@@ -79,6 +79,7 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
     } else {
       runner = null;
       s.event = null;
+      s.problem = ev.problem ?? '';
     }
     render();
   }

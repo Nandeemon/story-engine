@@ -32,7 +32,7 @@ describe('parseScript', () => {
   it('reads a conversation with a choice, a condition and a door without errors', () => {
     const { steps, errors } = parseScript(CAFE);
     expect(errors).toEqual([]);
-    expect(summarize(steps)).toEqual({ lines: 6, choices: 1, conditions: 1, doors: 1, facts: ['affection'], doorTargets: ['Street, night'] });
+    expect(summarize(steps)).toEqual({ lines: 6, choices: 1, conditions: 1, doors: 1, facts: ['affection'], doorTargets: ['Street, night'], parts: [] });
   });
 
   it('reads speaker, expression and narration', () => {
@@ -43,10 +43,11 @@ describe('parseScript', () => {
     ]);
   });
 
-  it('treats tabs as indentation and skips comments and blank lines', () => {
+  it('treats tabs as indentation, keeps notes and skips blank lines', () => {
     const { steps, errors } = parseScript('# note\nChoice\n\t"Yes"\n\t\tA: ok\n\n');
     expect(errors).toEqual([]);
-    expect(steps[0]).toMatchObject({ t: 'choice', options: [{ text: 'Yes', steps: [{ who: 'A', text: 'ok' }] }] });
+    expect(steps[0]).toEqual({ t: 'note', text: 'note' });
+    expect(steps[1]).toMatchObject({ t: 'choice', options: [{ text: 'Yes', steps: [{ who: 'A', text: 'ok' }] }] });
   });
 
   it('reads word and symbol conditions', () => {
@@ -58,7 +59,7 @@ describe('parseScript', () => {
   });
 
   it('reports mistakes with line numbers in plain words', () => {
-    const { errors } = parseScript('Choice\nOtherwise\n  x\nChange gold ? 3\nChoice\n  Yes without quotes');
+    const { errors } = parseScript('Choice\nOtherwise\n  x\nChange gold + lots, mood ? 3\nChoice\n  Yes without quotes');
     expect(errors.map(e => e.n)).toEqual([1, 2, 4, 6, 5]);
     expect(errors[2].msg).toContain('affection + 5');
   });

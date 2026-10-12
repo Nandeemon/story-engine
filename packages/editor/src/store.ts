@@ -36,13 +36,17 @@ export function sampleProject(): Project {
             'Choice',
             '  "I missed this place."  affection + 8',
             '    Mara (smiling): So did I.',
+            '    Go to part Stay',
             '  "Just passing through."',
             '    Mara (sad): Of course you are.',
-            'Only if affection is at least 5',
-            '  Mara (smiling): Stay a while. I want to tell you something.',
+            '    Mara: The street is that way.',
+            '    Go to Street, night',
+            'Part: Stay',
+            'Mara: Sit down. I want to tell you something.',
+            'Only if affection is at least 10',
+            '  Mara (smiling): I was hoping you would come back for me.',
             'Otherwise',
-            '  Mara: The street is that way.',
-            '  Go to Street, night'
+            '  Mara: It can wait. Drink your coffee.'
           ].join('\n')
         },
         {

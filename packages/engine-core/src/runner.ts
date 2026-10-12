@@ -6,7 +6,11 @@ export interface ChoiceEvent {
   /** Pick an answer by index. Applies its changes and continues under it. */
   pick(index: number): void;
 }
-export interface EndEvent { t: 'end' }
+export interface EndEvent {
+  t: 'end';
+  /** Set when the conversation stopped because of a mistake in the story, for the author to see. */
+  problem?: string;
+}
 
 /** What the player sees next. */
 export type RunEvent = SayStep | ChoiceEvent | DoorStep | EndEvent;
@@ -40,6 +44,9 @@ export function testCondition(facts: Facts, c: Condition): boolean {
   }
 }
 
+/** Steps a conversation may take without showing anything before it counts as an endless loop. */
+const LOOP_LIMIT = 10_000;
+
 /**
  * Runs a conversation step by step. Facts are changed in place, so every
  * conversation in a playthrough shares the same story facts.
@@ -48,7 +55,12 @@ export function createRunner(steps: Step[], facts: Facts): Runner {
   const stack: { steps: Step[]; i: number }[] = [{ steps, i: 0 }];
   return {
     next(): RunEvent {
+      let quiet = 0;
       while (stack.length) {
+        if (++quiet > LOOP_LIMIT) {
+          stack.length = 0;
+          return { t: 'end', problem: 'This conversation goes round in a loop without showing a line. Check its "Go to part" steps.' };
+        }
         const frame = stack[stack.length - 1];
         if (frame.i >= frame.steps.length) { stack.pop(); continue; }
         const s = frame.steps[frame.i++];
@@ -67,6 +79,16 @@ export function createRunner(steps: Step[], facts: Facts): Runner {
             };
           case 'if': stack.push({ steps: testCondition(facts, s.cond) ? s.then : s.else, i: 0 }); continue;
           case 'change': applyEffects(facts, s.effects); continue;
+          case 'jump': {
+            const key = s.part.trim().toLowerCase();
+            const at = steps.findIndex(x => x.t === 'part' && x.name.trim().toLowerCase() === key);
+            stack.length = 0;
+            if (at < 0) return { t: 'end', problem: `There is no part called "${s.part}" in this conversation.` };
+            stack.push({ steps, i: at + 1 });
+            continue;
+          }
+          case 'part':
+          case 'note': continue;
           case 'door': stack.length = 0; return s;
           case 'end': stack.length = 0; return { t: 'end' };
         }

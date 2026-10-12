@@ -6,13 +6,33 @@ import { BACKDROPS, CHARACTERS, OBJECTS, createPlayer, elementArt, esc, lookStyl
 import type { Player, PlayState } from '@story-engine/runtime';
 import { loadProject, sampleProject, saveProject } from './store';
 import { inserts, scriptStatus, viewConvo, viewLook, viewMap, viewPlay, viewRoom } from './views';
-import type { Adding, UI, View } from './views';
+import type { Adding, ConvoMode, UI, View } from './views';
+import { drawEdges, mapAction, mapHTML, mapInput, mapSide } from './map';
+import type { MapCtx, MapResult } from './map';
 
 const $ = <T extends HTMLElement = HTMLElement>(s: string) => document.querySelector<T>(s);
 
 let project: Project = loadProject();
 const ui: UI = { view: 'room', roomId: project.rooms[0].id, sel: null, adding: null, confirmReset: false, back: 'room' };
 let player: Player | null = null;
+
+const MODE_KEY = 'story-engine:convo-mode';
+let convoMode: ConvoMode = 'map';
+try { if (localStorage.getItem(MODE_KEY) === 'script') convoMode = 'script'; } catch { /* default to the map */ }
+let mapSel: string | null = null;
+/** Earlier versions of each conversation, for Undo. */
+const history = new Map<string, string[]>();
+const undoStack = () => { const e = selected(); return e ? (history.get(e.id) ?? []) : []; };
+function remember(before: string): void {
+  const e = selected();
+  if (!e || e.script === before) return;
+  const list = history.get(e.id) ?? [];
+  list.push(before);
+  if (list.length > 100) list.shift();
+  history.set(e.id, list);
+  const btn = $<HTMLButtonElement>('[data-act="undo"]');
+  if (btn) btn.disabled = false;
+}
 
 const room = (): Room => project.rooms.find(r => r.id === ui.roomId) ?? project.rooms[0];
 const selected = (): StoryElement | undefined => room().els.find(e => e.id === ui.sel);
@@ -51,10 +71,60 @@ function render(): void {
   switch (ui.view) {
     case 'map': main.innerHTML = viewMap(project, ui); break;
     case 'room': main.innerHTML = viewRoom(project, ui, r, e); break;
-    case 'convo': main.innerHTML = viewConvo(project, r, e!); updateStatus(); break;
+    case 'convo': {
+      const ctx = mapCtx()!;
+      main.innerHTML = viewConvo(project, r, e!, convoMode, undoStack().length > 0, { canvas: convoMode === 'map' ? mapHTML(ctx) : '', side: convoMode === 'map' ? mapSide(ctx) : '' });
+      if (convoMode === 'map') afterMap(); else updateStatus();
+      break;
+    }
     case 'look': main.innerHTML = viewLook(project, r); break;
     case 'play': main.innerHTML = viewPlay(); break;
   }
+}
+
+function mapCtx(): MapCtx | null {
+  const e = selected();
+  return e ? { project, room: room(), el: e, sel: mapSel } : null;
+}
+
+let observer: ResizeObserver | null = null;
+function afterMap(): void {
+  requestAnimationFrame(drawEdges);
+  observer?.disconnect();
+  const canvas = $('#mcanvas');
+  if (canvas && 'ResizeObserver' in window) { observer = new ResizeObserver(() => drawEdges()); observer.observe(canvas); }
+}
+
+/** Redraws the map and its panel in place, keeping scroll position and the field being typed in. */
+function refreshMap(): void {
+  const ctx = mapCtx();
+  const holder = $('#mapholder'), side = $('#mside');
+  if (!ctx || !holder || !side) return render();
+  const scroller = holder.querySelector('.mscroll');
+  const scroll = scroller ? [scroller.scrollLeft, scroller.scrollTop] : [0, 0];
+  const active = document.activeElement as HTMLInputElement | null;
+  const focusId = active && side.contains(active) ? active.id : '';
+  const caret = focusId && 'selectionStart' in active! ? [active!.selectionStart, active!.selectionEnd] : null;
+  holder.innerHTML = mapHTML(ctx);
+  side.innerHTML = mapSide(ctx);
+  const nextScroller = holder.querySelector('.mscroll');
+  if (nextScroller) { nextScroller.scrollLeft = scroll[0]; nextScroller.scrollTop = scroll[1]; }
+  if (focusId) {
+    const el = document.getElementById(focusId) as HTMLInputElement | null;
+    if (el) { el.focus(); if (caret && el.setSelectionRange && caret[0] !== null) { try { el.setSelectionRange(caret[0], caret[1]); } catch { /* not a text field */ } } }
+  } else {
+    const on = holder.querySelector<HTMLElement>('.on');
+    on?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }
+  afterMap();
+}
+
+function applyMap(res: MapResult | undefined, before: string): void {
+  if (!res) return;
+  remember(before);
+  mapSel = res.sel ?? null;
+  save();
+  refreshMap();
 }
 
 function updateStatus(): void {
@@ -153,6 +223,7 @@ const actions: Record<string, (k: string) => void> = {
     input.click();
   },
   convo() {
+    mapSel = null;
     go('convo');
     const t = $<HTMLTextAreaElement>('#script');
     if (t) { t.focus(); t.setSelectionRange(t.value.length, t.value.length); }
@@ -172,6 +243,21 @@ const actions: Record<string, (k: string) => void> = {
   front() { const r = room(), e = selected(); if (!e) return; r.els = r.els.filter(x => x !== e).concat(e); save(); render(); },
   remove() { const r = room(); r.els = r.els.filter(x => x.id !== ui.sel); ui.sel = null; save(); render(); },
   look() { go(ui.view === 'look' ? 'room' : 'look'); },
+  'convo-mode'(k) {
+    convoMode = k === 'script' ? 'script' : 'map';
+    try { localStorage.setItem(MODE_KEY, convoMode); } catch { /* remembered for this session only */ }
+    mapSel = null;
+    render();
+  },
+  undo() {
+    const e = selected(), list = undoStack();
+    const prev = list.pop();
+    if (!e || prev === undefined) return;
+    e.script = prev;
+    mapSel = null;
+    save();
+    render();
+  },
   theme(k) { project.look.theme = k; save(); render(); },
   play() { startPlay(); },
   'play-convo'() { startPlay(selected()); },
@@ -209,12 +295,38 @@ $('#file')!.addEventListener('change', ev => {
 /* ---------- Events ---------- */
 
 document.addEventListener('click', ev => {
-  const b = (ev.target as HTMLElement).closest<HTMLElement>('[data-act]');
-  if (b) actions[b.dataset.act!]?.(b.dataset.k ?? '');
+  const target = ev.target as HTMLElement;
+  const b = target.closest<HTMLElement>('[data-act]');
+  if (b) { actions[b.dataset.act!]?.(b.dataset.k ?? ''); return; }
+  const m = target.closest<HTMLElement>('[data-map-act]');
+  const ctx = mapCtx();
+  if (m && ctx) {
+    if ((m as HTMLButtonElement).disabled) return;
+    const before = ctx.el.script;
+    applyMap(mapAction(ctx, m.dataset.mapAct!, m.dataset.k ?? ''), before);
+    return;
+  }
+  if (ctx && mapSel && target.closest('.mcanvas') && !target.closest('.mnode, .madd')) { mapSel = null; refreshMap(); }
+});
+
+/* Typing in the map panel: one Undo step per field visit. */
+let fieldSnapshot: string | null = null;
+document.addEventListener('focusin', ev => {
+  if ((ev.target as HTMLElement).dataset?.mapIn) fieldSnapshot = selected()?.script ?? null;
+});
+document.addEventListener('focusout', ev => {
+  if ((ev.target as HTMLElement).dataset?.mapIn && fieldSnapshot !== null) { remember(fieldSnapshot); fieldSnapshot = null; }
 });
 
 document.addEventListener('input', ev => {
   const t = ev.target as HTMLInputElement;
+  if (t.dataset.mapIn) {
+    const ctx = mapCtx();
+    if (!ctx || (ev as InputEvent).isComposing) return;
+    const res = mapInput(ctx, t.dataset.mapIn, t.dataset.k ?? '', t.value);
+    if (res) { save(); refreshMap(); }
+    return;
+  }
   const k = t.dataset.in;
   if (!k) return;
   const e = selected();
@@ -240,6 +352,11 @@ document.addEventListener('change', ev => {
 
 document.addEventListener('keydown', ev => {
   const t = ev.target as HTMLTextAreaElement;
+  const typing = t.closest?.('input, textarea, select');
+  if (ui.view === 'convo' && !typing) {
+    if (ev.key === 'Escape' && mapSel) { mapSel = null; refreshMap(); return; }
+    if ((ev.metaKey || ev.ctrlKey) && ev.key.toLowerCase() === 'z') { ev.preventDefault(); actions.undo(''); return; }
+  }
   if (t.id === 'script' && ev.key === 'Tab') {
     ev.preventDefault();
     t.setRangeText('  ', t.selectionStart, t.selectionEnd, 'end');

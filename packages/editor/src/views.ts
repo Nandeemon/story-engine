@@ -99,29 +99,44 @@ export function inserts(p: Project, r: Room, e: StoryElement): { label: string; 
   ];
 }
 
-export function viewConvo(p: Project, r: Room, e: StoryElement): string {
-  const who = e.kind === 'char' ? esc(e.name) : 'Narrator';
-  return `<div class="work"><div class="paper">
-      <div class="row">${inserts(p, r, e).map((x, i) => `<button class="btn small quiet" data-act="insert" data-k="${i}">+ ${x.label}</button>`).join('')}</div>
-      <textarea id="script" data-in="script" spellcheck="false" aria-label="What ${esc(e.name)} says" placeholder="${who}: Type the first line here.">${esc(e.script)}</textarea>
-      <p class="status" id="status" role="status"></p>
-    </div>
-    <aside class="side"><h2>What ${e.kind === 'char' ? `${esc(e.name)} says` : 'happens'}</h2>
-      <button class="btn play block" data-act="play-convo">Play this conversation</button>
-      <p class="hint">Write it like a script. A name and a colon starts a line. Indent with two spaces to put lines under an answer.</p>
-      <pre class="cheat">Mara: Hello.
+export type ConvoMode = 'map' | 'script';
+
+const CHEAT = `Mara: Hello.
 Mara (smiling): Hi again.
 A line with no name is narration.
 Choice
   "An answer"  affection + 5
     Mara: A reply to it.
+    End
 Only if affection is at least 5
   Mara: Shown when true.
 Otherwise
   Mara: Shown when not.
 Change gold - 10
 Go to Street, night
-End</pre>
+Part: Later
+Go to part Later
+# A note only you see`;
+
+function convoBar(mode: ConvoMode, canUndo: boolean): string {
+  const tab = (m: ConvoMode, label: string) => `<button role="tab" class="seg${mode === m ? ' on' : ''}" aria-selected="${mode === m}" data-act="convo-mode" data-k="${m}">${label}</button>`;
+  return `<div class="convobar"><div class="segs" role="tablist" aria-label="How to show the conversation">${tab('map', 'Map')}${tab('script', 'Script')}</div>
+    <div class="row"><button class="btn small quiet" data-act="undo"${canUndo ? '' : ' disabled'}>Undo</button><button class="btn small play" data-act="play-convo">Play this conversation</button></div></div>`;
+}
+
+export function viewConvo(p: Project, r: Room, e: StoryElement, mode: ConvoMode, canUndo: boolean, map: { canvas: string; side: string }): string {
+  if (mode === 'map') {
+    return `<div class="work"><div class="mapwrap">${convoBar(mode, canUndo)}<div id="mapholder">${map.canvas}</div></div><aside class="side" id="mside">${map.side}</aside></div>`;
+  }
+  const who = e.kind === 'char' ? esc(e.name) : 'Narrator';
+  return `<div class="work"><div class="mapwrap">${convoBar(mode, canUndo)}<div class="paper">
+      <div class="row">${inserts(p, r, e).map((x, i) => `<button class="btn small quiet" data-act="insert" data-k="${i}">+ ${x.label}</button>`).join('')}</div>
+      <textarea id="script" data-in="script" spellcheck="false" aria-label="What ${esc(e.name)} says" placeholder="${who}: Type the first line here.">${esc(e.script)}</textarea>
+      <p class="status" id="status" role="status"></p>
+    </div></div>
+    <aside class="side"><h2>What ${e.kind === 'char' ? `${esc(e.name)} says` : 'happens'}</h2>
+      <p class="hint">Write it like a script. A name and a colon starts a line. Indent with two spaces to put lines under an answer. Lines that are not indented run after every answer.</p>
+      <pre class="cheat">${esc(CHEAT)}</pre>
       <div id="facts"></div></aside></div>`;
 }
 

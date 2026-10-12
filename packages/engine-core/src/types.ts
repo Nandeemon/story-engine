@@ -23,9 +23,15 @@ export interface IfStep { t: 'if'; cond: Condition; then: Step[]; else: Step[] }
 export interface ChangeStep { t: 'change'; effects: Effect[] }
 export interface DoorStep { t: 'door'; room: string }
 export interface EndStep { t: 'end' }
+/** A named point in a conversation that "Go to part" can jump to. Only at the top level. */
+export interface PartStep { t: 'part'; name: string }
+/** Continue from a named part of the same conversation. */
+export interface JumpStep { t: 'jump'; part: string }
+/** An author's note (a line starting with #). The player never sees it. */
+export interface NoteStep { t: 'note'; text: string }
 
 /** One step of a conversation. */
-export type Step = SayStep | ChoiceStep | IfStep | ChangeStep | DoorStep | EndStep;
+export type Step = SayStep | ChoiceStep | IfStep | ChangeStep | DoorStep | EndStep | PartStep | JumpStep | NoteStep;
 
 export interface ScriptError {
   /** 1-based line number in the written script. */

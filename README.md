@@ -26,26 +26,34 @@ npm run check    # type-check, tests and build
 
 ## Writing a conversation
 
+Every conversation can be shown two ways, switched at the top of the conversation view. **Map** (the default) draws it as boxes: click a box to change it, click + to add a step there. **Script** shows it as text. Both edit the same conversation.
+
 ```
 Mara: You came back.
 Choice
   "I missed this place."  affection + 8
     Mara (smiling): So did I.
+    Go to part Stay
   "Just passing through."
     Mara (sad): Of course you are.
+    Go to Street, night
+Part: Stay
 Only if affection is at least 5
   Mara: Stay a while.
 Otherwise
-  Go to Street, night
+  Mara: Drink your coffee.
 ```
 
 - `Name: text` is a line, `Name (expression): text` changes the expression, and a line with no name is narration.
 - `Choice` takes answers in quotes on the indented lines below it, each with optional changes such as `affection + 8`.
 - `Only if <fact> is at least <n>` runs the indented lines when true, and `Otherwise` runs the lines under it when not.
+- Lines indented under an answer run only for that answer. Lines that are not indented run after every answer, so paths meet again. End a path with `End` or `Go to` to keep it apart.
 - `Change gold - 10` changes a story fact, `Go to <room name>` moves to another room, and `End` closes the conversation.
+- `Part: Stay` names a point at the left edge, and `Go to part Stay` continues from there, forwards or back.
+- `# text` is a note only the author sees. `Narration: text` forces a line to be narration when it would otherwise read as a command.
 
 ## Status
 
-Step 1 of the v1 build order is in place: rooms, characters and objects, writing mode, Play, the look of the game, and the story map. Next up: publishing, the character builder, stats and on-screen display, story testing tools and simulation.
+Step 1 of the v1 build order is in place: rooms, characters and objects, the conversation map and writing mode, Play, the look of the game, and the story map. Next up: publishing, the character builder, stats and on-screen display, story testing tools and simulation.
 
 The design lives in two documents: the project brief and the design document.

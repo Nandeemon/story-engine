@@ -1,7 +1,7 @@
 import type { CompareOp, Condition, Effect, FactValue, ParseResult, ScriptError, Step } from './types';
 
 /**
- * Writing mode: turns a conversation written like a script into steps.
+ * Writing mode: turns a conversation written like a script into steps, and back.
  *
  *   Mara: You came back.
  *   Choice
@@ -11,8 +11,12 @@ import type { CompareOp, Condition, Effect, FactValue, ParseResult, ScriptError,
  *     Mara: Stay a while.
  *   Otherwise
  *     Go to Street, night
+ *   Part: Goodbye
+ *   Mara: See you.
  *
  * Indentation (two spaces, or a tab) puts lines under a choice answer or a condition.
+ * The script text is what a project stores; the map edits the steps and writes the
+ * text back with writeScript, so both views always show the same conversation.
  */
 
 export function toValue(raw: string): FactValue {
@@ -33,13 +37,14 @@ function parseEffects(text: string, n: number, errors: ScriptError[]): Effect[] 
   return out;
 }
 
-const WORD_OPS: [string, CompareOp][] = [
+/** Comparison words, in the order they are tried, with the symbol each means. */
+export const CONDITION_WORDS: [string, CompareOp][] = [
   ['is at least', '>='], ['is at most', '<='], ['is more than', '>'], ['is less than', '<'], ['is not', '!='], ['is', '=']
 ];
 
 function parseCondition(text: string, n: number, errors: ScriptError[]): Condition {
   const lower = text.toLowerCase();
-  for (const [word, op] of WORD_OPS) {
+  for (const [word, op] of CONDITION_WORDS) {
     const i = lower.indexOf(` ${word} `);
     if (i > 0) {
       const fact = text.slice(0, i).trim();
@@ -61,8 +66,9 @@ export function parseScript(src: string): ParseResult {
     .replace(/\t/g, '  ')
     .split('\n')
     .map((raw, i) => ({ n: i + 1, indent: (raw.match(/^ */) ?? [''])[0].length, text: raw.trim() }))
-    .filter(l => l.text && !l.text.startsWith('#'));
+    .filter(l => l.text);
   let pos = 0;
+  const parts = new Set<string>();
 
   function block(parentIndent: number): Step[] {
     const steps: Step[] = [];
@@ -70,7 +76,10 @@ export function parseScript(src: string): ParseResult {
       const l = lines[pos];
       let m: RegExpMatchArray | null;
 
-      if (/^choice$/i.test(l.text)) {
+      if (l.text.startsWith('#')) {
+        pos++;
+        steps.push({ t: 'note', text: l.text.replace(/^#+\s*/, '') });
+      } else if (/^choice$/i.test(l.text)) {
         pos++;
         const options = [];
         while (pos < lines.length && lines[pos].indent > l.indent) {
@@ -78,7 +87,7 @@ export function parseScript(src: string): ParseResult {
           const q = o.text.match(/^["“](.+?)["”]\s*(.*)$/);
           pos++;
           if (!q) {
-            errors.push({ n: o.n, msg: 'An answer under Choice starts with quotes, like "Yes, I will."' });
+            if (!o.text.startsWith('#')) errors.push({ n: o.n, msg: 'An answer under Choice starts with quotes, like "Yes, I will."' });
             block(o.indent);
             continue;
           }
@@ -98,9 +107,18 @@ export function parseScript(src: string): ParseResult {
         errors.push({ n: l.n, msg: 'Otherwise only works right after an "Only if" block, at the same indent.' });
         pos++;
         block(l.indent);
-      } else if ((m = l.text.match(/^change\s+(.+)$/i))) {
+      } else if ((m = l.text.match(/^part\s*:\s*(.+)$/i))) {
         pos++;
-        steps.push({ t: 'change', effects: parseEffects(m[1], l.n, errors) });
+        const name = m[1].trim();
+        if (parentIndent >= 0 || l.indent > 0) errors.push({ n: l.n, msg: 'A part starts at the left edge, not indented under something else.' });
+        else if (parts.has(name.toLowerCase())) errors.push({ n: l.n, msg: `There is already a part called "${name}". Give each part its own name.` });
+        else { parts.add(name.toLowerCase()); steps.push({ t: 'part', name }); }
+      } else if (/^change\s+[\w.]+\s*[+\-=]/i.test(l.text)) {
+        pos++;
+        steps.push({ t: 'change', effects: parseEffects(l.text.replace(/^change\s+/i, ''), l.n, errors) });
+      } else if ((m = l.text.match(/^go to part\s+(.+)$/i))) {
+        pos++;
+        steps.push({ t: 'jump', part: m[1].trim() });
       } else if ((m = l.text.match(/^go to\s+(.+)$/i))) {
         pos++;
         steps.push({ t: 'door', room: m[1].trim() });
@@ -109,7 +127,10 @@ export function parseScript(src: string): ParseResult {
         steps.push({ t: 'end' });
       } else if ((m = l.text.match(/^([^:"()]{1,40}?)\s*(?:\(([^)]+)\))?\s*:\s*(.+)$/))) {
         pos++;
-        steps.push({ t: 'say', who: m[1].trim(), expr: (m[2] ?? '').trim(), text: m[3] });
+        const who = m[1].trim();
+        steps.push(/^narration$/i.test(who)
+          ? { t: 'say', who: '', expr: '', text: m[3] }
+          : { t: 'say', who, expr: (m[2] ?? '').trim(), text: m[3] });
       } else {
         pos++;
         steps.push({ t: 'say', who: '', expr: '', text: l.text });
@@ -118,8 +139,99 @@ export function parseScript(src: string): ParseResult {
     return steps;
   }
 
-  return { steps: block(-1), errors };
+  const steps = block(-1);
+  for (const target of jumpTargets(steps)) {
+    if (!parts.has(target.toLowerCase())) {
+      const n = lines.find(l => new RegExp(`^go to part\\s+${escapeRe(target)}$`, 'i').test(l.text))?.n ?? 0;
+      errors.push({ n, msg: `There is no part called "${target}" in this conversation.` });
+    }
+  }
+  return { steps, errors };
 }
+
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+function jumpTargets(steps: Step[]): string[] {
+  const out: string[] = [];
+  walkSteps(steps, s => { if (s.t === 'jump') out.push(s.part); });
+  return out;
+}
+
+/** Visits every step, including those under answers and conditions. */
+export function walkSteps(steps: Step[], visit: (s: Step) => void): void {
+  for (const s of steps) {
+    visit(s);
+    if (s.t === 'choice') s.options.forEach(o => walkSteps(o.steps, visit));
+    if (s.t === 'if') { walkSteps(s.then, visit); walkSteps(s.else, visit); }
+  }
+}
+
+/* ---------- Writing steps back to text ---------- */
+
+export function valueText(v: FactValue): string {
+  return v === true ? 'yes' : v === false ? 'no' : String(v);
+}
+
+export function effectText(e: Effect): string {
+  if (e.op !== '=' && typeof e.value === 'number' && e.value < 0) return `${e.fact} ${e.op === '+' ? '-' : '+'} ${-e.value}`;
+  return `${e.fact} ${e.op} ${valueText(e.value)}`;
+}
+
+export function conditionText(c: Condition): string {
+  if (c.op === 'truthy') return c.fact;
+  const word = CONDITION_WORDS.find(([, op]) => op === c.op)?.[0] ?? 'is';
+  return `${c.fact} ${word} ${valueText(c.value)}`;
+}
+
+const oneLine = (s: string) => String(s).replace(/\s*\n\s*/g, ' ').trim();
+const cleanName = (s: string) => oneLine(s).replace(/[:"()]/g, '').trim();
+
+/** True when a line of narration reads back as narration and not as a command. */
+function plainNarration(text: string): boolean {
+  const { steps, errors } = parseScript(text);
+  return !errors.length && steps.length === 1 && steps[0].t === 'say' && steps[0].who === '' && steps[0].text === text;
+}
+
+export function writeScript(steps: Step[]): string {
+  const out: string[] = [];
+  const write = (list: Step[], depth: number): void => {
+    const pad = '  '.repeat(depth);
+    for (const s of list) {
+      switch (s.t) {
+        case 'say': {
+          const text = oneLine(s.text) || '...';
+          const who = cleanName(s.who);
+          if (who) out.push(`${pad}${who}${s.expr ? ` (${cleanName(s.expr)})` : ''}: ${text}`);
+          else out.push(pad + (plainNarration(text) ? text : `Narration: ${text}`));
+          break;
+        }
+        case 'choice':
+          out.push(`${pad}Choice`);
+          for (const o of s.options) {
+            const effects = o.effects.length ? `  ${o.effects.map(effectText).join(', ')}` : '';
+            out.push(`${pad}  "${oneLine(o.text).replace(/["“”]/g, "'") || '...'}"${effects}`);
+            write(o.steps, depth + 2);
+          }
+          break;
+        case 'if':
+          out.push(`${pad}Only if ${conditionText(s.cond)}`);
+          write(s.then, depth + 1);
+          if (s.else.length) { out.push(`${pad}Otherwise`); write(s.else, depth + 1); }
+          break;
+        case 'change': if (s.effects.length) out.push(`${pad}Change ${s.effects.map(effectText).join(', ')}`); break;
+        case 'door': out.push(`${pad}Go to ${oneLine(s.room)}`); break;
+        case 'jump': out.push(`${pad}Go to part ${oneLine(s.part)}`); break;
+        case 'end': out.push(`${pad}End`); break;
+        case 'part': out.push(`${pad}Part: ${oneLine(s.name)}`); break;
+        case 'note': out.push(`${pad}# ${oneLine(s.text)}`); break;
+      }
+    }
+  };
+  write(steps, 0);
+  return out.join('\n');
+}
+
+/* ---------- Summary ---------- */
 
 export interface ScriptSummary {
   lines: number;
@@ -130,27 +242,25 @@ export interface ScriptSummary {
   facts: string[];
   /** Room names that doors point to. */
   doorTargets: string[];
+  /** Named parts, in order. */
+  parts: string[];
 }
 
 export function summarize(steps: Step[]): ScriptSummary {
   const c = { lines: 0, choices: 0, conditions: 0, doors: 0 };
   const facts = new Set<string>();
   const doorTargets = new Set<string>();
-  const walk = (list: Step[]): void => {
-    for (const s of list) {
-      switch (s.t) {
-        case 'say': c.lines++; break;
-        case 'door': c.doors++; doorTargets.add(s.room); break;
-        case 'change': s.effects.forEach(e => facts.add(e.fact)); break;
-        case 'choice':
-          c.choices++;
-          s.options.forEach(o => { o.effects.forEach(e => facts.add(e.fact)); walk(o.steps); });
-          break;
-        case 'if': c.conditions++; facts.add(s.cond.fact); walk(s.then); walk(s.else); break;
-      }
+  const parts: string[] = [];
+  walkSteps(steps, s => {
+    switch (s.t) {
+      case 'say': c.lines++; break;
+      case 'door': c.doors++; doorTargets.add(s.room); break;
+      case 'change': s.effects.forEach(e => facts.add(e.fact)); break;
+      case 'choice': c.choices++; s.options.forEach(o => o.effects.forEach(e => facts.add(e.fact))); break;
+      case 'if': c.conditions++; facts.add(s.cond.fact); break;
+      case 'part': parts.push(s.name); break;
     }
-  };
-  walk(steps);
+  });
   facts.delete('_');
-  return { ...c, facts: [...facts], doorTargets: [...doorTargets] };
+  return { ...c, facts: [...facts], doorTargets: [...doorTargets], parts };
 }
