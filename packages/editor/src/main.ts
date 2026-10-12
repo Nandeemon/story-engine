@@ -29,7 +29,11 @@ const selected = (): StoryElement | undefined => room().els.find(e => e.id === u
 
 /* ---------- Saving ---------- */
 
-/** One-off pictures that no line uses any more are let go, so they do not linger in every save. */
+/**
+ * One-off pictures that no line uses any more are let go, so they do not linger.
+ * This runs only when a project is opened or saved to a file, never while the
+ * author is typing: a line can be unreadable for a moment while it is retyped.
+ */
 function pruneOncePictures(): void {
   for (const c of project.characters) {
     if (!c.looks.some(l => l.once)) continue;
@@ -43,7 +47,6 @@ function pruneOncePictures(): void {
 }
 
 function save(): void {
-  pruneOncePictures();
   void saveProject(project).then(ok => {
     const warn = $('#savewarn');
     if (warn) warn.hidden = ok;
@@ -279,6 +282,7 @@ function place(el: StoryElement): void {
 }
 
 function go(view: View): void {
+  if (view !== 'room' && view !== 'convo') lookReturn = null;
   ui.view = view;
   ui.adding = null;
   ui.lookEdit = null;
@@ -354,6 +358,8 @@ function pickLookFiles(mode: typeof lookFileMode, multiple: boolean): void {
 }
 
 let pendingUpload: Exclude<Adding, null> = 'bg';
+/** Where Done goes after lining up a one-off picture from a conversation. */
+let lookReturn: { elId: string | null; mapSel: string | null } | null = null;
 /** How the line-up shows the look over the base picture. */
 let lookCompare: 'see-through' | 'difference' = 'see-through';
 
@@ -404,7 +410,19 @@ const actions: Record<string, (k: string) => void> = {
     ui.lookEdit = k;
     render();
   },
-  'look-done'() { ui.lookEdit = null; render(); },
+  'look-done'() {
+    ui.lookEdit = null;
+    // Lining up a picture from a line in a conversation: go back to that line.
+    if (lookReturn) {
+      const back = lookReturn;
+      lookReturn = null;
+      ui.sel = back.elId;
+      mapSel = back.mapSel;
+      go('convo');
+      return;
+    }
+    render();
+  },
   'look-reset'() { const l = editedLook(); if (!l) return; l.dx = 0; l.dy = 0; l.scale = 1; save(); render(); },
   'look-replace'() { if (ui.lookEdit) pickLookFiles({ kind: 'replace', lookId: ui.lookEdit }, false); },
   'look-delete'() {
@@ -423,6 +441,7 @@ const actions: Record<string, (k: string) => void> = {
     const look = step?.t === 'say' ? findLook(sp.character, step.expr) : undefined;
     const el = room().els.find(x => x.characterId === sp.character.id);
     if (!look || !el) { toast(`Place ${sp.character.name} in this room to line the picture up.`); return; }
+    lookReturn = { elId: ui.sel, mapSel };
     ui.sel = el.id;
     go('room');
     ui.lookEdit = look.id;
@@ -480,7 +499,7 @@ const actions: Record<string, (k: string) => void> = {
   },
   undo() { undo(); },
   redo() { redo(); },
-  'save-file'() { saveToFile(project); toast('Saved to a file in your downloads'); },
+  'save-file'() { pruneOncePictures(); saveToFile(project); toast('Saved to a file in your downloads'); },
   'open-file'() { const input = $<HTMLInputElement>('#projectfile')!; input.value = ''; input.click(); },
   theme(k) { project.look.theme = k; save(); render(); },
   play() { startPlay(); },
@@ -913,6 +932,7 @@ document.addEventListener('pointercancel', drop);
 
 void loadProject().then(p => {
   project = p;
+  pruneOncePictures();
   ui.roomId = project.rooms[0].id;
   render();
   save();
