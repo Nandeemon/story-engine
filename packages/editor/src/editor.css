@@ -139,9 +139,17 @@ details.more > div { display: flex; flex-direction: column; gap: 12px; padding-t
 
 /* Conversation map. Laid out by flexbox; lines are drawn on top in SVG once boxes have settled. */
 .mbanner { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 12px; border: 1.5px solid var(--bad); border-radius: 10px; color: var(--bad); font-size: 14px; }
+.mview { position: relative; }
+.mzoom { position: absolute; top: 10px; right: 14px; z-index: 3; display: flex; gap: 4px; padding: 4px; border: 1.5px solid var(--line); border-radius: 999px; background: var(--ground); }
+.mzoom .btn { min-width: 34px; padding: 4px 10px; border: 0; }
+#mzoomlabel { min-width: 56px; font-variant-numeric: tabular-nums; }
+.msizer { position: relative; margin-inline: auto; }
+.mcanvas { transform-origin: 0 0; }
+.mscroll { cursor: grab; }
+.mscroll.panning { cursor: grabbing; user-select: none; }
 .mscroll { overflow: auto; max-height: max(420px, calc(100dvh - 170px)); min-height: 360px; border: 1.5px solid var(--line); border-radius: 12px;
   background: radial-gradient(circle, var(--line) 1px, transparent 1.2px) 0 0 / 18px 18px, var(--surface); }
-.mcanvas { position: relative; display: flex; justify-content: center; min-width: 100%; width: max-content; padding: 24px 72px 32px 24px; }
+.mcanvas { position: absolute; left: 0; top: 0; display: flex; justify-content: center; width: max-content; padding: 56px 72px 32px 24px; }
 .medges { position: absolute; left: 0; top: 0; pointer-events: none; overflow: visible; }
 .medges path { fill: none; stroke: var(--muted); stroke-width: 1.5; }
 .medges path.jump { stroke: var(--violet); stroke-dasharray: 5 4; }
@@ -205,3 +213,10 @@ button.mnode:hover, .mrow:hover { box-shadow: 0 0 0 3px color-mix(in srgb, var(-
 .mpreview .stage { border-width: 2px; border-radius: 10px; }
 
 .btn.armed { background: var(--bad); border-color: var(--bad); color: var(--ground); }
+
+.madd.join { width: auto; height: auto; padding: 4px 12px; border-radius: 999px; font-size: 12.5px; font-weight: 600; color: var(--ink); border-color: var(--muted); }
+.mnode.cap.broken { background: none; border-color: var(--bad); color: var(--bad); border-style: dashed; }
+.mnode .why { display: block; margin-top: 2px; font-size: 12px; font-weight: 500; }
+.medges path.jump.hot { stroke-width: 2.5; stroke-dasharray: none; }
+.savewarn { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 14px; border: 2px solid var(--bad); border-radius: 10px; color: var(--bad); font-weight: 600; }
+.toast { position: fixed; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom, 0px)); z-index: 20; transform: translateX(-50%); max-width: calc(100vw - 32px); padding: 10px 18px; border-radius: 999px; background: var(--ink); color: var(--ground); font-weight: 600; box-shadow: 0 6px 24px rgba(0,0,0,.25); }

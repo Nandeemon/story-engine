@@ -1,14 +1,15 @@
 import '@story-engine/runtime/game.css';
 import './editor.css';
-import { createProject, createRoom, findRoomByName, newId } from '@story-engine/engine-core';
+import { createProject, createRoom, findRoomByName, newId, normalizeProject, renameRoomInScript, renameSpeakerInScript } from '@story-engine/engine-core';
 import type { Project, Room, StoryElement } from '@story-engine/engine-core';
 import { BACKDROPS, CHARACTERS, OBJECTS, createPlayer, elementArt, esc, lookStyle } from '@story-engine/runtime';
 import type { Player, PlayState } from '@story-engine/runtime';
 import { loadProject, sampleProject, saveProject } from './store';
 import { inserts, scriptStatus, viewConvo, viewLook, viewMap, viewPlay, viewRoom } from './views';
 import type { Adding, ConvoMode, UI, View } from './views';
-import { drawEdges, mapAction, mapHTML, mapInput, mapSide } from './map';
+import { applyZoom, drawEdges, mapAction, mapHTML, mapInput, mapSide, mapView, openView, setZoom } from './map';
 import type { MapCtx, MapResult } from './map';
+import { readProjectFile, saveToFile } from './files';
 
 const $ = <T extends HTMLElement = HTMLElement>(s: string) => document.querySelector<T>(s);
 
@@ -20,23 +21,77 @@ const MODE_KEY = 'story-engine:convo-mode';
 let convoMode: ConvoMode = 'map';
 try { if (localStorage.getItem(MODE_KEY) === 'script') convoMode = 'script'; } catch { /* default to the map */ }
 let mapSel: string | null = null;
-/** Earlier versions of each conversation, for Undo. */
-const history = new Map<string, string[]>();
-const undoStack = () => { const e = selected(); return e ? (history.get(e.id) ?? []) : []; };
-function remember(before: string): void {
-  const e = selected();
-  if (!e || e.script === before) return;
-  const list = history.get(e.id) ?? [];
-  list.push(before);
-  if (list.length > 100) list.shift();
-  history.set(e.id, list);
-  const btn = $<HTMLButtonElement>('[data-act="undo"]');
-  if (btn) btn.disabled = false;
-}
+/** Set when a conversation is opened, so the map opens on its start. */
+let freshConvo = false;
 
 const room = (): Room => project.rooms.find(r => r.id === ui.roomId) ?? project.rooms[0];
 const selected = (): StoryElement | undefined => room().els.find(e => e.id === ui.sel);
-const save = () => saveProject(project);
+
+/* ---------- Saving ---------- */
+
+function save(): void {
+  const ok = saveProject(project);
+  const warn = $('#savewarn');
+  if (warn) warn.hidden = ok;
+}
+
+let toastTimer = 0;
+function toast(text: string): void {
+  const t = $('#toast');
+  if (!t) return;
+  t.textContent = text;
+  t.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = window.setTimeout(() => { t.hidden = true; }, 2600);
+}
+
+/* ---------- Undo and redo, for the whole project ----------
+   Every change is recorded as a copy of the project from before it. */
+
+const past: string[] = [];
+const future: string[] = [];
+const snapshot = () => JSON.stringify(project);
+
+function record(before: string | null): void {
+  if (before === null || before === snapshot()) return;
+  past.push(before);
+  if (past.length > 80) past.shift();
+  future.length = 0;
+  syncUndo();
+}
+
+function syncUndo(): void {
+  const u = $<HTMLButtonElement>('[data-act="undo"]'), r = $<HTMLButtonElement>('[data-act="redo"]');
+  if (u) u.disabled = !past.length;
+  if (r) r.disabled = !future.length;
+}
+
+function restore(json: string, message: string): void {
+  const p = normalizeProject(JSON.parse(json));
+  if (!p) return;
+  project = p;
+  if (!project.rooms.some(r => r.id === ui.roomId)) { ui.roomId = project.rooms[0].id; ui.sel = null; }
+  if (ui.sel && !room().els.some(e => e.id === ui.sel)) ui.sel = null;
+  if (ui.view === 'convo' && !ui.sel) ui.view = 'room';
+  mapSel = null;
+  save();
+  render();
+  toast(message);
+}
+
+function undo(): void {
+  const prev = past.pop();
+  if (prev === undefined) return;
+  future.push(snapshot());
+  restore(prev, 'Undone');
+}
+
+function redo(): void {
+  const next = future.pop();
+  if (next === undefined) return;
+  past.push(snapshot());
+  restore(next, 'Redone');
+}
 
 /* ---------- Rendering ---------- */
 
@@ -59,7 +114,9 @@ function renderBar(): void {
     `${i ? '<i>›</i>' : ''}<button data-act="crumb" data-k="${k}"${i === list.length - 1 ? ' aria-current="page"' : ''}>${esc(n)}</button>`).join('');
   $('#tools')!.innerHTML = ui.view === 'play'
     ? '<button class="btn ink" data-act="stop">Stop</button>'
-    : `<button class="btn${ui.view === 'look' ? ' ink' : ''}" data-act="look">Look</button><button class="btn play" data-act="play">Play</button>`;
+    : `<button class="btn small quiet" data-act="undo" title="Undo (Ctrl+Z)"${past.length ? '' : ' disabled'}>Undo</button>
+       <button class="btn small quiet" data-act="redo" title="Redo (Ctrl+Shift+Z)"${future.length ? '' : ' disabled'}>Redo</button>
+       <button class="btn${ui.view === 'look' ? ' ink' : ''}" data-act="look">Look</button><button class="btn play" data-act="play">Play</button>`;
 }
 
 function render(): void {
@@ -73,8 +130,12 @@ function render(): void {
     case 'room': main.innerHTML = viewRoom(project, ui, r, e); break;
     case 'convo': {
       const ctx = mapCtx()!;
-      main.innerHTML = viewConvo(project, r, e!, convoMode, undoStack().length > 0, { canvas: convoMode === 'map' ? mapHTML(ctx) : '', side: convoMode === 'map' ? mapSide(ctx) : '' });
-      if (convoMode === 'map') afterMap(); else updateStatus();
+      main.innerHTML = viewConvo(project, r, e!, convoMode, { canvas: convoMode === 'map' ? mapHTML(ctx) : '', side: convoMode === 'map' ? mapSide(ctx) : '' });
+      if (convoMode === 'map') {
+        if (freshConvo) openView(); else applyZoom();
+        afterMap();
+      } else updateStatus();
+      freshConvo = false;
       break;
     }
     case 'look': main.innerHTML = viewLook(project, r); break;
@@ -92,40 +153,50 @@ function afterMap(): void {
   requestAnimationFrame(drawEdges);
   observer?.disconnect();
   const canvas = $('#mcanvas');
-  if (canvas && 'ResizeObserver' in window) { observer = new ResizeObserver(() => drawEdges()); observer.observe(canvas); }
+  if (canvas && 'ResizeObserver' in window) {
+    observer = new ResizeObserver(() => { applyZoom(); drawEdges(); });
+    observer.observe(canvas);
+  }
+  const sc = $('#mscroll');
+  sc?.addEventListener('wheel', onWheel, { passive: false });
 }
 
-/** Redraws the map and its panel in place, keeping scroll position and the field being typed in. */
+/** Ctrl or Cmd with the wheel (or a trackpad pinch) zooms the map. */
+function onWheel(ev: WheelEvent): void {
+  if (!ev.ctrlKey && !ev.metaKey) return;
+  ev.preventDefault();
+  const z = parseFloat($('#mzoomlabel')?.textContent ?? '100') / 100 || 1;
+  setZoom(z * (ev.deltaY < 0 ? 1.1 : 1 / 1.1));
+  drawEdges();
+}
+
+/** Redraws the map and its panel in place, keeping zoom, scroll position and the field being typed in. */
 function refreshMap(): void {
   pendingRefresh = false;
   const ctx = mapCtx();
   const holder = $('#mapholder'), side = $('#mside');
   if (!ctx || !holder || !side) return render();
-  const scroller = holder.querySelector('.mscroll');
+  const scroller = $('#mscroll');
   const scroll = scroller ? [scroller.scrollLeft, scroller.scrollTop] : [0, 0];
   const active = document.activeElement as HTMLInputElement | null;
   const focusId = active && side.contains(active) ? active.id : '';
-  const caret = focusId && 'selectionStart' in active! ? [active!.selectionStart, active!.selectionEnd] : null;
   holder.innerHTML = mapHTML(ctx);
   side.innerHTML = mapSide(ctx);
-  const nextScroller = holder.querySelector('.mscroll');
-  if (nextScroller) { nextScroller.scrollLeft = scroll[0]; nextScroller.scrollTop = scroll[1]; }
-  if (focusId) {
-    const el = document.getElementById(focusId) as HTMLInputElement | null;
-    if (el) { el.focus(); if (caret && el.setSelectionRange && caret[0] !== null) { try { el.setSelectionRange(caret[0], caret[1]); } catch { /* not a text field */ } } }
-  } else {
-    const on = holder.querySelector<HTMLElement>('.on');
-    on?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-  }
+  applyZoom();
+  const next = $('#mscroll');
+  if (next) { next.scrollLeft = scroll[0]; next.scrollTop = scroll[1]; }
+  if (focusId) document.getElementById(focusId)?.focus();
+  else holder.querySelector<HTMLElement>('.on')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   afterMap();
 }
 
-function applyMap(res: MapResult | undefined, before: string): void {
+function applyMap(res: MapResult | undefined): void {
   if (!res) return;
-  remember(before);
   mapSel = res.sel ?? null;
   save();
   refreshMap();
+  // On a narrow screen the panel sits under the map: bring it into view.
+  if (mapSel && window.innerWidth <= 820) $('#mside')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 function updateStatus(): void {
@@ -182,7 +253,18 @@ function go(view: View): void {
   render();
 }
 
+function replaceProject(p: Project): void {
+  project = p;
+  ui.roomId = project.rooms[0].id;
+  ui.sel = null;
+  save();
+  go('room');
+}
+
 let pendingUpload: Exclude<Adding, null> = 'bg';
+
+/** Actions that never change the project, so they are not recorded for Undo. */
+const NOT_RECORDED = new Set(['undo', 'redo', 'save-file', 'open-file', 'upload', 'play', 'play-convo', 'stop', 'convo-mode', 'look', 'crumb']);
 
 const actions: Record<string, (k: string) => void> = {
   crumb(k) {
@@ -200,9 +282,9 @@ const actions: Record<string, (k: string) => void> = {
     project.rooms = project.rooms.filter(r => r.id !== ui.roomId);
     ui.roomId = project.rooms[0].id; ui.sel = null; save(); go('map');
   },
-  sample() { project = sampleProject(); ui.roomId = project.rooms[0].id; ui.sel = null; save(); go('room'); },
+  sample() { replaceProject(sampleProject()); },
   'ask-reset'() { ui.confirmReset = true; render(); },
-  reset() { project = createProject(); ui.roomId = project.rooms[0].id; ui.sel = null; save(); go('room'); },
+  reset() { replaceProject(createProject()); },
   cancel() { ui.adding = null; ui.confirmReset = false; render(); },
   adding(k) { ui.adding = k as Adding; render(); },
   'set-bg'(k) {
@@ -225,6 +307,7 @@ const actions: Record<string, (k: string) => void> = {
   },
   convo() {
     mapSel = null;
+    freshConvo = true;
     go('convo');
     const t = $<HTMLTextAreaElement>('#script');
     if (t) { t.focus(); t.setSelectionRange(t.value.length, t.value.length); }
@@ -233,7 +316,6 @@ const actions: Record<string, (k: string) => void> = {
     const e = selected(), t = $<HTMLTextAreaElement>('#script');
     if (!e || !t) return;
     const text = inserts(project, room(), e)[Number(k)].text;
-    remember(e.script);
     const before = t.value.slice(0, t.selectionStart), after = t.value.slice(t.selectionEnd);
     const lead = before && !before.endsWith('\n') ? '\n' : '';
     t.value = before + lead + text + after;
@@ -249,32 +331,41 @@ const actions: Record<string, (k: string) => void> = {
     convoMode = k === 'script' ? 'script' : 'map';
     try { localStorage.setItem(MODE_KEY, convoMode); } catch { /* remembered for this session only */ }
     mapSel = null;
+    freshConvo = convoMode === 'map';
     render();
   },
-  undo() {
-    const e = selected(), list = undoStack();
-    const prev = list.pop();
-    if (!e || prev === undefined) return;
-    e.script = prev;
-    mapSel = null;
-    save();
-    render();
-  },
+  undo() { undo(); },
+  redo() { redo(); },
+  'save-file'() { saveToFile(project); toast('Saved to a file in your downloads'); },
+  'open-file'() { const input = $<HTMLInputElement>('#projectfile')!; input.value = ''; input.click(); },
   theme(k) { project.look.theme = k; save(); render(); },
   play() { startPlay(); },
   'play-convo'() { startPlay(selected()); },
   stop() {
     const back = ui.back === 'convo' && selected() ? 'convo' : ui.back === 'map' ? 'map' : 'room';
+    if (back === 'convo') freshConvo = false;
     go(back);
   }
 };
 
-/* ---------- Images ---------- */
+/* ---------- Files ---------- */
+
+$('#projectfile')!.addEventListener('change', async ev => {
+  const f = (ev.target as HTMLInputElement).files?.[0];
+  if (!f) return;
+  const p = await readProjectFile(f);
+  if (!p) { toast('That file is not a Story Engine project.'); return; }
+  const before = snapshot();
+  replaceProject(p);
+  record(before);
+  toast(`Opened ${f.name}. Undo brings back what you had.`);
+});
 
 /** Imported images are scaled down and stored inside the project, so it stays one file. */
 $('#file')!.addEventListener('change', ev => {
   const f = (ev.target as HTMLInputElement).files?.[0];
   if (!f) return;
+  const before = snapshot();
   const img = new Image();
   const url = URL.createObjectURL(f);
   img.onload = () => {
@@ -287,10 +378,14 @@ $('#file')!.addEventListener('change', ev => {
     URL.revokeObjectURL(url);
     const data = c.toDataURL(isBg ? 'image/jpeg' : 'image/webp', 0.85);
     const name = f.name.replace(/\.[^.]+$/, '').slice(0, 30) || 'Image';
-    if (isBg) { room().bg = { img: data }; ui.adding = null; save(); render(); return; }
-    const isChar = pendingUpload === 'char';
-    place({ id: newId(), kind: isChar ? 'char' : 'object', img: data, name, x: 50, y: isChar ? 98 : 78, size: isChar ? 76 : 20, script: '' });
+    if (isBg) { room().bg = { img: data }; ui.adding = null; save(); render(); }
+    else {
+      const isChar = pendingUpload === 'char';
+      place({ id: newId(), kind: isChar ? 'char' : 'object', img: data, name, x: 50, y: isChar ? 98 : 78, size: isChar ? 76 : 20, script: '' });
+    }
+    record(before);
   };
+  img.onerror = () => { URL.revokeObjectURL(url); toast('That image could not be opened.'); };
   img.src = url;
 });
 
@@ -305,10 +400,36 @@ document.addEventListener('pointerup', () => {
   setTimeout(() => { if (pendingRefresh) refreshMap(); }, 0);
 }, true);
 
+/* Dragging the map's background pans it. */
+let pan: { x: number; y: number; left: number; top: number; moved: boolean } | null = null;
+let justPanned = false;
+document.addEventListener('pointerdown', ev => {
+  const t = ev.target as HTMLElement;
+  const sc = t.closest<HTMLElement>('#mscroll');
+  if (!sc || ev.button !== 0 || t.closest('button, input, select, textarea')) return;
+  pan = { x: ev.clientX, y: ev.clientY, left: sc.scrollLeft, top: sc.scrollTop, moved: false };
+});
+document.addEventListener('pointermove', ev => {
+  const sc = $('#mscroll');
+  if (!pan || !sc) return;
+  const dx = ev.clientX - pan.x, dy = ev.clientY - pan.y;
+  if (!pan.moved && Math.hypot(dx, dy) < 5) return;
+  pan.moved = true;
+  sc.classList.add('panning');
+  sc.scrollLeft = pan.left - dx;
+  sc.scrollTop = pan.top - dy;
+});
+document.addEventListener('pointerup', () => {
+  if (pan?.moved) { justPanned = true; setTimeout(() => { justPanned = false; }, 0); }
+  pan = null;
+  $('#mscroll')?.classList.remove('panning');
+});
+
 document.addEventListener('click', ev => {
   const target = ev.target as HTMLElement;
   const b = target.closest<HTMLElement>('[data-act]');
   if (b) {
+    if ((b as HTMLButtonElement).disabled) return;
     // Destructive buttons ask once more in place: the first click arms them.
     if (b.dataset.confirm && !b.dataset.armed) {
       const label = b.textContent ?? '';
@@ -318,29 +439,58 @@ document.addEventListener('click', ev => {
       setTimeout(() => { if (b.isConnected) { delete b.dataset.armed; b.classList.remove('armed'); b.textContent = label; } }, 4000);
       return;
     }
-    actions[b.dataset.act!]?.(b.dataset.k ?? '');
+    const act = b.dataset.act!;
+    const before = NOT_RECORDED.has(act) ? null : snapshot();
+    actions[act]?.(b.dataset.k ?? '');
+    record(before);
     return;
   }
+  const v = target.closest<HTMLElement>('[data-map-view]');
+  if (v) { mapView(v.dataset.mapView!); drawEdges(); return; }
   const m = target.closest<HTMLElement>('[data-map-act]');
   const ctx = mapCtx();
   if (m && ctx) {
     if ((m as HTMLButtonElement).disabled) return;
-    const before = ctx.el.script;
-    applyMap(mapAction(ctx, m.dataset.mapAct!, m.dataset.k ?? ''), before);
+    const before = snapshot();
+    applyMap(mapAction(ctx, m.dataset.mapAct!, m.dataset.k ?? ''));
+    record(before);
     return;
   }
-  if (ctx && mapSel && target.closest('.mcanvas') && !target.closest('.mnode, .madd')) { mapSel = null; refreshMap(); }
+  if (ctx && mapSel && !justPanned && target.closest('.mscroll') && !target.closest('.mnode, .madd')) { mapSel = null; refreshMap(); }
 });
 
-/* One Undo step per visit to a field, in the map panel and in the script. */
+/* One Undo step per visit to a field. Renames are carried through to the steps
+   that point at the old name when the field is left. */
 let fieldSnapshot: string | null = null;
-const tracked = (el: HTMLElement) => !!el.dataset?.mapIn || el.dataset?.in === 'script';
+let renameFrom = '';
+const isField = (el: HTMLElement) => !!el.closest?.('#main') && /^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName);
 document.addEventListener('focusin', ev => {
-  if (tracked(ev.target as HTMLElement)) fieldSnapshot = selected()?.script ?? null;
+  const t = ev.target as HTMLInputElement;
+  if (!isField(t)) return;
+  if (fieldSnapshot === null) fieldSnapshot = snapshot();
+  if (t.dataset.in === 'room-name') renameFrom = room().name;
+  if (t.dataset.in === 'el-name') renameFrom = selected()?.name ?? '';
 });
 document.addEventListener('focusout', ev => {
-  if (tracked(ev.target as HTMLElement) && fieldSnapshot !== null) { remember(fieldSnapshot); fieldSnapshot = null; }
+  const lost = ev.target as HTMLElement;
+  if (!isField(lost) || fieldSnapshot === null) return;
+  setTimeout(() => {
+    const now = document.activeElement as HTMLElement | null;
+    // The same field drawn again (the map redraws its panel) is still the same visit.
+    if (now && lost.id && now.id === lost.id) return;
+    record(fieldSnapshot);
+    fieldSnapshot = now && isField(now) ? snapshot() : null;
+  }, 0);
 });
+
+function renameEverywhere(kind: 'room' | 'speaker', from: string, to: string): number {
+  let changed = 0;
+  for (const r of project.rooms) for (const e of r.els) {
+    const next = kind === 'room' ? renameRoomInScript(e.script, from, to) : renameSpeakerInScript(e.script, from, to);
+    if (next !== e.script) { e.script = next; changed++; }
+  }
+  return changed;
+}
 
 /**
  * Map panel fields write to the conversation when the field is left (or Enter is
@@ -382,18 +532,37 @@ document.addEventListener('input', ev => {
 });
 
 document.addEventListener('change', ev => {
-  const mt = ev.target as HTMLInputElement;
-  if (mt.dataset.mapIn && mt.tagName !== 'SELECT') commitMapField(mt);
-  if ((ev.target as HTMLElement).dataset.in === 'el-name') render();
+  const t = ev.target as HTMLInputElement;
+  if (t.dataset.mapIn && t.tagName !== 'SELECT') commitMapField(t);
+  if (t.dataset.in === 'room-name') {
+    if (!t.value.trim()) { room().name = renameFrom || 'Room'; t.value = room().name; }
+    const n = renameEverywhere('room', renameFrom, room().name);
+    if (n) toast(`Updated "Go to" in ${n} conversation${n === 1 ? '' : 's'}`);
+    renameFrom = room().name;
+    save();
+  }
+  if (t.dataset.in === 'el-name') {
+    const e = selected();
+    if (e && !e.name.trim()) e.name = renameFrom || 'Thing';
+    if (e?.kind === 'char') {
+      const n = renameEverywhere('speaker', renameFrom, e.name);
+      if (n) toast(`Updated ${e.name}'s lines in ${n} conversation${n === 1 ? '' : 's'}`);
+    }
+    renameFrom = e?.name ?? '';
+    save();
+    render();
+  }
 });
 
 document.addEventListener('keydown', ev => {
   const t = ev.target as HTMLTextAreaElement;
   const typing = t.closest?.('input, textarea, select');
-  if (ui.view === 'convo' && !typing) {
-    if (ev.key === 'Escape' && mapSel) { mapSel = null; refreshMap(); return; }
-    if ((ev.metaKey || ev.ctrlKey) && ev.key.toLowerCase() === 'z') { ev.preventDefault(); actions.undo(''); return; }
+  if (!typing && ui.view !== 'play' && (ev.metaKey || ev.ctrlKey)) {
+    const key = ev.key.toLowerCase();
+    if (key === 'z' && !ev.shiftKey) { ev.preventDefault(); undo(); return; }
+    if ((key === 'z' && ev.shiftKey) || key === 'y') { ev.preventDefault(); redo(); return; }
   }
+  if (ui.view === 'convo' && !typing && ev.key === 'Escape' && mapSel) { mapSel = null; refreshMap(); return; }
   if (t.id === 'script' && ev.key === 'Tab') {
     ev.preventDefault();
     t.setRangeText('  ', t.selectionStart, t.selectionEnd, 'end');
@@ -404,7 +573,7 @@ document.addEventListener('keydown', ev => {
 /* ---------- Drag to place ----------
    Positions are stored as a share of the stage, so a layout holds at any screen size. */
 
-interface Drag { e: StoryElement; node: HTMLElement; box: DOMRect; dx: number; dy: number; rerender: boolean }
+interface Drag { e: StoryElement; node: HTMLElement; box: DOMRect; dx: number; dy: number; rerender: boolean; before: string }
 let drag: Drag | null = null;
 
 document.addEventListener('pointerdown', ev => {
@@ -423,7 +592,7 @@ document.addEventListener('pointerdown', ev => {
   stage.querySelectorAll('.el.sel').forEach(x => x.classList.remove('sel'));
   node.classList.add('sel');
   drag = {
-    e, node, box,
+    e, node, box, before: snapshot(),
     dx: ev.clientX - (box.left + box.width * e.x / 100),
     dy: ev.clientY - (box.top + box.height * e.y / 100),
     rerender: ui.sel !== e.id || ui.adding !== null
@@ -446,12 +615,14 @@ document.addEventListener('pointermove', ev => {
 
 const drop = () => {
   if (!drag) return;
-  const again = drag.rerender;
+  const { rerender, before } = drag;
   drag = null;
   save();
-  if (again) render();
+  record(before);
+  if (rerender) render();
 };
 document.addEventListener('pointerup', drop);
 document.addEventListener('pointercancel', drop);
 
 render();
+save();

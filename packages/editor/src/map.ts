@@ -6,7 +6,7 @@
  * where the paths continue together. Edits made here rewrite the script, so the
  * script and the map always show the same conversation.
  */
-import { CONDITION_WORDS, conditionText, effectText, getList, getStep, parseScript, splitPath, stepPathOf, summarize, toValue, valueText, walkSteps, writeScript } from '@story-engine/engine-core';
+import { CONDITION_WORDS, conditionText, effectText, findRoomByName, getList, getStep, parseScript, splitPath, stepPathOf, summarize, toValue, valueText, walkSteps, writeScript } from '@story-engine/engine-core';
 import type { ChoiceStep, CompareOp, Effect, Project, Room, Step, StoryElement } from '@story-engine/engine-core';
 import { EXPRESSIONS, esc, sayHTML, stageHTML } from '@story-engine/runtime';
 
@@ -45,8 +45,13 @@ export function mapHTML(ctx: MapCtx): string {
   const pick = (key: string) => (readOnly ? '' : ` data-map-act="sel" data-k="${esc(key)}"`);
   const link = (from: string[], to: string) => from.forEach(f => model.edges.push([f, to]));
 
-  const addButton = (list: string, index: number, label = '') => readOnly ? '' :
-    `<button class="madd${label ? ' wide' : ''}${on(`add:${list}:${index}`)}" data-map-act="sel" data-k="add:${list}:${index}" aria-label="Add a step here" title="Add a step here">${label || '+'}</button>`;
+  const addButton = (list: string, index: number, label = '', kind: '' | 'wide' | 'join' = '') => {
+    if (readOnly) return '';
+    const key = `add:${list}:${index}`;
+    if (kind === 'wide') return `<button class="madd wide" data-map-act="first-line" data-k="${key}">${label}</button>`;
+    const title = kind === 'join' ? 'Add a step that every path reaches' : 'Add a step here';
+    return `<button class="madd${kind ? ` ${kind}` : ''}${on(key)}" data-map-act="sel" data-k="${key}" aria-label="${title}" title="${title}">${label || '+'}</button>`;
+  };
 
   const row = (s: Step, path: string): string => {
     const attrs = `class="mrow k-${s.t}${on(path)}"${pick(path)}`;
@@ -62,11 +67,12 @@ export function mapHTML(ctx: MapCtx): string {
   };
 
   function flow(list: Step[], lp: string, entries: string[], reachable: boolean, top: boolean): { html: string; exits: string[] } {
-    let html = addButton(lp, 0, top && !list.length ? '+ Add the first line' : '');
+    let html = top && !list.length ? addButton(lp, 0, '+ Add the first line', 'wide') : addButton(lp, 0);
     let ents = entries;
     let reach = reachable;
     let i = 0;
     while (i < list.length) {
+      let join = '';
       const s = list[i];
       const path = stepPathOf(lp, i);
       if (s.t === 'part') reach = ents.length > 0 || jumped.has(lower(s.name));
@@ -100,6 +106,7 @@ export function mapHTML(ctx: MapCtx): string {
         if (!readOnly) html += `<div class="mbranch ghost"><button class="mnode answer add" data-map-act="add-answer" data-k="${path}">+ Answer</button></div>`;
         html += '</div>';
         ents = exits;
+        if (exits.length > 1) join = '+ After every answer';
         i++;
       } else if (s.t === 'if') {
         html += `<button class="mnode cond${dim}${on(path)}" id="${nid}"${pick(path)}><span class="tag">Only if</span>${esc(conditionText(s.cond))}</button><div class="msplit">`;
@@ -114,6 +121,7 @@ export function mapHTML(ctx: MapCtx): string {
         }
         html += '</div>';
         ents = exits;
+        if (exits.length > 1) join = '+ After both paths';
         i++;
       } else if (s.t === 'part') {
         html += `<button class="mnode part${dim}${on(path)}" id="${nid}"${pick(path)}><span class="tag">Part</span>${esc(s.name)}</button>`;
@@ -122,17 +130,18 @@ export function mapHTML(ctx: MapCtx): string {
         ents = [nid];
         i++;
       } else {
-        const label = s.t === 'door' ? `<span class="tag">Go to</span>${esc(s.room)}`
+        const broken = s.t === 'door' && !findRoomByName(ctx.project, s.room);
+        const label = s.t === 'door' ? `<span class="tag">Go to</span>${esc(s.room)}${broken ? '<span class="why">There is no room with this name</span>' : ''}`
           : s.t === 'jump' ? `<span class="tag">Go to part</span>${esc(s.part)}`
           : 'End';
-        html += `<button class="mnode cap ${s.t}${dim}${on(path)}" id="${nid}"${pick(path)}>${label}</button>`;
+        html += `<button class="mnode cap ${s.t}${broken ? ' broken' : ''}${dim}${on(path)}" id="${nid}"${pick(path)}>${label}</button>`;
         if (s.t === 'jump') model.jumps.push([nid, lower(s.part)]);
         link(ents, nid);
         ents = [];
         i++;
       }
       if (TERMINAL.has(s.t) && !top) continue;
-      html += addButton(lp, i);
+      html += join ? addButton(lp, i, join, 'join') : addButton(lp, i);
     }
     if (top && ents.length && list.length) {
       const nid = id();
@@ -148,8 +157,69 @@ export function mapHTML(ctx: MapCtx): string {
   const banner = readOnly
     ? `<div class="mbanner">Line ${errors[0].n} of the script needs fixing before the map can be changed: ${esc(errors[0].msg)} <button class="btn small" data-act="convo-mode" data-k="script">Open the script</button></div>`
     : '';
-  return `${banner}<div class="mscroll"><div class="mcanvas" id="mcanvas"><svg class="medges" id="medges" aria-hidden="true"></svg>
-    <div class="mflow top"><div class="mnode start" id="${startId}">${esc(startLabel(ctx.room, ctx.el))}</div>${body.html}</div></div></div>`;
+  const zoomBar = `<div class="mzoom" role="group" aria-label="Zoom">
+    <button class="btn small quiet" data-map-view="out" aria-label="Zoom out" title="Zoom out">−</button>
+    <button class="btn small quiet" data-map-view="reset" id="mzoomlabel" title="Show at actual size">${Math.round(zoom * 100)}%</button>
+    <button class="btn small quiet" data-map-view="in" aria-label="Zoom in" title="Zoom in">+</button>
+    <button class="btn small quiet" data-map-view="fit" title="Fit the whole conversation in view">Fit</button></div>`;
+  return `${banner}<div class="mview">${zoomBar}<div class="mscroll" id="mscroll"><div class="msizer" id="msizer"><div class="mcanvas" id="mcanvas"><svg class="medges" id="medges" aria-hidden="true"></svg>
+    <div class="mflow top"><div class="mnode start" id="${startId}">${esc(startLabel(ctx.room, ctx.el))}</div>${body.html}</div></div></div></div></div>`;
+}
+
+/* ---------- Zoom and pan ---------- */
+
+let zoom = 1;
+const MIN_ZOOM = 0.3, MAX_ZOOM = 1.5;
+
+/** Sizes the scroll area to the zoomed canvas. Call after the map is in the page. */
+export function applyZoom(): void {
+  const canvas = document.getElementById('mcanvas'), sizer = document.getElementById('msizer');
+  if (!canvas || !sizer) return;
+  canvas.style.transform = zoom === 1 ? '' : `scale(${zoom})`;
+  sizer.style.width = `${canvas.offsetWidth * zoom}px`;
+  sizer.style.height = `${canvas.offsetHeight * zoom}px`;
+  const label = document.getElementById('mzoomlabel');
+  if (label) label.textContent = `${Math.round(zoom * 100)}%`;
+}
+
+/** Changes the zoom and keeps the middle of the view where it was. */
+export function setZoom(next: number): void {
+  const sc = document.getElementById('mscroll');
+  const z = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.round(next * 100) / 100));
+  if (!sc) { zoom = z; return; }
+  const cx = (sc.scrollLeft + sc.clientWidth / 2) / zoom, cy = (sc.scrollTop + sc.clientHeight / 2) / zoom;
+  zoom = z;
+  applyZoom();
+  sc.scrollLeft = cx * zoom - sc.clientWidth / 2;
+  sc.scrollTop = cy * zoom - sc.clientHeight / 2;
+}
+
+export function mapView(kind: string): void {
+  if (kind === 'in') setZoom(zoom * 1.2);
+  else if (kind === 'out') setZoom(zoom / 1.2);
+  else if (kind === 'reset') setZoom(1);
+  else if (kind === 'fit') {
+    const sc = document.getElementById('mscroll'), canvas = document.getElementById('mcanvas');
+    if (!sc || !canvas) return;
+    setZoom(Math.min(1, (sc.clientWidth - 8) / canvas.offsetWidth, (sc.clientHeight - 8) / canvas.offsetHeight));
+    sc.scrollLeft = 0;
+    sc.scrollTop = 0;
+  }
+}
+
+/**
+ * First look at a conversation: everything at full size when it fits; otherwise
+ * shrink it down to 60% at most and put the start in the middle of the view.
+ */
+export function openView(): void {
+  const sc = document.getElementById('mscroll'), canvas = document.getElementById('mcanvas');
+  const start = canvas?.querySelector<HTMLElement>('.mnode.start');
+  if (!sc || !canvas || !start) return;
+  zoom = Math.min(1, Math.max(0.6, (sc.clientWidth - 8) / canvas.offsetWidth));
+  applyZoom();
+  const centre = (start.offsetLeft + start.offsetWidth / 2 + (start.offsetParent as HTMLElement).offsetLeft) * zoom;
+  sc.scrollLeft = centre - sc.clientWidth / 2;
+  sc.scrollTop = 0;
 }
 
 /** Draws the connecting lines once the boxes are laid out. */
@@ -158,11 +228,13 @@ export function drawEdges(): void {
   const svg = document.getElementById('medges');
   if (!canvas || !svg) return;
   const base = canvas.getBoundingClientRect();
+  // Measured on screen, then divided by the zoom so lines are drawn in the canvas's own units.
   const box = (id: string) => {
     const el = document.getElementById(id);
     if (!el) return null;
     const r = el.getBoundingClientRect();
-    return { l: r.left - base.left, r: r.right - base.left, t: r.top - base.top, b: r.bottom - base.top, cx: (r.left + r.right) / 2 - base.left, cy: (r.top + r.bottom) / 2 - base.top };
+    const l = (r.left - base.left) / zoom, t = (r.top - base.top) / zoom, w = r.width / zoom, h = r.height / zoom;
+    return { l, r: l + w, t, b: t + h, cx: l + w / 2, cy: t + h / 2 };
   };
   let paths = '';
   for (const [from, to] of model.edges) {
@@ -173,15 +245,16 @@ export function drawEdges(): void {
     paths += `<path d="${d}" marker-end="url(#m-arrow)"/>`;
   }
   let right = 0;
-  canvas.querySelectorAll<HTMLElement>('.mnode').forEach(n => { right = Math.max(right, n.getBoundingClientRect().right - base.left); });
+  canvas.querySelectorAll<HTMLElement>('.mnode').forEach(n => { right = Math.max(right, (n.getBoundingClientRect().right - base.left) / zoom); });
   model.jumps.forEach(([from, part], k) => {
     const a = box(from), target = model.parts.get(part), b = target ? box(target) : null;
     if (!a || !b) return;
     const x = right + 24 + k * 12;
-    paths += `<path class="jump" d="M${a.r} ${a.cy}H${x}V${b.cy}H${b.r + 2}" marker-end="url(#m-jump)"/>`;
+    const hot = document.getElementById(from)?.classList.contains('on') || (target && document.getElementById(target)?.classList.contains('on'));
+    paths += `<path class="jump${hot ? ' hot' : ''}" d="M${a.r} ${a.cy}H${x}V${b.cy}H${b.r + 2}" marker-end="url(#m-jump)"/>`;
   });
-  svg.setAttribute('width', String(canvas.scrollWidth));
-  svg.setAttribute('height', String(canvas.scrollHeight));
+  svg.setAttribute('width', String(canvas.offsetWidth));
+  svg.setAttribute('height', String(canvas.offsetHeight));
   svg.innerHTML = `<defs><marker id="m-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="head"/></marker><marker id="m-jump" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="jhead"/></marker></defs>${paths}`;
 }
 
@@ -343,6 +416,13 @@ export function mapAction(ctx: MapCtx, act: string, k: string): MapResult | unde
 
   switch (act) {
     case 'sel': return { sel: k, panel: true };
+    case 'first-line': {
+      const [, list, at] = k.split(':');
+      const target = getList(steps, list);
+      if (!target) return undefined;
+      target.splice(Number(at), 0, newStep('say', ctx, []));
+      return commit(stepPathOf(list, Number(at)));
+    }
     case 'deselect': return { sel: null, panel: true };
     case 'insert': {
       const [, list, at] = (ctx.sel ?? '').split(':');

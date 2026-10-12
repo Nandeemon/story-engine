@@ -16,8 +16,11 @@
         <nav class="crumbs" id="crumbs" aria-label="Where you are"></nav>
         <div class="tools" id="tools"></div>
       </header>
+      <div class="savewarn" id="savewarn" role="alert" hidden>This browser has stopped saving your story, because its storage is full. Save to file to keep your work. <button class="btn small" data-act="save-file">Save to file</button></div>
       <main id="main"></main>
       <input type="file" id="file" accept="image/*" hidden>
+      <input type="file" id="projectfile" accept=".json,application/json" hidden>
+      <div class="toast" id="toast" role="status" hidden></div>
     </div>
     <script type="module" src="/src/main.ts"></script>
   </body>

@@ -16,6 +16,10 @@ npm run dev      # editor at http://localhost:5173
 npm run check    # type-check, tests and build
 ```
 
+## Your work
+
+The editor keeps your story in this browser and warns you if it stops being able to save. **Save to file** on the Story map downloads the whole project, images included, as one `.story.json` file, and **Open a file** brings it back. Undo and Redo (Ctrl+Z, Ctrl+Shift+Z) cover every change to the project. Renaming a room updates every `Go to` that points at it, and renaming a character updates their lines.
+
 ## Layout
 
 | Package | What it is |

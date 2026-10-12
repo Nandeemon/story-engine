@@ -28,9 +28,9 @@ export const hasContent = (p: Project) => p.rooms.length > 1 || p.rooms.some(r =
 export function viewMap(p: Project, ui: UI): string {
   const actions = ui.confirmReset
     ? `<span class="hint">Erase everything?</span><button class="btn small danger" data-act="reset">Yes, start over</button><button class="btn small quiet" data-act="cancel">Keep it</button>`
-    : `<button class="btn small quiet" data-act="sample"${hasContent(p) ? ' data-confirm="This replaces your story. Click again"' : ''}>Load the sample scene</button><button class="btn small quiet" data-act="ask-reset">Start over</button>`;
+    : `<button class="btn small" data-act="save-file">Save to file</button><button class="btn small" data-act="open-file">Open a file</button><button class="btn small quiet" data-act="sample"${hasContent(p) ? ' data-confirm="This replaces your story. Click again"' : ''}>Load the sample scene</button><button class="btn small quiet" data-act="ask-reset">Start over</button>`;
   const cards = p.rooms.map(r => `<button class="card" data-act="open-room" data-k="${esc(r.id)}"><span class="pic">${backdropHTML(r.bg)}</span><span class="meta"><b>${esc(r.name)}</b><span>${r.els.length} ${r.els.length === 1 ? 'thing' : 'things'} placed${r.auto ? ' · starts talking right away' : ''}</span></span></button>`).join('');
-  return `<div class="side"><div class="maphead"><div><h2>Story map</h2><p class="hint">Every room in your story. Click one to work in it.</p></div><div class="row">${actions}</div></div>
+  return `<div class="side"><div class="maphead"><div><h2>Story map</h2><p class="hint">Every room in your story. Click one to work in it. Your story is kept in this browser; Save to file keeps a copy you can move or back up.</p></div><div class="row">${actions}</div></div>
     <div class="map">${cards}<button class="card new" data-act="new-room">+ New room</button></div></div>`;
 }
 
@@ -121,18 +121,18 @@ Part: Later
 Go to part Later
 # A note only you see`;
 
-function convoBar(mode: ConvoMode, canUndo: boolean): string {
+function convoBar(mode: ConvoMode): string {
   const tab = (m: ConvoMode, label: string) => `<button role="tab" class="seg${mode === m ? ' on' : ''}" aria-selected="${mode === m}" data-act="convo-mode" data-k="${m}">${label}</button>`;
   return `<div class="convobar"><div class="segs" role="tablist" aria-label="How to show the conversation">${tab('map', 'Map')}${tab('script', 'Script')}</div>
-    <div class="row"><button class="btn small quiet" data-act="undo"${canUndo ? '' : ' disabled'}>Undo</button><button class="btn small play" data-act="play-convo">Play this conversation</button></div></div>`;
+    <button class="btn small play" data-act="play-convo">Play this conversation</button></div>`;
 }
 
-export function viewConvo(p: Project, r: Room, e: StoryElement, mode: ConvoMode, canUndo: boolean, map: { canvas: string; side: string }): string {
+export function viewConvo(p: Project, r: Room, e: StoryElement, mode: ConvoMode, map: { canvas: string; side: string }): string {
   if (mode === 'map') {
-    return `<div class="work"><div class="mapwrap">${convoBar(mode, canUndo)}<div id="mapholder">${map.canvas}</div></div><aside class="side" id="mside">${map.side}</aside></div>`;
+    return `<div class="work"><div class="mapwrap">${convoBar(mode)}<div id="mapholder">${map.canvas}</div></div><aside class="side" id="mside">${map.side}</aside></div>`;
   }
   const who = e.kind === 'char' ? esc(e.name) : 'Narrator';
-  return `<div class="work"><div class="mapwrap">${convoBar(mode, canUndo)}<div class="paper">
+  return `<div class="work"><div class="mapwrap">${convoBar(mode)}<div class="paper">
       <div class="row">${inserts(p, r, e).map((x, i) => `<button class="btn small quiet" data-act="insert" data-k="${i}">+ ${x.label}</button>`).join('')}</div>
       <textarea id="script" data-in="script" spellcheck="false" aria-label="What ${esc(e.name)} says" placeholder="${who}: Type the first line here.">${esc(e.script)}</textarea>
       <p class="status" id="status" role="status"></p>

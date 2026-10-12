@@ -6,3 +6,4 @@ export type { Runner, RunEvent, ChoiceEvent, EndEvent } from './runner';
 export { createProject, createRoom, newId, normalizeProject, findRoomByName, DEFAULT_LOOK } from './project';
 export { getList, getStep, splitPath, stepPathOf } from './paths';
 export type { StepPath, ListPath } from './paths';
+export { renameRoomInScript, renameSpeakerInScript } from './refs';
