@@ -66,7 +66,7 @@ function elementPanel(e: StoryElement): string {
     <label class="field"><span>Name</span><input type="text" id="el-name" data-in="el-name" value="${name}"></label>
     <label class="field"><span>Size</span><input type="range" id="el-size" data-in="el-size" min="6" max="110" value="${e.size}"></label>
     <details class="more" id="el-more"><summary>More</summary><div>${expr}
-      <div class="row"><button class="btn small quiet" data-act="front">Bring to front</button><button class="btn small danger" data-act="remove" data-confirm="Remove, with what they say?">Remove</button></div>
+      <div class="row"><button class="btn small quiet" data-act="front">Bring to front</button><button class="btn small danger" data-act="remove" data-confirm="Click again to remove">Remove</button></div>
     </div></details>
     <p class="hint">Drag ${name} in the picture to move. Click empty space to go back to the room.</p>`;
 }

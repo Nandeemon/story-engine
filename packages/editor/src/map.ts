@@ -169,7 +169,7 @@ export function mapHTML(ctx: MapCtx): string {
 /* ---------- Zoom and pan ---------- */
 
 let zoom = 1;
-const MIN_ZOOM = 0.3, MAX_ZOOM = 1.5;
+const MIN_ZOOM = 0.15, MAX_ZOOM = 1.5;
 
 /** Sizes the scroll area to the zoomed canvas. Call after the map is in the page. */
 export function applyZoom(): void {
@@ -201,8 +201,8 @@ export function mapView(kind: string): void {
   else if (kind === 'fit') {
     const sc = document.getElementById('mscroll'), canvas = document.getElementById('mcanvas');
     if (!sc || !canvas) return;
-    setZoom(Math.min(1, (sc.clientWidth - 8) / canvas.offsetWidth, (sc.clientHeight - 8) / canvas.offsetHeight));
-    sc.scrollLeft = 0;
+    setZoom(Math.min(1, (sc.clientWidth - 16) / canvas.offsetWidth, (sc.clientHeight - 16) / canvas.offsetHeight));
+    sc.scrollLeft = Math.max(0, (sc.scrollWidth - sc.clientWidth) / 2);
     sc.scrollTop = 0;
   }
 }

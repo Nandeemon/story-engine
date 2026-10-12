@@ -2,7 +2,7 @@ import '@story-engine/runtime/game.css';
 import './editor.css';
 import { createProject, createRoom, findRoomByName, newId, normalizeProject, renameRoomInScript, renameSpeakerInScript } from '@story-engine/engine-core';
 import type { Project, Room, StoryElement } from '@story-engine/engine-core';
-import { BACKDROPS, CHARACTERS, OBJECTS, createPlayer, elementArt, esc, lookStyle } from '@story-engine/runtime';
+import { BACKDROPS, CHARACTERS, OBJECTS, createPlayer, elementArt, esc, lookStyle, sayHTML } from '@story-engine/runtime';
 import type { Player, PlayState } from '@story-engine/runtime';
 import { loadProject, sampleProject, saveProject } from './store';
 import { inserts, scriptStatus, viewConvo, viewLook, viewMap, viewPlay, viewRoom } from './views';
@@ -50,7 +50,17 @@ function toast(text: string): void {
 
 const past: string[] = [];
 const future: string[] = [];
-const snapshot = () => JSON.stringify(project);
+/* Images are kept once, by key, so undo copies hold only the story itself. */
+const images = new Map<string, string>();
+const imageKeys = new Map<string, string>();
+const IMG = '\u00a7img:';
+const snapshot = () => JSON.stringify(project, (_k, v) => {
+  if (typeof v !== 'string' || !v.startsWith('data:')) return v;
+  let key = imageKeys.get(v);
+  if (!key) { key = IMG + images.size; images.set(key, v); imageKeys.set(v, key); }
+  return key;
+});
+const fromSnapshot = (json: string) => JSON.parse(json, (_k, v) => (typeof v === 'string' && v.startsWith(IMG) ? images.get(v) ?? '' : v));
 
 function record(before: string | null): void {
   if (before === null || before === snapshot()) return;
@@ -67,8 +77,11 @@ function syncUndo(): void {
 }
 
 function restore(json: string, message: string): void {
-  const p = normalizeProject(JSON.parse(json));
+  const p = normalizeProject(fromSnapshot(json));
   if (!p) return;
+  // A field visit in progress belongs to the state being left.
+  fieldSnapshot = null;
+  (document.activeElement as HTMLElement | null)?.blur();
   project = p;
   if (!project.rooms.some(r => r.id === ui.roomId)) { ui.roomId = project.rooms[0].id; ui.sel = null; }
   if (ui.sel && !room().els.some(e => e.id === ui.sel)) ui.sel = null;
@@ -178,14 +191,17 @@ function refreshMap(): void {
   if (!ctx || !holder || !side) return render();
   const scroller = $('#mscroll');
   const scroll = scroller ? [scroller.scrollLeft, scroller.scrollTop] : [0, 0];
-  const active = document.activeElement as HTMLInputElement | null;
-  const focusId = active && side.contains(active) ? active.id : '';
+  const active = document.activeElement as HTMLElement | null;
+  const inSide = !!active && side.contains(active);
+  // Fields keep focus by id; buttons by what they do.
+  const focusSel = !inSide ? '' : active!.id ? `#${CSS.escape(active!.id)}`
+    : active!.dataset.mapAct ? `[data-map-act="${active!.dataset.mapAct}"]${active!.dataset.k ? `[data-k="${CSS.escape(active!.dataset.k)}"]` : ''}` : '';
   holder.innerHTML = mapHTML(ctx);
   side.innerHTML = mapSide(ctx);
   applyZoom();
   const next = $('#mscroll');
   if (next) { next.scrollLeft = scroll[0]; next.scrollTop = scroll[1]; }
-  if (focusId) document.getElementById(focusId)?.focus();
+  if (focusSel) side.querySelector<HTMLElement>(focusSel)?.focus();
   else holder.querySelector<HTMLElement>('.on')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   afterMap();
 }
@@ -290,7 +306,11 @@ const actions: Record<string, (k: string) => void> = {
   'set-bg'(k) {
     const r = room();
     r.bg = { preset: k };
-    if (/^Room \d+$/.test(r.name) && !findRoomByName(project, BACKDROPS[k].name)) r.name = BACKDROPS[k].name;
+    if (/^Room \d+$/.test(r.name) && !findRoomByName(project, BACKDROPS[k].name)) {
+      const old = r.name;
+      r.name = BACKDROPS[k].name;
+      renameEverywhere('room', old, r.name);
+    }
     ui.adding = null; save(); render();
   },
   'add-char'(k) {
@@ -484,6 +504,11 @@ document.addEventListener('focusout', ev => {
 });
 
 function renameEverywhere(kind: 'room' | 'speaker', from: string, to: string): number {
+  const key = from.trim().toLowerCase();
+  const stillUsed = kind === 'room'
+    ? project.rooms.some(r => r.name.trim().toLowerCase() === key)
+    : project.rooms.some(r => r.els.some(e => e.kind === 'char' && e.name.trim().toLowerCase() === key));
+  if (stillUsed) return 0;
   let changed = 0;
   for (const r of project.rooms) for (const e of r.els) {
     const next = kind === 'room' ? renameRoomInScript(e.script, from, to) : renameSpeakerInScript(e.script, from, to);
@@ -500,16 +525,27 @@ function renameEverywhere(kind: 'room' | 'speaker', from: string, to: string): n
 function commitMapField(t: HTMLInputElement): void {
   const ctx = mapCtx();
   if (!ctx) return;
+  const before = fieldSnapshot ?? snapshot();
   const res = mapInput(ctx, t.dataset.mapIn!, t.dataset.k ?? '', t.value);
   if (!res) return;
   save();
-  if (pointerDown) pendingRefresh = true; else refreshMap();
+  // The change is recorded now, and the field starts a fresh visit if it keeps focus.
+  record(before);
+  fieldSnapshot = snapshot();
+  // Redraw once focus has moved on (Tab), so the newly focused field is the one kept.
+  if (pointerDown) pendingRefresh = true;
+  else { pendingRefresh = true; setTimeout(() => { if (pendingRefresh) refreshMap(); }, 0); }
 }
 
 document.addEventListener('input', ev => {
   const t = ev.target as HTMLInputElement;
   if (t.dataset.mapIn) {
     if (t.tagName === 'SELECT') commitMapField(t);
+    else if (t.dataset.mapIn === 'say-text' || t.dataset.mapIn === 'say-who') {
+      const game = $('.mpreview .game');
+      const who = $<HTMLInputElement>('#m-who-in')?.value ?? '', text = $<HTMLTextAreaElement>('#m-text')?.value ?? '';
+      if (game) game.innerHTML = sayHTML(who.trim(), text, false);
+    }
     return;
   }
   const k = t.dataset.in;
@@ -535,7 +571,9 @@ document.addEventListener('change', ev => {
   const t = ev.target as HTMLInputElement;
   if (t.dataset.mapIn && t.tagName !== 'SELECT') commitMapField(t);
   if (t.dataset.in === 'room-name') {
-    if (!t.value.trim()) { room().name = renameFrom || 'Room'; t.value = room().name; }
+    const clash = project.rooms.find(r => r !== room() && r.name.trim().toLowerCase() === t.value.trim().toLowerCase());
+    if (clash) toast(`There is already a room called "${clash.name}". Pick another name.`);
+    if (!t.value.trim() || clash) { room().name = renameFrom || 'Room'; t.value = room().name; const c = $('#crumbs [aria-current]'); if (c) c.textContent = room().name; }
     const n = renameEverywhere('room', renameFrom, room().name);
     if (n) toast(`Updated "Go to" in ${n} conversation${n === 1 ? '' : 's'}`);
     renameFrom = room().name;
@@ -563,6 +601,11 @@ document.addEventListener('keydown', ev => {
     if ((key === 'z' && ev.shiftKey) || key === 'y') { ev.preventDefault(); redo(); return; }
   }
   if (ui.view === 'convo' && !typing && ev.key === 'Escape' && mapSel) { mapSel = null; refreshMap(); return; }
+  if ((t as HTMLElement).dataset?.mapIn && t.tagName === 'TEXTAREA' && ev.key === 'Enter' && !ev.shiftKey) {
+    ev.preventDefault();
+    commitMapField(t as unknown as HTMLInputElement);
+    return;
+  }
   if (t.id === 'script' && ev.key === 'Tab') {
     ev.preventDefault();
     t.setRangeText('  ', t.selectionStart, t.selectionEnd, 'end');
