@@ -16,7 +16,24 @@ export interface Condition {
   value: FactValue;
 }
 
-export interface SayStep { t: 'say'; who: string; expr: string; text: string }
+export interface SayStep {
+  t: 'say';
+  who: string;
+  /** The look (or expression) the speaker shows from this line on. */
+  expr: string;
+  text: string;
+  /** An effect on the speaker for this line: shake, bounce, jump or flash. */
+  fx?: string;
+}
+
+/** Where a character stands on stage: x and y are the bottom centre in percent of the stage, size is height in percent. */
+export interface Placement { x?: number; y?: number; size?: number; flip?: boolean }
+/** Bring a character on stage during a conversation. */
+export interface ShowStep { t: 'show'; who: string; look: string; at: Placement; fx: string }
+/** Move, resize or turn a character on stage. */
+export interface MoveStep { t: 'move'; who: string; at: Placement }
+/** Take a character off stage. */
+export interface HideStep { t: 'hide'; who: string; fx: string }
 export interface ChoiceOption { text: string; effects: Effect[]; steps: Step[] }
 export interface ChoiceStep { t: 'choice'; options: ChoiceOption[] }
 export interface IfStep { t: 'if'; cond: Condition; then: Step[]; else: Step[] }
@@ -31,7 +48,8 @@ export interface JumpStep { t: 'jump'; part: string }
 export interface NoteStep { t: 'note'; text: string }
 
 /** One step of a conversation. */
-export type Step = SayStep | ChoiceStep | IfStep | ChangeStep | DoorStep | EndStep | PartStep | JumpStep | NoteStep;
+export type Step = SayStep | ChoiceStep | IfStep | ChangeStep | DoorStep | EndStep | PartStep | JumpStep | NoteStep | ShowStep | MoveStep | HideStep;
+export type StageStep = ShowStep | MoveStep | HideStep;
 
 export interface ScriptError {
   /** 1-based line number in the written script. */
@@ -98,6 +116,8 @@ export interface StoryElement {
   size: number;
   /** Starting expression or look for characters. */
   expr?: string;
+  /** How this element's conversation opens: other characters step aside (default) or the room stays. */
+  staging?: 'aside' | 'room';
   /** The written conversation opened by clicking this element. */
   script: string;
 }

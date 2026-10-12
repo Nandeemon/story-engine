@@ -46,3 +46,25 @@ export function getStep(root: Step[], path: StepPath): Step | null {
   const { list, index } = splitPath(path);
   return getList(root, list)?.[index] ?? null;
 }
+
+/**
+ * The steps passed on the way to a step, in order, following its branch. Steps
+ * inside answers or conditions that lie before it on other branches are not
+ * included (only the choice or condition itself), since the way through them
+ * depends on the player.
+ */
+export function stepsBefore(root: Step[], path: StepPath): Step[] {
+  const parts = path.split('.');
+  const out: Step[] = [];
+  let list: Step[] = root;
+  for (let i = 0; i < parts.length; i += 2) {
+    const idx = Number(parts[i]);
+    out.push(...list.slice(0, idx));
+    if (i + 1 >= parts.length) break;
+    const step = list[idx], branch = parts[i + 1];
+    if (step?.t === 'choice') list = step.options[Number(branch.slice(1))]?.steps ?? [];
+    else if (step?.t === 'if') list = branch === 't' ? step.then : step.else;
+    else break;
+  }
+  return out;
+}

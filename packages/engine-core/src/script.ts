@@ -1,4 +1,5 @@
-import type { CompareOp, Condition, Effect, FactValue, ParseResult, ScriptError, Step } from './types';
+import type { CompareOp, Condition, Effect, FactValue, ParseResult, Placement, ScriptError, Step } from './types';
+import { isLineEffect, parsePlace, placeText } from './staging';
 
 /**
  * Writing mode: turns a conversation written like a script into steps, and back.
@@ -125,12 +126,31 @@ export function parseScript(src: string): ParseResult {
       } else if (/^end$/i.test(l.text)) {
         pos++;
         steps.push({ t: 'end' });
+      } else if ((m = l.text.match(/^show\s+(.+?)(?:\s+as\s+(.+?))?(?:\s+at\s+(.+?))?(?:\s+size\s+(\d+(?:\.\d+)?))?(\s+flipped)?(?:\s+with\s+(.+?))?$/i))) {
+        pos++;
+        const at = placeOf(m[3], l.n, errors);
+        if (m[4]) at.size = Number(m[4]);
+        if (m[5]) at.flip = true;
+        steps.push({ t: 'show', who: m[1].trim(), look: (m[2] ?? '').trim(), at, fx: (m[6] ?? '').trim().toLowerCase() });
+      } else if ((m = l.text.match(/^move\s+(.+?)(?:\s+to\s+(.+?))?(?:\s+size\s+(\d+(?:\.\d+)?))?(\s+(?:flipped|unflipped))?$/i)) && !m[1].includes(',') && ((m[2] && parsePlace(m[2])) || (!m[2] && (m[3] || m[4])))) {
+        pos++;
+        const at = placeOf(m[2], l.n, errors);
+        if (m[3]) at.size = Number(m[3]);
+        if (m[4]) at.flip = /^\s*flipped/i.test(m[4]);
+        steps.push({ t: 'move', who: m[1].trim(), at });
+      } else if ((m = l.text.match(/^hide\s+(.+?)(?:\s+with\s+(.+?))?$/i)) && m[1].split(/\s+/).length <= 3) {
+        pos++;
+        steps.push({ t: 'hide', who: m[1].trim(), fx: (m[2] ?? '').trim().toLowerCase() });
       } else if ((m = l.text.match(/^([^:"()]{1,40}?)\s*(?:\(([^)]+)\))?\s*:\s*(.+)$/))) {
         pos++;
         const who = m[1].trim();
-        steps.push(/^narration$/i.test(who)
-          ? { t: 'say', who: '', expr: '', text: m[3] }
-          : { t: 'say', who, expr: (m[2] ?? '').trim(), text: m[3] });
+        // "(sad, shake)": a look and a line effect, in any order.
+        const parts = (m[2] ?? '').split(',').map(x => x.trim()).filter(Boolean);
+        const fx = parts.find(isLineEffect);
+        const expr = parts.filter(x => x !== fx).join(', ');
+        const say: Step = /^narration$/i.test(who) ? { t: 'say', who: '', expr: '', text: m[3] } : { t: 'say', who, expr, text: m[3] };
+        if (fx && say.who) say.fx = fx.toLowerCase();
+        steps.push(say);
       } else {
         pos++;
         steps.push({ t: 'say', who: '', expr: '', text: l.text });
@@ -147,6 +167,14 @@ export function parseScript(src: string): ParseResult {
     }
   }
   return { steps, errors };
+}
+
+function placeOf(text: string | undefined, n: number, errors: ScriptError[]): Placement {
+  if (!text) return {};
+  const at = parsePlace(text);
+  if (at) return at;
+  errors.push({ n, msg: `Could not read the place "${text}". Use far left, left, center, right, far right, or a number like 40%.` });
+  return {};
 }
 
 const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -201,7 +229,8 @@ export function writeScript(steps: Step[]): string {
         case 'say': {
           const text = oneLine(s.text) || '...';
           const who = cleanName(s.who);
-          if (who) out.push(`${pad}${who}${s.expr ? ` (${cleanName(s.expr)})` : ''}: ${text}`);
+          const paren = [cleanName(s.expr).replace(/,/g, ' '), s.fx ?? ''].filter(Boolean).join(', ');
+          if (who) out.push(`${pad}${who}${paren ? ` (${paren})` : ''}: ${text}`);
           else out.push(pad + (plainNarration(text) ? text : `Narration: ${text}`));
           break;
         }
@@ -224,6 +253,19 @@ export function writeScript(steps: Step[]): string {
         case 'end': out.push(`${pad}End`); break;
         case 'part': out.push(`${pad}Part: ${oneLine(s.name)}`); break;
         case 'note': out.push(`${pad}# ${oneLine(s.text)}`); break;
+        case 'show': {
+          const where = placeText(s.at);
+          out.push(`${pad}Show ${cleanName(s.who)}${s.look ? ` as ${oneLine(s.look)}` : ''}${where ? ` at ${where}` : ''}${s.at.size !== undefined ? ` size ${s.at.size}` : ''}${s.at.flip ? ' flipped' : ''}${s.fx ? ` with ${s.fx}` : ''}`);
+          break;
+        }
+        case 'move': {
+          const where = placeText(s.at);
+          const flip = s.at.flip === undefined ? '' : s.at.flip ? ' flipped' : ' unflipped';
+          const line = `${pad}Move ${cleanName(s.who)}${where ? ` to ${where}` : ''}${s.at.size !== undefined ? ` size ${s.at.size}` : ''}${flip}`;
+          if (where || s.at.size !== undefined || flip) out.push(line);
+          break;
+        }
+        case 'hide': out.push(`${pad}Hide ${cleanName(s.who)}${s.fx ? ` with ${s.fx}` : ''}`); break;
       }
     }
   };

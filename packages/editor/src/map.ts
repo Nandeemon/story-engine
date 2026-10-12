@@ -6,10 +6,11 @@
  * where the paths continue together. Edits made here rewrite the script, so the
  * script and the map always show the same conversation.
  */
-import { CONDITION_WORDS, conditionText, effectText, findRoomByName, getList, getStep, parseScript, splitPath, stepPathOf, summarize, toValue, valueText, walkSteps, writeScript } from '@story-engine/engine-core';
+import { CONDITION_WORDS, ENTER_EFFECTS, EXIT_EFFECTS, LINE_EFFECTS, SPOTS, placeText, snapToSpot, stepsBefore, conditionText, effectText, findRoomByName, getList, getStep, parseScript, splitPath, stepPathOf, summarize, toValue, valueText, walkSteps, writeScript } from '@story-engine/engine-core';
 import { characterOf, findLook, hasLook } from '@story-engine/engine-core';
-import type { Character, ChoiceStep, CompareOp, Effect, Project, Room, Step, StoryElement } from '@story-engine/engine-core';
-import { EXPRESSIONS, esc, sayHTML, stageHTML } from '@story-engine/runtime';
+import type { Character, ChoiceStep, CompareOp, Effect, Placement, Project, Room, Step, StoryElement } from '@story-engine/engine-core';
+import { EXPRESSIONS, applyToScene, esc, nextMoment, sayHTML, sceneHTML, startScene } from '@story-engine/runtime';
+import type { Scene } from '@story-engine/runtime';
 
 export interface MapCtx {
   project: Project;
@@ -39,6 +40,33 @@ export function missingLook(project: Project, room: Room, who: string, expr: str
   return '';
 }
 
+/** A stage step in plain words, for the map. */
+export function stageText(s: Step): string {
+  const place = (at: Placement) => [at.x !== undefined ? `at ${placeText(at)}` : '', at.size !== undefined ? `size ${at.size}` : '', at.flip === true ? 'turned' : at.flip === false ? 'facing forward' : ''].filter(Boolean).join(', ');
+  if (s.t === 'show') return `${s.who} comes in${s.look ? ` as ${s.look}` : ''}${place(s.at) ? `, ${place(s.at)}` : ''}${s.fx ? ` (${s.fx})` : ''}`;
+  if (s.t === 'move') return `${s.who} moves${place(s.at) ? ` ${place(s.at).replace(/^at /, 'to ')}` : ''}`;
+  if (s.t === 'hide') return `${s.who} leaves${s.fx ? ` (${s.fx})` : ''}`;
+  return '';
+}
+
+/** The scene as it stands at a step: everything on the way there applied, in order. */
+export function sceneAt(ctx: MapCtx, steps: Step[], path: string): Scene {
+  const scene = startScene(ctx.room, ctx.el, steps);
+  for (const st of stepsBefore(steps, path)) { applyToScene(scene, st, ctx.project); nextMoment(scene); }
+  const here = getStep(steps, path);
+  if (here) applyToScene(scene, here, ctx.project);
+  for (const c of scene.chars) c.fx = '';
+  return scene;
+}
+
+/** Everyone who can take part in a conversation here: the author's characters and figures in the room. */
+function castNames(ctx: MapCtx): string[] {
+  const names = new Map<string, string>();
+  for (const c of ctx.project.characters) names.set(lower(c.name), c.name);
+  for (const e of ctx.room.els) if (e.kind === 'char') names.set(lower(e.name), e.name);
+  return [...names.values()];
+}
+
 /* ---------- Drawing ---------- */
 
 interface Model { edges: [string, string][]; jumps: [string, string][]; parts: Map<string, string> }
@@ -46,7 +74,7 @@ let model: Model = { edges: [], jumps: [], parts: new Map() };
 let nextId = 0;
 
 const lower = (s: string) => s.trim().toLowerCase();
-const LINE_KINDS = new Set(['say', 'change', 'note']);
+const LINE_KINDS = new Set(['say', 'change', 'note', 'show', 'move', 'hide']);
 const TERMINAL = new Set(['door', 'end', 'jump']);
 
 export function startLabel(room: Room, el: StoryElement): string {
@@ -91,6 +119,7 @@ export function mapHTML(ctx: MapCtx): string {
     }
     if (s.t === 'change') return `<button ${attrs}><span class="tag">Change</span><span class="txt">${esc(s.effects.map(effectText).join(', '))}</span></button>`;
     if (s.t === 'note') return `<button ${attrs}><span class="tag">Note</span><span class="txt">${esc(s.text)}</span></button>`;
+    if (s.t === 'show' || s.t === 'move' || s.t === 'hide') return `<button ${attrs}><span class="tag">Stage</span><span class="txt">${esc(stageText(s))}</span></button>`;
     return '';
   };
 
@@ -305,10 +334,29 @@ function effectRows(effects: Effect[]): string {
   return `<div class="field"><span>Changes to story facts</span>${rows || '<p class="hint">None yet.</p>'}<button class="btn small quiet" data-map-act="eff-add">+ Add a change</button></div>`;
 }
 
-function preview(ctx: MapCtx, who: string, expr: string, text: string): string {
-  const speaker = speakerOf(ctx.project, ctx.room, who).el;
-  const game = sayHTML(who, text === '...' ? '' : text, false);
-  return `<div class="mpreview">${stageHTML(ctx.room, { mode: 'look', look: ctx.project.look, expr: speaker && expr ? { [speaker.id]: expr } : {}, game, characters: ctx.project.characters })}</div>`;
+function preview(ctx: MapCtx, scene: Scene, who: string, text: string, withLine = true): string {
+  const game = withLine ? sayHTML(who, text === '...' ? '' : text, false) : '';
+  return `<div class="mpreview">${sceneHTML(ctx.project, ctx.room, scene, ctx.project.look, game, { draggable: true, focus: who })}</div>`;
+}
+
+const spotButtons = (act: string, x: number | undefined) => `<div class="spots" role="group" aria-label="Place">${SPOTS.map(([name, sx]) =>
+  `<button class="btn small${x === sx ? ' ink' : ' quiet'}" data-map-act="${act}" data-k="${sx}" title="${name}" aria-pressed="${x === sx}">${name}</button>`).join('')}</div>`;
+
+/** Controls for the speaker's place on stage at this line, and who else is on stage. */
+function stageField(ctx: MapCtx, scene: Scene, who: string, fx: string): string {
+  const me = scene.chars.find(c => c.visible && lower(c.name) === lower(who));
+  const others = scene.chars.filter(c => c.visible && c !== me);
+  const out = castNames(ctx).filter(n => !scene.chars.some(c => c.visible && lower(c.name) === lower(n)));
+  const mine = me ? `
+    <p class="hint">Drag ${esc(me.name)} in the picture to place ${esc(me.name)} for this line. The place holds until it changes.</p>
+    ${spotButtons('stage-spot', me.x)}
+    <label class="field"><span>Size on stage</span><input type="range" id="m-ssize" data-map-in="stage-size" min="20" max="130" value="${me.size}"></label>
+    <div class="row"><label class="check"><input type="checkbox" id="m-sflip" data-map-in="stage-flip"${me.flip ? ' checked' : ''}><span>Turn around</span></label></div>
+    <label class="field"><span>Effect on this line</span><select id="m-sfx" data-map-in="say-fx"><option value="">None</option>${LINE_EFFECTS.map(f => `<option${f === fx ? ' selected' : ''}>${f}</option>`).join('')}</select></label>` : '';
+  const people = others.length ? `<div class="label">Also on stage</div><div class="cast">${others.map(c =>
+    `<span class="chip">${esc(c.name)} <button class="linkbtn" data-map-act="stage-hide" data-k="${esc(c.name)}">take out</button></span>`).join('')}</div>` : '';
+  const bring = out.length ? `<label class="field"><span>Bring someone in for this line</span><select id="m-sshow" data-map-in="stage-show"><option value="">Choose…</option>${out.map(n => `<option>${esc(n)}</option>`).join('')}</select></label>` : '';
+  return mine || people || bring ? `<div class="stagebox"><div class="label">On stage</div>${mine}${people}${bring}</div>` : '';
 }
 
 /** The look picker for a line: the speaker's own looks, or the starter figure's expressions. */
@@ -341,6 +389,9 @@ const kinds = (top: boolean, hasParts: boolean) => [
   ['change', 'Change something', 'Change a story fact without saying anything'],
   ['door', 'Go to another room', 'The player moves to another room'],
   ...(hasParts ? [['jump', 'Go to a part', 'Continue from a named part of this conversation']] : []),
+  ['show', 'Bring someone in', 'A character comes on stage, with an effect'],
+  ['move', 'Move someone', 'Change where someone stands, their size, or turn them'],
+  ['hide', 'Take someone out', 'A character leaves the stage'],
   ['end', 'End', 'The conversation closes here'],
   ...(top ? [['part', 'Part', 'A named point that "Go to a part" can jump to']] : [])
 ];
@@ -354,6 +405,10 @@ export function mapSide(ctx: MapCtx): string {
   if (!sel || errors.length) {
     return `<h2>What ${ctx.el.kind === 'char' ? `${esc(ctx.el.name)} says` : 'happens'}</h2>
       <p class="hint">Click any box to change it. Click + to add a step there.</p>
+      <label class="field"><span>When this conversation starts</span><select id="m-staging" data-in="conv-staging">
+        <option value="aside"${(ctx.el.staging ?? 'aside') === 'aside' ? ' selected' : ''}>Others step aside</option>
+        <option value="room"${ctx.el.staging === 'room' ? ' selected' : ''}>The room stays as it is</option></select></label>
+      <p class="hint">${(ctx.el.staging ?? 'aside') === 'aside' ? 'Characters who take no part leave the stage until the conversation ends. Objects stay.' : 'Everyone stays where they stand in the room.'}</p>
       ${s.facts.length ? `<div class="label">Story facts used here</div><div class="row">${s.facts.map(f => `<span class="chip">${esc(f)}</span>`).join('')}</div>` : ''}`;
   }
 
@@ -384,12 +439,33 @@ export function mapSide(ctx: MapCtx): string {
     case 'say': {
       const speakers = new Set([...ctx.room.els.filter(x => x.kind === 'char').map(x => x.name), ...ctx.project.characters.map(c => c.name)]);
       walkSteps(steps, x => { if (x.t === 'say' && x.who) speakers.add(x.who); });
-      return `${header('Line')}${preview(ctx, step.who, step.expr, step.text)}
+      const scene = sceneAt(ctx, steps, path);
+      return `${header('Line')}${preview(ctx, scene, step.who, step.text)}
+        ${lookField(ctx, step.who, step.expr)}
+        ${stageField(ctx, scene, step.who, step.fx ?? '')}
         <label class="field"><span>Who speaks</span><input type="text" list="m-who" id="m-who-in" data-map-in="say-who" value="${esc(step.who)}" placeholder="Leave empty for narration"></label>
         <datalist id="m-who">${[...speakers].map(n => `<option value="${esc(n)}">`).join('')}</datalist>
-        ${lookField(ctx, step.who, step.expr)}
         <label class="field"><span>${step.who ? 'What they say' : 'Narration'}</span><textarea id="m-text" data-map-in="say-text" rows="3" placeholder="Type the line here">${step.text === '...' ? '' : esc(step.text)}</textarea></label>
         <div class="row"><button class="btn small" data-map-act="add-after">+ Line after this</button>${del()}</div>`;
+    }
+    case 'show':
+    case 'move':
+    case 'hide': {
+      const scene = sceneAt(ctx, steps, path);
+      const title = step.t === 'show' ? 'Bring someone in' : step.t === 'move' ? 'Move someone' : 'Take someone out';
+      const names = castNames(ctx);
+      if (!names.some(n => lower(n) === lower(step.who))) names.push(step.who);
+      const who = `<label class="field"><span>Who</span><select id="m-stwho" data-map-in="stg-who">${names.map(n => `<option${lower(n) === lower(step.who) ? ' selected' : ''}>${esc(n)}</option>`).join('')}</select></label>`;
+      const effects: readonly string[] = step.t === 'hide' ? EXIT_EFFECTS : ENTER_EFFECTS;
+      const fx = step.t === 'move' ? '' : `<label class="field"><span>${step.t === 'show' ? 'How they come in' : 'How they leave'}</span><select id="m-stfx" data-map-in="stg-fx">${effects.map(f => `<option${f === (step.fx || 'fade') ? ' selected' : ''}>${f}</option>`).join('')}</select></label>`;
+      const character = speakerOf(ctx.project, ctx.room, step.who).character;
+      const look = step.t === 'show' && character ? `<label class="field"><span>Look</span><select id="m-stlook" data-map-in="stg-look"><option value="">As before</option>${['default', ...character.looks.filter(l => !l.once).map(l => l.name)].map(n => `<option${lower(n) === lower(step.look) ? ' selected' : ''}>${esc(n)}</option>`).join('')}</select></label>` : '';
+      const at = step.t === 'hide' ? '' : `
+        ${spotButtons('stg-spot', step.at.x)}
+        <label class="field"><span>Size on stage</span><input type="range" id="m-stsize" data-map-in="stg-size" min="20" max="130" value="${step.at.size ?? scene.chars.find(c => lower(c.name) === lower(step.who))?.size ?? 76}"></label>
+        <div class="row"><label class="check"><input type="checkbox" id="m-stflip" data-map-in="stg-flip"${step.at.flip ? ' checked' : ''}><span>Turn around</span></label></div>
+        <p class="hint">Or drag ${esc(step.who)} in the picture.</p>`;
+      return `${header(title)}${preview(ctx, scene, '', '', false)}${who}${look}${at}${fx}${del()}`;
     }
     case 'choice':
       return `${header('Choice')}
@@ -454,6 +530,9 @@ function newStep(kind: string, ctx: MapCtx, parts: string[]): Step {
       while (parts.some(p => lower(p) === `part ${n}`)) n++;
       return { t: 'part', name: `Part ${n}` };
     }
+    case 'show': return { t: 'show', who: castNames(ctx).find(n => lower(n) !== lower(ctx.el.name)) ?? ctx.el.name, look: '', at: { x: 70 }, fx: 'fade' };
+    case 'move': return { t: 'move', who: ctx.el.kind === 'char' ? ctx.el.name : castNames(ctx)[0] ?? 'Someone', at: { x: 50 } };
+    case 'hide': return { t: 'hide', who: ctx.el.kind === 'char' ? ctx.el.name : castNames(ctx)[0] ?? 'Someone', fx: 'fade' };
     default: return { t: 'say', who: ctx.el.kind === 'char' ? ctx.el.name : '', expr: '', text: '...' };
   }
 }
@@ -518,6 +597,31 @@ export function mapAction(ctx: MapCtx, act: string, k: string): MapResult | unde
       [step.options[i], step.options[j]] = [step.options[j], step.options[i]];
       return commit(`${path}#o${j}`);
     }
+    case 'stage-spot':
+    case 'stage-place': {
+      const step = getStep(steps, path);
+      if (step?.t !== 'say' || !step.who) return undefined;
+      const [who, x, y] = act === 'stage-place' ? k.split('|') : [step.who, k, ''];
+      const at: Placement = { x: snapToSpot(Number(x)) };
+      if (y) at.y = Math.round(Number(y) * 10) / 10;
+      return commit(placeBefore(steps, path, who, at));
+    }
+    case 'stage-hide': {
+      const { list, index } = splitPath(path);
+      const target = getList(steps, list);
+      if (!target) return undefined;
+      target.splice(index, 0, { t: 'hide', who: k, fx: 'fade' });
+      return commit(stepPathOf(list, index + 1));
+    }
+    case 'stg-spot':
+    case 'stg-place': {
+      const step = getStep(steps, path);
+      if (step?.t !== 'show' && step?.t !== 'move') return undefined;
+      const [, x, y] = act === 'stg-place' ? k.split('|') : ['', k, ''];
+      step.at.x = snapToSpot(Number(x));
+      if (y) step.at.y = Math.round(Number(y) * 10) / 10;
+      return commit(ctx.sel);
+    }
     case 'eff-add':
     case 'eff-remove': {
       const effects = effectsAt(steps, path, opt);
@@ -537,6 +641,24 @@ function effectsAt(steps: Step[], path: string, opt: string | undefined): Effect
   return null;
 }
 
+/**
+ * Sets where someone stands from a line on: changes the stage step right before
+ * the line when it is about the same person, or adds a "Move" there. Returns the
+ * line's path, which moves down by one when a step was added above it.
+ */
+function placeBefore(steps: Step[], path: string, who: string, at: Placement): string {
+  const { list, index } = splitPath(path);
+  const target = getList(steps, list);
+  if (!target) return path;
+  const prev = target[index - 1];
+  if (prev && (prev.t === 'move' || prev.t === 'show') && lower(prev.who) === lower(who)) {
+    Object.assign(prev.at, at);
+    return path;
+  }
+  target.splice(index, 0, { t: 'move', who, at });
+  return stepPathOf(list, index + 1);
+}
+
 /** Applies a typed or picked value from the panel. */
 export function mapInput(ctx: MapCtx, field: string, k: string, value: string): MapResult | undefined {
   const { steps, errors } = parseScript(ctx.el.script);
@@ -553,7 +675,27 @@ export function mapInput(ctx: MapCtx, field: string, k: string, value: string): 
     if (field === 'eff-fact') e.fact = factName(value) || 'fact';
     if (field === 'eff-op') e.op = value as Effect['op'];
     if (field === 'eff-val') e.value = amount(value);
+  } else if (step.t === 'say' && field.startsWith('stage-')) {
+    if (field === 'stage-show') {
+      if (!value) return undefined;
+      const { list, index } = splitPath(path);
+      getList(steps, list)?.splice(index, 0, { t: 'show', who: value, look: '', at: {}, fx: 'fade' });
+      ctx.el.script = writeScript(steps);
+      return { sel: stepPathOf(list, index + 1), panel: true };
+    }
+    const who = step.who;
+    const at: Placement = field === 'stage-size' ? { size: Number(value) } : { flip: value === 'true' };
+    const sel = placeBefore(steps, path, who, at);
+    ctx.el.script = writeScript(steps);
+    return { sel, panel: true };
+  } else if ((step.t === 'show' || step.t === 'move' || step.t === 'hide') && field.startsWith('stg-')) {
+    if (field === 'stg-who') step.who = value;
+    if (field === 'stg-fx' && step.t !== 'move') step.fx = value === 'fade' ? 'fade' : value;
+    if (field === 'stg-look' && step.t === 'show') step.look = value;
+    if (field === 'stg-size' && step.t !== 'hide') step.at.size = Number(value);
+    if (field === 'stg-flip' && step.t !== 'hide') step.at.flip = value === 'true' ? true : step.t === 'move' ? false : undefined;
   } else if (step.t === 'say') {
+    if (field === 'say-fx') step.fx = value || undefined;
     if (field === 'say-who') { panel = !step.who !== !value.trim(); step.who = value; if (!value.trim()) step.expr = ''; }
     if (field === 'say-expr') step.expr = value;
     if (field === 'say-text') step.text = text.trim() ? text : '...';

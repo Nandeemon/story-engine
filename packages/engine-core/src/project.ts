@@ -1,4 +1,5 @@
 import type { Character, CharacterLook, Look, Project, Room, StoryElement } from './types';
+import { isLineEffect } from './staging';
 
 export const DEFAULT_LOOK: Look = { theme: 'velvet', font: 'Lora', radius: 14, size: 2 };
 
@@ -44,6 +45,7 @@ export function normalizeProject(raw: unknown): Project | null {
       y: num(e.y, 98),
       size: num(e.size, 50),
       expr: typeof e.expr === 'string' ? e.expr : undefined,
+      staging: e.staging === 'room' ? 'room' : undefined,
       script: str(e.script, '')
     }));
     return { id: str(x.id, newId()), name: str(x.name, 'Room'), bg, auto: x.auto === true, els };
@@ -90,9 +92,10 @@ export function normalizeProject(raw: unknown): Project | null {
 /** The name a line uses for a character's base picture. */
 export const DEFAULT_LOOK_NAME = 'default';
 
-/** Look names sit inside "Lin (happy): ..." in the script, so they cannot hold ( ) : , or quotes. */
+/** Look names sit inside "Lin (happy): ..." in the script, so they cannot hold ( ) : , or quotes, or be an effect word. */
 export function cleanLookName(name: string): string {
-  return name.replace(/[():,"]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 30) || 'look';
+  const n = name.replace(/[():,"]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 30) || 'look';
+  return isLineEffect(n) ? `${n} look` : n;
 }
 
 export function characterOf(project: Project, el: StoryElement): Character | undefined {

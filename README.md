@@ -24,6 +24,21 @@ The editor keeps your story in this browser and warns you if it stops being able
 
 Add a character with **Use your own picture**: that picture is the character's base. **Add looks** takes one or more pictures (expressions or poses), named after their files (`lin_happy.png` becomes `happy`). Click a look to line it up over the base picture, so the character stays still when the look changes. In a conversation, pick a look per line, or write `Lin (happy): Hi.` in the script; **Use a different picture here** gives one line a picture of its own. A character made from your pictures can be placed in any room and keeps its looks.
 
+## Staging a conversation
+
+When a conversation starts, characters who take no part step aside until it ends (or choose "The room stays as it is"). Click a line in the map: the picture at the top of the panel shows the scene at that line. Drag a character there, or use the place buttons, size, and turn around; the place holds until it changes. Pick an effect for the line (shake, bounce, jump, flash), bring someone in or take someone out. Someone who speaks but is not on stage comes in by themselves.
+
+In the script these are plain lines:
+
+```
+Show Lin as happy at left with fade
+Lin (sad, shake): I thought you forgot.
+Move Lin to center size 70 flipped
+Hide Lin with slide to right
+```
+
+Places are far left, left, center, right, far right, or a number such as `40%` (and `40% 90%` to set the height too).
+
 ## Layout
 
 | Package | What it is |

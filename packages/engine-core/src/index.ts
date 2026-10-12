@@ -4,6 +4,7 @@ export type { ScriptSummary } from './script';
 export { createRunner, applyEffects, testCondition, getFact } from './runner';
 export type { Runner, RunEvent, ChoiceEvent, EndEvent } from './runner';
 export { createProject, createRoom, newId, normalizeProject, findRoomByName, DEFAULT_LOOK, DEFAULT_LOOK_NAME, cleanLookName, characterOf, findLook, hasLook, uniqueLookName } from './project';
-export { getList, getStep, splitPath, stepPathOf } from './paths';
+export { getList, getStep, splitPath, stepPathOf, stepsBefore } from './paths';
+export { SPOTS, ENTER_EFFECTS, EXIT_EFFECTS, LINE_EFFECTS, isLineEffect, parsePlace, placeText, snapToSpot } from './staging';
 export type { StepPath, ListPath } from './paths';
 export { renameRoomInScript, renameSpeakerInScript, renameLookInScript } from './refs';

@@ -26,3 +26,33 @@
 .choices { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: .6em; padding: 4%; background: rgba(10, 8, 20, .35); }
 .choices button { min-width: min(60%, 22em); max-width: 100%; padding: .6em 1.2em; border: 2px solid var(--g-accent); border-radius: var(--g-radius); background: var(--g-box); color: var(--g-fg); font: inherit; cursor: pointer; }
 .choices button:hover { background: var(--g-accent); color: var(--g-on); }
+
+/* The scene during a conversation. Characters are updated in place, so these transitions run. */
+.el .art { position: relative; display: block; height: 100%; }
+.el.flip .art { transform: scaleX(-1); }
+.stage.play .el.staged { transition: left .45s ease, top .45s ease, height .45s ease, opacity .35s ease; }
+.el.gone { opacity: 0; pointer-events: none; }
+.el.fx-in-fade .art { animation: se-in-fade .4s ease both; }
+.el.fx-in-left .art { animation: se-in-left .5s ease-out both; }
+.el.fx-in-right .art { animation: se-in-right .5s ease-out both; }
+.el.fx-in-pop .art { animation: se-in-pop .4s ease-out both; }
+.el.fx-out-left .art { animation: se-out-left .45s ease-in both; }
+.el.fx-out-right .art { animation: se-out-right .45s ease-in both; }
+.el.fx-shake .art { animation: se-shake .5s ease both; }
+.el.fx-bounce .art { animation: se-bounce .6s ease both; }
+.el.fx-jump .art { animation: se-jump .45s ease-out both; }
+.el.fx-flash .art { animation: se-flash .5s ease both; }
+@keyframes se-in-fade { from { opacity: 0; } }
+@keyframes se-in-left { from { translate: -60cqw 0; } }
+@keyframes se-in-right { from { translate: 60cqw 0; } }
+@keyframes se-in-pop { 0% { scale: .6; opacity: 0; } 70% { scale: 1.06; opacity: 1; } 100% { scale: 1; } }
+@keyframes se-out-left { to { translate: -60cqw 0; } }
+@keyframes se-out-right { to { translate: 60cqw 0; } }
+@keyframes se-shake { 0%, 100% { translate: 0 0; } 20% { translate: -3% 0; } 40% { translate: 3% 0; } 60% { translate: -2% 0; } 80% { translate: 2% 0; } }
+@keyframes se-bounce { 0%, 100% { translate: 0 0; } 30% { translate: 0 -4%; } 50% { translate: 0 0; } 70% { translate: 0 -2%; } }
+@keyframes se-jump { 0%, 100% { translate: 0 0; } 40% { translate: 0 -10%; } }
+@keyframes se-flash { 0%, 100% { filter: none; } 30% { filter: brightness(2.2); } }
+@media (prefers-reduced-motion: reduce) {
+  .stage.play .el.staged { transition: opacity .2s; }
+  .el[class*="fx-"] .art { animation: none; }
+}

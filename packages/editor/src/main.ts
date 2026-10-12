@@ -559,7 +559,7 @@ $('#lookfile')!.addEventListener('change', async ev => {
   }
   save();
   record(before);
-  if (added.length === 1) { ui.lookEdit = added[0].id; render(); toast('Drag the new look until it lines up with the faded base picture.'); }
+  if (added.length === 1) { ui.lookEdit = added[0].id; render(); toast('Drag the new look until it lines up with the base picture underneath.'); }
   else { render(); if (added.length) toast(`Added ${added.length} looks to ${c.name}. Click one to line it up.`); }
 });
 
@@ -605,6 +605,40 @@ document.addEventListener('pointerup', () => {
   pointerDown = false;
   setTimeout(() => { if (pendingRefresh) refreshMap(); }, 0);
 }, true);
+
+/* Dragging someone in the line preview places them for that line. */
+let previewDrag: { node: HTMLElement; box: DOMRect; who: string; dx: number; dy: number; x: number; y: number; moved: boolean } | null = null;
+document.addEventListener('pointerdown', ev => {
+  const node = (ev.target as HTMLElement).closest<HTMLElement>('.mpreview .el.drag');
+  if (!node || ev.button !== 0) return;
+  const stage = node.closest<HTMLElement>('[data-stage]')!;
+  const box = stage.getBoundingClientRect();
+  const x = parseFloat(node.style.left), y = parseFloat(node.style.top);
+  previewDrag = { node, box, who: node.dataset.who ?? '', x, y, moved: false, dx: ev.clientX - (box.left + box.width * x / 100), dy: ev.clientY - (box.top + box.height * y / 100) };
+  try { node.setPointerCapture(ev.pointerId); } catch { /* not supported */ }
+  ev.preventDefault();
+});
+document.addEventListener('pointermove', ev => {
+  const d = previewDrag;
+  if (!d) return;
+  d.moved = true;
+  d.x = Math.max(2, Math.min(98, (ev.clientX - d.dx - d.box.left) / d.box.width * 100));
+  d.y = Math.max(20, Math.min(118, (ev.clientY - d.dy - d.box.top) / d.box.height * 100));
+  d.node.style.left = `${d.x}%`;
+  d.node.style.top = `${d.y}%`;
+});
+document.addEventListener('pointerup', () => {
+  const d = previewDrag;
+  previewDrag = null;
+  const ctx = mapCtx();
+  if (!d || !d.moved || !ctx) return;
+  const before = snapshot();
+  const step = mapSel ? getStep(parseScript(ctx.el.script).steps, mapSel) : null;
+  if (!step) return;
+  const act = step.t === 'say' ? 'stage-place' : 'stg-place';
+  applyMap(mapAction(ctx, act, `${d.who}|${d.x}|${Math.abs(d.y - 98) < 2 ? '' : d.y}`));
+  record(before);
+});
 
 /* Dragging the map's background pans it. */
 let pan: { x: number; y: number; left: number; top: number; moved: boolean } | null = null;
@@ -712,8 +746,10 @@ function commitMapField(t: HTMLInputElement): void {
   const ctx = mapCtx();
   if (!ctx) return;
   const before = fieldSnapshot ?? snapshot();
-  const res = mapInput(ctx, t.dataset.mapIn!, t.dataset.k ?? '', t.value);
+  const value = t.type === 'checkbox' ? String(t.checked) : t.value;
+  const res = mapInput(ctx, t.dataset.mapIn!, t.dataset.k ?? '', value);
   if (!res) return;
+  mapSel = res.sel ?? mapSel;
   save();
   // The change is recorded now, and the field starts a fresh visit if it keeps focus.
   record(before);
@@ -746,6 +782,7 @@ document.addEventListener('input', ev => {
     case 'look-scale': { const l = editedLook(); if (l && e) { l.scale = Number(t.value); if (node) node.innerHTML = elementArt(e, undefined, project.characters, l.id); } break; }
     case 'room-name': { room().name = t.value; const c = $('#crumbs [aria-current]'); if (c) c.textContent = t.value; break; }
     case 'room-auto': room().auto = t.checked; break;
+    case 'conv-staging': if (e) { e.staging = t.value === 'room' ? 'room' : undefined; refreshMap(); } break;
     case 'look-font': project.look.font = t.value; break;
     case 'look-radius': project.look.radius = Number(t.value); break;
     case 'look-size': project.look.size = Number(t.value); break;

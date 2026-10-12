@@ -240,3 +240,13 @@ button.mnode:hover, .mrow:hover { box-shadow: 0 0 0 3px color-mix(in srgb, var(-
 .hint code { font-family: var(--script); font-size: 12.5px; }
 
 .compare-difference .el .look.ghost { opacity: 1; mix-blend-mode: difference; }
+
+/* Staging in the line preview */
+.mpreview .el.drag { cursor: grab; touch-action: none; }
+.mpreview .el.focus { filter: drop-shadow(0 0 0 transparent); outline: 2px dashed var(--tape); outline-offset: 2px; }
+.stagebox { display: flex; flex-direction: column; gap: 10px; padding: 12px; border: 1.5px solid var(--line); border-radius: 10px; }
+.spots { display: flex; flex-wrap: wrap; gap: 4px; }
+.spots .btn { padding: 4px 9px; font-size: 12.5px; }
+.cast { display: flex; flex-wrap: wrap; gap: 6px; }
+.cast .chip { display: inline-flex; align-items: center; gap: 6px; font-family: var(--body); }
+.linkbtn { padding: 0; border: 0; background: none; color: var(--violet); font: inherit; font-size: 12px; text-decoration: underline; cursor: pointer; }
