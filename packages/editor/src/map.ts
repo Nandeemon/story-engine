@@ -313,6 +313,8 @@ export interface MapResult {
 }
 
 const factName = (v: string) => v.trim().replace(/[^\w.]/g, '_');
+/** A typed amount: "2,5" means 2.5, and commas never split a value into two changes. */
+const amount = (v: string) => toValue((/^\s*-?\d+,\d+\s*$/.test(v) ? v.replace(',', '.') : v.replace(/,/g, ' ')).trim() || '0');
 
 function newStep(kind: string, ctx: MapCtx, parts: string[]): Step {
   const other = ctx.project.rooms.find(r => r.id !== ctx.room.id) ?? ctx.room;
@@ -419,7 +421,7 @@ export function mapInput(ctx: MapCtx, field: string, k: string, value: string): 
     if (!e) return undefined;
     if (field === 'eff-fact') e.fact = factName(value) || 'fact';
     if (field === 'eff-op') e.op = value as Effect['op'];
-    if (field === 'eff-val') e.value = toValue(value || '0');
+    if (field === 'eff-val') e.value = amount(value);
   } else if (step.t === 'say') {
     if (field === 'say-who') { panel = !step.who !== !value.trim(); step.who = value; if (!value.trim()) step.expr = ''; }
     if (field === 'say-expr') step.expr = value;
@@ -430,7 +432,7 @@ export function mapInput(ctx: MapCtx, field: string, k: string, value: string): 
   } else if (step.t === 'if') {
     if (field === 'cond-fact') step.cond.fact = factName(value) || 'fact';
     if (field === 'cond-op') { panel = (step.cond.op === 'truthy') !== (value === 'truthy'); step.cond.op = value as CompareOp; if (value === 'truthy') step.cond.value = true; else if (panel) step.cond.value = 5; }
-    if (field === 'cond-val') step.cond.value = toValue(value || '0');
+    if (field === 'cond-val') step.cond.value = amount(value);
   } else if (step.t === 'door' && field === 'door-room') {
     step.room = value;
   } else if (step.t === 'jump' && field === 'jump-part') {

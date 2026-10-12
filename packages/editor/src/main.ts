@@ -97,6 +97,7 @@ function afterMap(): void {
 
 /** Redraws the map and its panel in place, keeping scroll position and the field being typed in. */
 function refreshMap(): void {
+  pendingRefresh = false;
   const ctx = mapCtx();
   const holder = $('#mapholder'), side = $('#mside');
   if (!ctx || !holder || !side) return render();
@@ -232,6 +233,7 @@ const actions: Record<string, (k: string) => void> = {
     const e = selected(), t = $<HTMLTextAreaElement>('#script');
     if (!e || !t) return;
     const text = inserts(project, room(), e)[Number(k)].text;
+    remember(e.script);
     const before = t.value.slice(0, t.selectionStart), after = t.value.slice(t.selectionEnd);
     const lead = before && !before.endsWith('\n') ? '\n' : '';
     t.value = before + lead + text + after;
@@ -294,10 +296,31 @@ $('#file')!.addEventListener('change', ev => {
 
 /* ---------- Events ---------- */
 
+/* Pointer state, so a map field committed on blur does not redraw the map under a click in progress. */
+let pointerDown = false;
+let pendingRefresh = false;
+document.addEventListener('pointerdown', () => { pointerDown = true; }, true);
+document.addEventListener('pointerup', () => {
+  pointerDown = false;
+  setTimeout(() => { if (pendingRefresh) refreshMap(); }, 0);
+}, true);
+
 document.addEventListener('click', ev => {
   const target = ev.target as HTMLElement;
   const b = target.closest<HTMLElement>('[data-act]');
-  if (b) { actions[b.dataset.act!]?.(b.dataset.k ?? ''); return; }
+  if (b) {
+    // Destructive buttons ask once more in place: the first click arms them.
+    if (b.dataset.confirm && !b.dataset.armed) {
+      const label = b.textContent ?? '';
+      b.dataset.armed = '1';
+      b.classList.add('armed');
+      b.textContent = b.dataset.confirm;
+      setTimeout(() => { if (b.isConnected) { delete b.dataset.armed; b.classList.remove('armed'); b.textContent = label; } }, 4000);
+      return;
+    }
+    actions[b.dataset.act!]?.(b.dataset.k ?? '');
+    return;
+  }
   const m = target.closest<HTMLElement>('[data-map-act]');
   const ctx = mapCtx();
   if (m && ctx) {
@@ -309,22 +332,34 @@ document.addEventListener('click', ev => {
   if (ctx && mapSel && target.closest('.mcanvas') && !target.closest('.mnode, .madd')) { mapSel = null; refreshMap(); }
 });
 
-/* Typing in the map panel: one Undo step per field visit. */
+/* One Undo step per visit to a field, in the map panel and in the script. */
 let fieldSnapshot: string | null = null;
+const tracked = (el: HTMLElement) => !!el.dataset?.mapIn || el.dataset?.in === 'script';
 document.addEventListener('focusin', ev => {
-  if ((ev.target as HTMLElement).dataset?.mapIn) fieldSnapshot = selected()?.script ?? null;
+  if (tracked(ev.target as HTMLElement)) fieldSnapshot = selected()?.script ?? null;
 });
 document.addEventListener('focusout', ev => {
-  if ((ev.target as HTMLElement).dataset?.mapIn && fieldSnapshot !== null) { remember(fieldSnapshot); fieldSnapshot = null; }
+  if (tracked(ev.target as HTMLElement) && fieldSnapshot !== null) { remember(fieldSnapshot); fieldSnapshot = null; }
 });
+
+/**
+ * Map panel fields write to the conversation when the field is left (or Enter is
+ * pressed), not on every key, so half-typed text never changes what a step is.
+ * Picks from a list apply at once.
+ */
+function commitMapField(t: HTMLInputElement): void {
+  const ctx = mapCtx();
+  if (!ctx) return;
+  const res = mapInput(ctx, t.dataset.mapIn!, t.dataset.k ?? '', t.value);
+  if (!res) return;
+  save();
+  if (pointerDown) pendingRefresh = true; else refreshMap();
+}
 
 document.addEventListener('input', ev => {
   const t = ev.target as HTMLInputElement;
   if (t.dataset.mapIn) {
-    const ctx = mapCtx();
-    if (!ctx || (ev as InputEvent).isComposing) return;
-    const res = mapInput(ctx, t.dataset.mapIn, t.dataset.k ?? '', t.value);
-    if (res) { save(); refreshMap(); }
+    if (t.tagName === 'SELECT') commitMapField(t);
     return;
   }
   const k = t.dataset.in;
@@ -347,6 +382,8 @@ document.addEventListener('input', ev => {
 });
 
 document.addEventListener('change', ev => {
+  const mt = ev.target as HTMLInputElement;
+  if (mt.dataset.mapIn && mt.tagName !== 'SELECT') commitMapField(mt);
   if ((ev.target as HTMLElement).dataset.in === 'el-name') render();
 });
 

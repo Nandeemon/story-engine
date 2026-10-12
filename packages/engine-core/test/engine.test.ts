@@ -90,6 +90,15 @@ describe('createRunner', () => {
     expect(play('Only if met\n  A: Hello again.\nOtherwise\n  A: Who are you?', 0, facts)).toEqual(['A: Hello again.', 'end']);
   });
 
+  it('treats a fact that was never set as "no"', () => {
+    const src = 'Only if met is no\n  A: First time.\nOtherwise\n  A: Again.\nChange met = yes';
+    const facts: Facts = {};
+    expect(play(src, 0, facts)).toEqual(['A: First time.', 'end']);
+    expect(play(src, 0, facts)).toEqual(['A: Again.', 'end']);
+    expect(play('Only if met is 1\n  A: yes', 0, facts)).toEqual(['A: yes', 'end']);
+    expect(play('Only if met is not no\n  A: yes', 0, facts)).toEqual(['A: yes', 'end']);
+  });
+
   it('stops at End', () => {
     expect(play('A: one\nEnd\nA: never', 0)).toEqual(['A: one', 'end']);
   });

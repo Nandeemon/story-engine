@@ -30,6 +30,13 @@ export function applyEffects(facts: Facts, effects: Effect[]): void {
   }
 }
 
+/** Equality that treats yes/no sensibly: an unset fact (0) is "no", and yes equals 1. */
+function same(a: FactValue, b: FactValue): boolean {
+  if (typeof b === 'boolean') return Boolean(a) === b;
+  if (typeof a === 'boolean') return typeof b === 'number' ? Number(a) === b : String(a) === String(b);
+  return String(a) === String(b);
+}
+
 export function testCondition(facts: Facts, c: Condition): boolean {
   const a = getFact(facts, c.fact);
   const b = c.value;
@@ -38,8 +45,8 @@ export function testCondition(facts: Facts, c: Condition): boolean {
     case '<=': return a <= b;
     case '>': return a > b;
     case '<': return a < b;
-    case '!=': return String(a) !== String(b);
-    case '=': return String(a) === String(b);
+    case '!=': return !same(a, b);
+    case '=': return same(a, b);
     case 'truthy': return Boolean(a);
   }
 }

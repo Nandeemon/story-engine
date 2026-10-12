@@ -203,3 +203,5 @@ button.mnode:hover, .mrow:hover { box-shadow: 0 0 0 3px color-mix(in srgb, var(-
 .mfx input, .mfx select, .side textarea { width: 100%; padding: 7px 8px; border: 1.5px solid var(--line); border-radius: 8px; background: var(--surface); }
 .side textarea { resize: vertical; }
 .mpreview .stage { border-width: 2px; border-radius: 10px; }
+
+.btn.armed { background: var(--bad); border-color: var(--bad); color: var(--ground); }

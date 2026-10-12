@@ -22,10 +22,13 @@ const thumbs = <T>(set: Record<string, T & { name: string }>, act: string, cls: 
 
 const svgOf = (v: Preset) => v.svg;
 
+/** True once the author has made anything worth keeping. */
+export const hasContent = (p: Project) => p.rooms.length > 1 || p.rooms.some(r => r.bg || r.els.length);
+
 export function viewMap(p: Project, ui: UI): string {
   const actions = ui.confirmReset
     ? `<span class="hint">Erase everything?</span><button class="btn small danger" data-act="reset">Yes, start over</button><button class="btn small quiet" data-act="cancel">Keep it</button>`
-    : `<button class="btn small quiet" data-act="sample">Load the sample scene</button><button class="btn small quiet" data-act="ask-reset">Start over</button>`;
+    : `<button class="btn small quiet" data-act="sample"${hasContent(p) ? ' data-confirm="This replaces your story. Click again"' : ''}>Load the sample scene</button><button class="btn small quiet" data-act="ask-reset">Start over</button>`;
   const cards = p.rooms.map(r => `<button class="card" data-act="open-room" data-k="${esc(r.id)}"><span class="pic">${backdropHTML(r.bg)}</span><span class="meta"><b>${esc(r.name)}</b><span>${r.els.length} ${r.els.length === 1 ? 'thing' : 'things'} placed${r.auto ? ' · starts talking right away' : ''}</span></span></button>`).join('');
   return `<div class="side"><div class="maphead"><div><h2>Story map</h2><p class="hint">Every room in your story. Click one to work in it.</p></div><div class="row">${actions}</div></div>
     <div class="map">${cards}<button class="card new" data-act="new-room">+ New room</button></div></div>`;
@@ -63,7 +66,7 @@ function elementPanel(e: StoryElement): string {
     <label class="field"><span>Name</span><input type="text" id="el-name" data-in="el-name" value="${name}"></label>
     <label class="field"><span>Size</span><input type="range" id="el-size" data-in="el-size" min="6" max="110" value="${e.size}"></label>
     <details class="more" id="el-more"><summary>More</summary><div>${expr}
-      <div class="row"><button class="btn small quiet" data-act="front">Bring to front</button><button class="btn small danger" data-act="remove">Remove</button></div>
+      <div class="row"><button class="btn small quiet" data-act="front">Bring to front</button><button class="btn small danger" data-act="remove" data-confirm="Remove, with what they say?">Remove</button></div>
     </div></details>
     <p class="hint">Drag ${name} in the picture to move. Click empty space to go back to the room.</p>`;
 }
@@ -75,7 +78,7 @@ function roomPanel(p: Project, r: Room): string {
     <details class="more" id="room-more"><summary>More</summary><div>
       <button class="btn small quiet" data-act="adding" data-k="bg">Change the backdrop</button>
       <label class="check"><input type="checkbox" id="room-auto" data-in="room-auto"${r.auto ? ' checked' : ''}><span>Start talking right away when the player enters, like a classic visual novel</span></label>
-      ${p.rooms.length > 1 ? '<button class="btn small danger" data-act="del-room">Delete this room</button>' : ''}
+      ${p.rooms.length > 1 ? '<button class="btn small danger" data-act="del-room" data-confirm="Click again to delete the room">Delete this room</button>' : ''}
     </div></details>
     <p class="hint">${r.els.length ? 'Click anything in the picture to change it.' : 'The room is ready. Add someone to talk to.'}</p>`;
 }
