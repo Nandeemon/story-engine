@@ -73,15 +73,31 @@ function looksStrip(c: Character, e: StoryElement): string {
     </div><p class="hint">A line can show any look: pick it in the conversation, or write <code>${esc(c.name)} (${esc(looks[0]?.name ?? 'happy')}): …</code> in the script.</p></div>`;
 }
 
-function lookPanel(c: Character, lookId: string): string {
+/** How many lines in the whole story show this look of this character. */
+function linesUsingLook(p: Project, c: Character, look: string): number {
+  let n = 0;
+  const who = c.name.trim().toLowerCase(), key = look.toLowerCase();
+  for (const r of p.rooms) for (const el of r.els) walkSteps(parseScript(el.script).steps, st => {
+    if (st.t === 'say' && st.who.trim().toLowerCase() === who && st.expr.trim().toLowerCase() === key) n++;
+  });
+  return n;
+}
+
+function lookPanel(p: Project, c: Character, lookId: string): string {
   const l = c.looks.find(x => x.id === lookId);
   if (!l) return '';
+  const used = linesUsingLook(p, c, l.name);
+  const compare = document.body.classList.contains('compare-difference') ? 'difference' : 'see-through';
   return `<div class="mhead"><h2>Look: ${esc(l.name)}</h2><button class="btn small" data-act="look-done">Done</button></div>
     <p class="hint">The new look is drawn see-through over ${esc(c.name)}'s base picture. Drag it until the two line up, so ${esc(c.name)} stays still when the look changes. Arrow keys move it a little, Shift with an arrow moves it more.</p>
-    <label class="field"><span>Name used in lines</span><input type="text" id="look-name" data-in="look-name" value="${esc(l.name)}"></label>
+    <div class="field"><span>Compare with the base picture</span><div class="row">
+      <button class="btn small${compare === 'see-through' ? ' ink' : ''}" data-act="look-compare" data-k="see-through" aria-pressed="${compare === 'see-through'}">See-through</button>
+      <button class="btn small${compare === 'difference' ? ' ink' : ''}" data-act="look-compare" data-k="difference" aria-pressed="${compare === 'difference'}">Difference</button></div>
+      <p class="hint">${compare === 'difference' ? 'Where the two pictures line up, they turn dark.' : 'The look is drawn see-through over the base picture.'}</p></div>
+    ${l.once ? '<p class="hint">This picture is used by one line only.</p>' : `<label class="field"><span>Name used in lines</span><input type="text" id="look-name" data-in="look-name" value="${esc(l.name)}"></label>`}
     <label class="field"><span>Size</span><input type="range" id="look-scale" data-in="look-scale" min="0.5" max="1.6" step="0.01" value="${l.scale}"></label>
     <div class="row"><button class="btn small quiet" data-act="look-reset">Reset position</button><button class="btn small quiet" data-act="look-replace">Replace picture</button></div>
-    <div class="row"><button class="btn small danger" data-act="look-delete" data-confirm="Click again to delete the look">Delete this look</button></div>`;
+    <div class="row"><button class="btn small danger" data-act="look-delete" data-confirm="${used ? `${used} line${used === 1 ? ' uses' : 's use'} it. Click again` : 'Click again to delete the look'}">Delete this look</button></div>`;
 }
 
 function elementPanel(p: Project, e: StoryElement): string {
@@ -126,7 +142,7 @@ export function viewRoom(p: Project, ui: UI, r: Room, e: StoryElement | undefine
   if (!r.bg && !r.els.length) return emptyRoom();
   const c = e ? characterOf(p, e) : undefined;
   const lining = e && c && ui.lookEdit && c.looks.some(l => l.id === ui.lookEdit) ? { elId: e.id, lookId: ui.lookEdit } : undefined;
-  const side = ui.adding ? addingPanel(p, ui.adding) : lining && c ? lookPanel(c, lining.lookId) : e ? elementPanel(p, e) : roomPanel(p, r);
+  const side = ui.adding ? addingPanel(p, ui.adding) : lining && c ? lookPanel(p, c, lining.lookId) : e ? elementPanel(p, e) : roomPanel(p, r);
   return `<div class="work"><div>${stageHTML(r, { mode: 'edit', look: p.look, selected: lining ? null : ui.sel, characters: p.characters, lineup: lining })}</div><aside class="side">${side}</aside></div>`;
 }
 

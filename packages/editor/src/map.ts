@@ -321,10 +321,11 @@ function lookField(ctx: MapCtx, who: string, expr: string): string {
     const current = findLook(character, expr);
     if (current?.once) {
       return `<div class="field"><span>Look</span><div class="oncepic"><img src="${esc(current.img)}" alt=""><span>This line shows a picture of its own.</span></div>
-        <div class="row"><button class="btn small quiet" data-act="once-picture">Replace picture</button><button class="btn small quiet" data-act="once-remove">Use a regular look</button></div></div>`;
+        <div class="row"><button class="btn small quiet" data-act="once-lineup">Line it up</button><button class="btn small quiet" data-act="once-picture">Replace picture</button><button class="btn small quiet" data-act="once-remove">Use a regular look</button></div>
+        <p class="hint">After this line, ${esc(who)} goes back to the look shown before it.</p></div>`;
     }
     const names = ['default', ...character.looks.filter(l => !l.once).map(l => l.name)];
-    return `<label class="field"><span>Look</span><select id="m-expr" data-map-in="say-expr"><option value="">No change</option>${names.map(n => `<option${lower(n) === lower(expr) ? ' selected' : ''}>${esc(n)}</option>`).join('')}${missing ? `<option selected>${esc(missing)}</option>` : ''}</select></label>${warn}
+    return `<label class="field"><span>Look</span><select id="m-expr" data-map-in="say-expr"><option value="">Keep the look from before</option>${names.map(n => `<option${lower(n) === lower(expr) ? ' selected' : ''}>${esc(n)}</option>`).join('')}${missing ? `<option selected>${esc(missing)}</option>` : ''}</select></label>${warn}
       <button class="btn small quiet" data-act="once-picture">Use a different picture here</button>`;
   }
   if (el && !el.img) {

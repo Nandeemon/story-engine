@@ -1,11 +1,14 @@
-import { createRunner, findRoomByName, parseScript } from '@story-engine/engine-core';
+import { characterOf, createRunner, findLook, findRoomByName, parseScript } from '@story-engine/engine-core';
 import type { ChoiceEvent, Facts, Project, Room, Runner, SayStep, StoryElement } from '@story-engine/engine-core';
 import { choicesHTML, sayHTML, stageHTML } from './stage';
 
 export interface PlayState {
   roomId: string;
   facts: Facts;
+  /** Looks that hold until changed, by element id. */
   expr: Record<string, string>;
+  /** Pictures for the current line only (one-off pictures), by element id. */
+  lineExpr: Record<string, string>;
   /** What is on screen: a line, a choice, or nothing (the room is explorable). */
   event: SayStep | ChoiceEvent | null;
   /** A problem in the story itself, such as a door to a missing room. Shown to the author only. */
@@ -32,7 +35,7 @@ export interface Player {
  */
 export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOptions = {}): Player {
   const first = project.rooms.find(r => r.id === opts.roomId) ?? project.rooms[0];
-  const s: PlayState = { roomId: first.id, facts: {}, expr: {}, event: null, problem: '' };
+  const s: PlayState = { roomId: first.id, facts: {}, expr: {}, lineExpr: {}, event: null, problem: '' };
   let runner: Runner | null = null;
 
   const room = (): Room => project.rooms.find(r => r.id === s.roomId) ?? project.rooms[0];
@@ -41,7 +44,7 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
   function render(): void {
     const ev = s.event;
     const game = !ev ? '' : ev.t === 'say' ? sayHTML(ev.who, ev.text) : choicesHTML(ev.options);
-    host.innerHTML = stageHTML(room(), { mode: 'play', look: project.look, expr: s.expr, clickable: canTalk, game, characters: project.characters });
+    host.innerHTML = stageHTML(room(), { mode: 'play', look: project.look, expr: { ...s.expr, ...s.lineExpr }, clickable: canTalk, game, characters: project.characters });
     opts.onChange?.(s);
   }
 
@@ -54,6 +57,9 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
   }
 
   function talk(el: StoryElement): void {
+    // Every conversation starts with each character's "Look at the start".
+    s.expr = {};
+    s.lineExpr = {};
     runner = createRunner(parseScript(el.script).steps, s.facts);
     advance();
   }
@@ -62,10 +68,14 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
     if (!runner) return;
     const ev = runner.next();
     s.problem = '';
+    s.lineExpr = {};
     if (ev.t === 'say') {
       if (ev.expr) {
         const who = room().els.find(el => el.name.trim().toLowerCase() === ev.who.toLowerCase());
-        if (who) s.expr[who.id] = ev.expr;
+        const character = who && characterOf(project, who);
+        // A picture of its own belongs to its line only; other looks hold until changed.
+        if (who && character && findLook(character, ev.expr)?.once) s.lineExpr[who.id] = ev.expr;
+        else if (who) s.expr[who.id] = ev.expr;
       }
       s.event = ev;
     } else if (ev.t === 'choice') {

@@ -238,3 +238,5 @@ button.mnode:hover, .mrow:hover { box-shadow: 0 0 0 3px color-mix(in srgb, var(-
 .oncepic span { color: var(--muted); font-size: 13.5px; }
 .hint.err, .mrow .expr.bad { color: var(--bad); }
 .hint code { font-family: var(--script); font-size: 12.5px; }
+
+.compare-difference .el .look.ghost { opacity: 1; mix-blend-mode: difference; }
