@@ -1,0 +1,8 @@
+{
+  "name": "@story-engine/runtime",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": { ".": "./src/index.ts", "./game.css": "./src/game.css" },
+  "dependencies": { "@story-engine/engine-core": "0.1.0" }
+}
