@@ -31,3 +31,17 @@ export function renameSpeakerInScript(script: string, oldName: string, newName: 
     return `${m[1]}${to}${m[3]}`;
   }).join('\n');
 }
+
+/** Points every line where the speaker shows the old look at the new look name. */
+export function renameLookInScript(script: string, speaker: string, oldLook: string, newLook: string): string {
+  const who = lower(speaker), from = lower(oldLook), to = newLook.trim();
+  if (!who || !from || !to || from === lower(to)) return script;
+  return script.split('\n').map(line => {
+    const m = line.match(/^(\s*)([^:"()#]{1,40}?)(\s*\()([^)]*)(\)\s*:.*)$/);
+    if (!m || lower(m[2]) !== who) return line;
+    const parts = m[4].split(',');
+    if (lower(parts[0]) !== from) return line;
+    parts[0] = parts[0].replace(/\S.*\S|\S/, to);
+    return `${m[1]}${m[2]}${m[3]}${parts.join(',')}${m[5]}`;
+  }).join('\n');
+}

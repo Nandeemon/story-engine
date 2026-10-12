@@ -1,7 +1,7 @@
 import '@story-engine/runtime/game.css';
 import './editor.css';
-import { createProject, createRoom, findRoomByName, newId, normalizeProject, renameRoomInScript, renameSpeakerInScript } from '@story-engine/engine-core';
-import type { Project, Room, StoryElement } from '@story-engine/engine-core';
+import { characterOf, cleanLookName, createProject, createRoom, findLook, findRoomByName, newId, normalizeProject, parseScript, renameLookInScript, renameRoomInScript, renameSpeakerInScript, uniqueLookName, writeScript, getStep } from '@story-engine/engine-core';
+import type { Character, CharacterLook, Project, Room, StoryElement } from '@story-engine/engine-core';
 import { BACKDROPS, CHARACTERS, OBJECTS, createPlayer, elementArt, esc, lookStyle, sayHTML } from '@story-engine/runtime';
 import type { Player, PlayState } from '@story-engine/runtime';
 import { loadProject, sampleProject, saveProject } from './store';
@@ -13,8 +13,8 @@ import { readProjectFile, saveToFile } from './files';
 
 const $ = <T extends HTMLElement = HTMLElement>(s: string) => document.querySelector<T>(s);
 
-let project: Project = loadProject();
-const ui: UI = { view: 'room', roomId: project.rooms[0].id, sel: null, adding: null, confirmReset: false, back: 'room' };
+let project: Project = createProject();
+const ui: UI = { view: 'room', roomId: project.rooms[0].id, sel: null, adding: null, confirmReset: false, back: 'room', lookEdit: null };
 let player: Player | null = null;
 
 const MODE_KEY = 'story-engine:convo-mode';
@@ -30,9 +30,10 @@ const selected = (): StoryElement | undefined => room().els.find(e => e.id === u
 /* ---------- Saving ---------- */
 
 function save(): void {
-  const ok = saveProject(project);
-  const warn = $('#savewarn');
-  if (warn) warn.hidden = ok;
+  void saveProject(project).then(ok => {
+    const warn = $('#savewarn');
+    if (warn) warn.hidden = ok;
+  });
 }
 
 let toastTimer = 0;
@@ -218,7 +219,7 @@ function applyMap(res: MapResult | undefined): void {
 function updateStatus(): void {
   const e = selected(), el = $('#status'), facts = $('#facts');
   if (!e || !el || !facts) return;
-  const s = scriptStatus(project, e.script);
+  const s = scriptStatus(project, room(), e.script);
   el.className = s.error ? 'status err' : 'status';
   el.textContent = s.text;
   facts.innerHTML = s.facts.length
@@ -265,6 +266,7 @@ function place(el: StoryElement): void {
 function go(view: View): void {
   ui.view = view;
   ui.adding = null;
+  ui.lookEdit = null;
   ui.confirmReset = false;
   render();
 }
@@ -277,10 +279,62 @@ function replaceProject(p: Project): void {
   go('room');
 }
 
+/** Reads an image file, scaled down so the project stays small enough to save. */
+function readImage(f: File, max: number, type: 'image/jpeg' | 'image/webp'): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(f);
+    img.onload = () => {
+      const k = Math.min(1, max / Math.max(img.width, img.height));
+      const c = document.createElement('canvas');
+      c.width = Math.round(img.width * k);
+      c.height = Math.round(img.height * k);
+      c.getContext('2d')!.drawImage(img, 0, 0, c.width, c.height);
+      URL.revokeObjectURL(url);
+      resolve(c.toDataURL(type, 0.85));
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('not an image')); };
+    img.src = url;
+  });
+}
+
+const fileTitle = (f: File) => f.name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim();
+
+/** A look name from a file name, without the character's name: "lin_happy.png" gives "happy". */
+function lookNameFromFile(c: Character, f: File): string {
+  const name = fileTitle(f).replace(new RegExp(`\\b${c.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i'), '').trim();
+  return uniqueLookName(c, name || 'look');
+}
+
+const selectedCharacter = (): Character | undefined => { const e = selected(); return e ? characterOf(project, e) : undefined; };
+const editedLook = (): CharacterLook | undefined => selectedCharacter()?.looks.find(l => l.id === ui.lookEdit);
+
+/** The character speaking the selected line in the map, if it has looks of its own. */
+function onceSpeaker(): { character: Character } | null {
+  const ctx = mapCtx();
+  if (!ctx || !mapSel) return null;
+  const step = getStep(parseScript(ctx.el.script).steps, mapSel);
+  if (step?.t !== 'say' || !step.who) return null;
+  const key = step.who.trim().toLowerCase();
+  const el = room().els.find(x => x.kind === 'char' && x.name.trim().toLowerCase() === key);
+  const character = (el && characterOf(project, el)) ?? project.characters.find(c => c.name.trim().toLowerCase() === key);
+  return character ? { character } : null;
+}
+
+/** What the shared look-file input is for right now. */
+let lookFileMode: { kind: 'add' } | { kind: 'replace'; lookId: string } | { kind: 'once' } = { kind: 'add' };
+function pickLookFiles(mode: typeof lookFileMode, multiple: boolean): void {
+  lookFileMode = mode;
+  const input = $<HTMLInputElement>('#lookfile')!;
+  input.multiple = multiple;
+  input.value = '';
+  input.click();
+}
+
 let pendingUpload: Exclude<Adding, null> = 'bg';
 
 /** Actions that never change the project, so they are not recorded for Undo. */
-const NOT_RECORDED = new Set(['undo', 'redo', 'save-file', 'open-file', 'upload', 'play', 'play-convo', 'stop', 'convo-mode', 'look', 'crumb']);
+const NOT_RECORDED = new Set(['undo', 'redo', 'save-file', 'open-file', 'upload', 'play', 'play-convo', 'stop', 'convo-mode', 'look', 'crumb', 'add-looks', 'look-replace', 'once-picture', 'look-open', 'look-done']);
 
 const actions: Record<string, (k: string) => void> = {
   crumb(k) {
@@ -315,6 +369,41 @@ const actions: Record<string, (k: string) => void> = {
   },
   'add-char'(k) {
     place({ id: newId(), kind: 'char', preset: k, name: CHARACTERS[k].name, x: 30 + (room().els.length * 14) % 50, y: 98, size: 76, expr: 'neutral', script: '' });
+  },
+  'add-own'(k) {
+    const c = project.characters.find(x => x.id === k);
+    if (!c) return;
+    place({ id: newId(), kind: 'char', characterId: c.id, name: c.name, x: 30 + (room().els.length * 14) % 50, y: 98, size: 76, script: '' });
+  },
+  'look-open'(k) {
+    if (!k) { toast('This is the base picture. Add looks to give the character more expressions.'); return; }
+    ui.lookEdit = k;
+    render();
+  },
+  'look-done'() { ui.lookEdit = null; render(); },
+  'look-reset'() { const l = editedLook(); if (!l) return; l.dx = 0; l.dy = 0; l.scale = 1; save(); render(); },
+  'look-replace'() { if (ui.lookEdit) pickLookFiles({ kind: 'replace', lookId: ui.lookEdit }, false); },
+  'look-delete'() {
+    const c = selectedCharacter();
+    if (!c) return;
+    c.looks = c.looks.filter(l => l.id !== ui.lookEdit);
+    ui.lookEdit = null;
+    save();
+    render();
+  },
+  'add-looks'() { pickLookFiles({ kind: 'add' }, true); },
+  'once-picture'() { pickLookFiles({ kind: 'once' }, false); },
+  'once-remove'() {
+    const ctx = mapCtx(), c = onceSpeaker();
+    if (!ctx || !c || !mapSel) return;
+    const steps = parseScript(ctx.el.script).steps, step = getStep(steps, mapSel);
+    if (step?.t !== 'say') return;
+    const look = findLook(c.character, step.expr);
+    step.expr = '';
+    ctx.el.script = writeScript(steps);
+    if (look?.once) c.character.looks = c.character.looks.filter(l => l !== look);
+    save();
+    refreshMap();
   },
   'add-object'(k) {
     place({ id: newId(), kind: 'object', preset: k, name: OBJECTS[k].name, x: 60, y: 78, size: 16, script: '' });
@@ -381,6 +470,47 @@ $('#projectfile')!.addEventListener('change', async ev => {
   toast(`Opened ${f.name}. Undo brings back what you had.`);
 });
 
+$('#lookfile')!.addEventListener('change', async ev => {
+  const files = [...((ev.target as HTMLInputElement).files ?? [])];
+  if (!files.length) return;
+  const mode = lookFileMode;
+  const c = mode.kind === 'once' ? onceSpeaker()?.character : selectedCharacter();
+  if (!c) return;
+  const before = snapshot();
+  const added: CharacterLook[] = [];
+  for (const f of files) {
+    let img: string;
+    try { img = await readImage(f, 900, 'image/webp'); } catch { toast(`${f.name} could not be opened as a picture.`); continue; }
+    if (mode.kind === 'replace') {
+      const l = c.looks.find(x => x.id === mode.lookId);
+      if (l) l.img = img;
+      continue;
+    }
+    const look: CharacterLook = { id: newId(), name: mode.kind === 'once' ? uniqueLookName(c, 'own picture') : lookNameFromFile(c, f), img, dx: 0, dy: 0, scale: 1, ...(mode.kind === 'once' ? { once: true } : {}) };
+    c.looks.push(look);
+    added.push(look);
+  }
+  if (mode.kind === 'once' && added[0]) {
+    // The selected line now shows the new picture; an older picture of its own is let go.
+    const ctx = mapCtx()!;
+    const steps = parseScript(ctx.el.script).steps, step = mapSel ? getStep(steps, mapSel) : null;
+    if (step?.t === 'say') {
+      const old = findLook(c, step.expr);
+      if (old?.once) c.looks = c.looks.filter(l => l !== old);
+      step.expr = added[0].name;
+      ctx.el.script = writeScript(steps);
+    }
+    save();
+    record(before);
+    refreshMap();
+    return;
+  }
+  save();
+  record(before);
+  if (added.length === 1) { ui.lookEdit = added[0].id; render(); toast('Drag the new look until it lines up with the faded base picture.'); }
+  else { render(); if (added.length) toast(`Added ${added.length} looks to ${c.name}. Click one to line it up.`); }
+});
+
 /** Imported images are scaled down and stored inside the project, so it stays one file. */
 $('#file')!.addEventListener('change', ev => {
   const f = (ev.target as HTMLInputElement).files?.[0];
@@ -399,9 +529,13 @@ $('#file')!.addEventListener('change', ev => {
     const data = c.toDataURL(isBg ? 'image/jpeg' : 'image/webp', 0.85);
     const name = f.name.replace(/\.[^.]+$/, '').slice(0, 30) || 'Image';
     if (isBg) { room().bg = { img: data }; ui.adding = null; save(); render(); }
-    else {
-      const isChar = pendingUpload === 'char';
-      place({ id: newId(), kind: isChar ? 'char' : 'object', img: data, name, x: 50, y: isChar ? 98 : 78, size: isChar ? 76 : 20, script: '' });
+    else if (pendingUpload === 'char') {
+      const c: Character = { id: newId(), name: fileTitle(f).slice(0, 30) || 'Character', base: data, looks: [] };
+      project.characters.push(c);
+      place({ id: newId(), kind: 'char', characterId: c.id, name: c.name, x: 50, y: 98, size: 76, script: '' });
+      toast(`${c.name} is ready. Add looks to give ${c.name} more expressions.`);
+    } else {
+      place({ id: newId(), kind: 'object', img: data, name, x: 50, y: 78, size: 20, script: '' });
     }
     record(before);
   };
@@ -556,7 +690,8 @@ document.addEventListener('input', ev => {
     case 'script': if (e) { e.script = t.value; updateStatus(); } break;
     case 'el-name': if (e) e.name = t.value; break;
     case 'el-size': if (e) { e.size = Number(t.value); if (node) node.style.height = `${e.size}%`; } break;
-    case 'el-expr': if (e) { e.expr = t.value; if (node) node.innerHTML = elementArt(e); } break;
+    case 'el-expr': if (e) { e.expr = t.value; if (node) node.innerHTML = elementArt(e, undefined, project.characters); } break;
+    case 'look-scale': { const l = editedLook(); if (l && e) { l.scale = Number(t.value); if (node) node.innerHTML = elementArt(e, undefined, project.characters, l.id); } break; }
     case 'room-name': { room().name = t.value; const c = $('#crumbs [aria-current]'); if (c) c.textContent = t.value; break; }
     case 'room-auto': room().auto = t.checked; break;
     case 'look-font': project.look.font = t.value; break;
@@ -579,9 +714,32 @@ document.addEventListener('change', ev => {
     renameFrom = room().name;
     save();
   }
+  if (t.dataset.in === 'look-name') {
+    const c = selectedCharacter(), l = editedLook();
+    if (c && l) {
+      const old = l.name;
+      const others = { ...c, looks: c.looks.filter(x => x !== l) };
+      l.name = uniqueLookName(others, cleanLookName(t.value || old));
+      t.value = l.name;
+      let n = 0;
+      for (const r of project.rooms) for (const el of r.els) {
+        const next = renameLookInScript(el.script, c.name, old, l.name);
+        if (next !== el.script) { el.script = next; n++; }
+      }
+      if (n) toast(`Updated the look on ${c.name}'s lines in ${n} conversation${n === 1 ? '' : 's'}`);
+      save();
+      render();
+    }
+  }
   if (t.dataset.in === 'el-name') {
     const e = selected();
     if (e && !e.name.trim()) e.name = renameFrom || 'Thing';
+    // A character made from the author's pictures has one name everywhere it is placed.
+    const c = e ? characterOf(project, e) : undefined;
+    if (e && c) {
+      c.name = e.name;
+      for (const r of project.rooms) for (const x of r.els) if (x.characterId === c.id) x.name = c.name;
+    }
     if (e?.kind === 'char') {
       const n = renameEverywhere('speaker', renameFrom, e.name);
       if (n) toast(`Updated ${e.name}'s lines in ${n} conversation${n === 1 ? '' : 's'}`);
@@ -601,6 +759,20 @@ document.addEventListener('keydown', ev => {
     if ((key === 'z' && ev.shiftKey) || key === 'y') { ev.preventDefault(); redo(); return; }
   }
   if (ui.view === 'convo' && !typing && ev.key === 'Escape' && mapSel) { mapSel = null; refreshMap(); return; }
+  const nudging = !typing && ui.view === 'room' ? editedLook() : undefined;
+  if (nudging && ev.key.startsWith('Arrow')) {
+    ev.preventDefault();
+    const before = snapshot(), step = ev.shiftKey ? 0.02 : 0.004;
+    if (ev.key === 'ArrowLeft') nudging.dx -= step;
+    if (ev.key === 'ArrowRight') nudging.dx += step;
+    if (ev.key === 'ArrowUp') nudging.dy -= step;
+    if (ev.key === 'ArrowDown') nudging.dy += step;
+    const e = selected(), node = e ? document.querySelector<HTMLElement>(`.el[data-el="${CSS.escape(e.id)}"]`) : null;
+    if (e && node) node.innerHTML = elementArt(e, undefined, project.characters, nudging.id);
+    save();
+    record(before);
+    return;
+  }
   if ((t as HTMLElement).dataset?.mapIn && t.tagName === 'TEXTAREA' && ev.key === 'Enter' && !ev.shiftKey) {
     ev.preventDefault();
     commitMapField(t as unknown as HTMLInputElement);
@@ -619,6 +791,27 @@ document.addEventListener('keydown', ev => {
 interface Drag { e: StoryElement; node: HTMLElement; box: DOMRect; dx: number; dy: number; rerender: boolean; before: string }
 let drag: Drag | null = null;
 
+/* Lining up a look: dragging moves the look by a share of its own size. */
+interface LookDrag { look: CharacterLook; img: HTMLElement; node: HTMLElement; e: StoryElement; x: number; y: number; dx: number; dy: number; before: string }
+let lookDrag: LookDrag | null = null;
+document.addEventListener('pointermove', ev => {
+  if (!lookDrag) return;
+  const { look, img, node, e } = lookDrag;
+  look.dx = Math.round((lookDrag.dx + (ev.clientX - lookDrag.x) / img.offsetWidth) * 1000) / 1000;
+  look.dy = Math.round((lookDrag.dy + (ev.clientY - lookDrag.y) / img.offsetHeight) * 1000) / 1000;
+  node.innerHTML = elementArt(e, undefined, project.characters, look.id);
+  lookDrag.img = node.querySelector<HTMLElement>('.look') ?? img;
+});
+const lookDrop = () => {
+  if (!lookDrag) return;
+  const before = lookDrag.before;
+  lookDrag = null;
+  save();
+  record(before);
+};
+document.addEventListener('pointerup', lookDrop);
+document.addEventListener('pointercancel', lookDrop);
+
 document.addEventListener('pointerdown', ev => {
   if (ui.view !== 'room') return;
   const target = ev.target as HTMLElement;
@@ -626,11 +819,22 @@ document.addEventListener('pointerdown', ev => {
   if (!stage) return;
   const node = target.closest<HTMLElement>('.el');
   if (!node) {
+    if (ui.lookEdit) return; // lining up: clicks beside the picture do nothing
     if (ui.sel || ui.adding) { ui.sel = null; ui.adding = null; render(); }
     return;
   }
   const e = room().els.find(x => x.id === node.dataset.el);
   if (!e) return;
+  const lining = editedLook();
+  if (lining && e.id === ui.sel) {
+    const img = node.querySelector<HTMLElement>('.look');
+    if (!img) return;
+    lookDrag = { look: lining, img, node, e, x: ev.clientX, y: ev.clientY, dx: lining.dx, dy: lining.dy, before: snapshot() };
+    try { node.setPointerCapture(ev.pointerId); } catch { /* not supported */ }
+    ev.preventDefault();
+    return;
+  }
+  if (ui.lookEdit) return;
   const box = stage.getBoundingClientRect();
   stage.querySelectorAll('.el.sel').forEach(x => x.classList.remove('sel'));
   node.classList.add('sel');
@@ -667,5 +871,11 @@ const drop = () => {
 document.addEventListener('pointerup', drop);
 document.addEventListener('pointercancel', drop);
 
-render();
-save();
+/* ---------- Start ---------- */
+
+void loadProject().then(p => {
+  project = p;
+  ui.roomId = project.rooms[0].id;
+  render();
+  save();
+});

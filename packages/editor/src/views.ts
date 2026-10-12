@@ -1,5 +1,6 @@
-import { findRoomByName, parseScript, summarize } from '@story-engine/engine-core';
-import type { Project, Room, StoryElement } from '@story-engine/engine-core';
+import { characterOf, findRoomByName, parseScript, summarize, walkSteps } from '@story-engine/engine-core';
+import { missingLook } from './map';
+import type { Character, Project, Room, StoryElement } from '@story-engine/engine-core';
 import { BACKDROPS, CHARACTERS, EXPRESSIONS, FONTS, OBJECTS, THEMES, backdropHTML, characterSVG, choicesHTML, esc, sayHTML, stageHTML } from '@story-engine/runtime';
 import type { Preset } from '@story-engine/runtime';
 
@@ -14,6 +15,8 @@ export interface UI {
   confirmReset: boolean;
   /** Where Stop returns to. */
   back: View;
+  /** The look being lined up, for the selected character. */
+  lookEdit: string | null;
 }
 
 const thumbs = <T>(set: Record<string, T & { name: string }>, act: string, cls: string, art: (v: T) => string): string =>
@@ -43,29 +46,65 @@ function emptyRoom(): string {
   </div></div>`;
 }
 
-function addingPanel(a: Exclude<Adding, null>): string {
+function addingPanel(p: Project, a: Exclude<Adding, null>): string {
   const title = { char: 'Add a character', object: 'Add an object', bg: 'Change the backdrop' }[a];
+  const own = a === 'char' && p.characters.length
+    ? `<div class="label">Your characters</div><div class="thumbs">${p.characters.map(c =>
+      `<button class="thumb" data-act="add-own" data-k="${esc(c.id)}"><span class="pic tall own"><img src="${esc(c.base)}" alt=""></span><b>${esc(c.name)}</b></button>`).join('')}</div><div class="label">Starter characters</div>`
+    : '';
   const grid = a === 'char' ? thumbs(CHARACTERS, 'add-char', 'tall', v => characterSVG(v))
     : a === 'object' ? thumbs(OBJECTS, 'add-object', 'obj', svgOf)
     : thumbs(BACKDROPS, 'set-bg', '', svgOf);
-  return `<h2>${title}</h2>${grid}
-    <div class="row"><button class="btn small" data-act="upload" data-k="${a}">Use your own image</button><button class="btn small quiet" data-act="cancel">Cancel</button></div>`;
+  const upload = a === 'char' ? 'Use your own picture' : 'Use your own image';
+  return `<h2>${title}</h2>${own}${grid}
+    <div class="row"><button class="btn small" data-act="upload" data-k="${a}">${upload}</button><button class="btn small quiet" data-act="cancel">Cancel</button></div>`;
 }
 
-function elementPanel(e: StoryElement): string {
+/** The character's looks as a row of small pictures, with a way to add more. */
+function looksStrip(c: Character, e: StoryElement): string {
+  const start = (e.expr ?? '').toLowerCase();
+  const looks = c.looks.filter(l => !l.once);
+  const cell = (k: string, img: string, name: string, isStart: boolean) =>
+    `<button class="lookcell" data-act="look-open" data-k="${esc(k)}" title="${k ? 'Line up or rename this look' : 'The base picture'}"><span class="pic"><img src="${esc(img)}" alt=""></span><b>${esc(name)}</b>${isStart ? '<i>at start</i>' : ''}</button>`;
+  return `<div class="field"><span>Looks</span><div class="looks">
+      ${cell('', c.base, 'default', !start || start === 'default')}
+      ${looks.map(l => cell(l.id, l.img, l.name, start === l.name.toLowerCase())).join('')}
+      <button class="lookcell add" data-act="add-looks"><span class="pic">+</span><b>Add looks</b></button>
+    </div><p class="hint">A line can show any look: pick it in the conversation, or write <code>${esc(c.name)} (${esc(looks[0]?.name ?? 'happy')}): …</code> in the script.</p></div>`;
+}
+
+function lookPanel(c: Character, lookId: string): string {
+  const l = c.looks.find(x => x.id === lookId);
+  if (!l) return '';
+  return `<div class="mhead"><h2>Look: ${esc(l.name)}</h2><button class="btn small" data-act="look-done">Done</button></div>
+    <p class="hint">The new look is drawn see-through over ${esc(c.name)}'s base picture. Drag it until the two line up, so ${esc(c.name)} stays still when the look changes. Arrow keys move it a little, Shift with an arrow moves it more.</p>
+    <label class="field"><span>Name used in lines</span><input type="text" id="look-name" data-in="look-name" value="${esc(l.name)}"></label>
+    <label class="field"><span>Size</span><input type="range" id="look-scale" data-in="look-scale" min="0.5" max="1.6" step="0.01" value="${l.scale}"></label>
+    <div class="row"><button class="btn small quiet" data-act="look-reset">Reset position</button><button class="btn small quiet" data-act="look-replace">Replace picture</button></div>
+    <div class="row"><button class="btn small danger" data-act="look-delete" data-confirm="Click again to delete the look">Delete this look</button></div>`;
+}
+
+function elementPanel(p: Project, e: StoryElement): string {
   const name = esc(e.name);
+  const c = characterOf(p, e);
   const has = e.script.trim() !== '';
   const label = e.kind === 'char'
     ? (has ? `Edit what ${name} says` : `Make ${name} say something`)
     : (has ? 'Edit what happens on click' : 'Make it do something on click');
-  const expr = e.kind === 'char' && !e.img
-    ? `<label class="field"><span>Expression at the start</span><select id="el-expr" data-in="el-expr">${EXPRESSIONS.map(x => `<option${x === (e.expr ?? 'neutral') ? ' selected' : ''}>${x}</option>`).join('')}</select></label>`
+  const startOptions = c ? ['default', ...c.looks.filter(l => !l.once).map(l => l.name)] : [...EXPRESSIONS];
+  const startNow = (e.expr || (c ? 'default' : 'neutral')).toLowerCase();
+  const expr = e.kind === 'char' && (c || !e.img)
+    ? `<label class="field"><span>${c ? 'Look at the start' : 'Expression at the start'}</span><select id="el-expr" data-in="el-expr">${startOptions.map(x => `<option${x.toLowerCase() === startNow ? ' selected' : ''}>${esc(x)}</option>`).join('')}</select></label>`
+    : '';
+  const builtIn = e.kind === 'char' && !c
+    ? '<p class="hint">A starter figure with built-in expressions. To give a character looks of your own, add it with "Use your own picture".</p>'
     : '';
   return `<h2>${name}</h2>
     <button class="btn play block" data-act="convo">${label}</button>
     <label class="field"><span>Name</span><input type="text" id="el-name" data-in="el-name" value="${name}"></label>
     <label class="field"><span>Size</span><input type="range" id="el-size" data-in="el-size" min="6" max="110" value="${e.size}"></label>
-    <details class="more" id="el-more"><summary>More</summary><div>${expr}
+    ${c ? looksStrip(c, e) : ''}
+    <details class="more" id="el-more"><summary>More</summary><div>${expr}${builtIn}
       <div class="row"><button class="btn small quiet" data-act="front">Bring to front</button><button class="btn small danger" data-act="remove" data-confirm="Click again to remove">Remove</button></div>
     </div></details>
     <p class="hint">Drag ${name} in the picture to move. Click empty space to go back to the room.</p>`;
@@ -85,8 +124,10 @@ function roomPanel(p: Project, r: Room): string {
 
 export function viewRoom(p: Project, ui: UI, r: Room, e: StoryElement | undefined): string {
   if (!r.bg && !r.els.length) return emptyRoom();
-  const side = ui.adding ? addingPanel(ui.adding) : e ? elementPanel(e) : roomPanel(p, r);
-  return `<div class="work"><div>${stageHTML(r, { mode: 'edit', look: p.look, selected: ui.sel })}</div><aside class="side">${side}</aside></div>`;
+  const c = e ? characterOf(p, e) : undefined;
+  const lining = e && c && ui.lookEdit && c.looks.some(l => l.id === ui.lookEdit) ? { elId: e.id, lookId: ui.lookEdit } : undefined;
+  const side = ui.adding ? addingPanel(p, ui.adding) : lining && c ? lookPanel(c, lining.lookId) : e ? elementPanel(p, e) : roomPanel(p, r);
+  return `<div class="work"><div>${stageHTML(r, { mode: 'edit', look: p.look, selected: lining ? null : ui.sel, characters: p.characters, lineup: lining })}</div><aside class="side">${side}</aside></div>`;
 }
 
 /** Text inserted by the buttons above the script. */
@@ -144,12 +185,18 @@ export function viewConvo(p: Project, r: Room, e: StoryElement, mode: ConvoMode,
 }
 
 /** Feedback under the script: what it reads as, or the first problem in plain words. */
-export function scriptStatus(p: Project, script: string): { text: string; error: boolean; facts: string[] } {
+export function scriptStatus(p: Project, r: Room, script: string): { text: string; error: boolean; facts: string[] } {
   const { steps, errors } = parseScript(script);
   const s = summarize(steps);
   if (errors.length) return { text: `Line ${errors[0].n}: ${errors[0].msg}`, error: true, facts: s.facts };
   const missing = s.doorTargets.find(name => !findRoomByName(p, name));
   if (missing) return { text: `There is no room called "${missing}" yet. Add it in the story map.`, error: true, facts: s.facts };
+  let badLook: { who: string; expr: string } | null = null;
+  walkSteps(steps, x => { if (!badLook && x.t === 'say' && missingLook(p, r, x.who, x.expr)) badLook = { who: x.who, expr: x.expr }; });
+  if (badLook) {
+    const b = badLook as { who: string; expr: string };
+    return { text: `${b.who} has no look called "${b.expr}", so the base picture shows.`, error: true, facts: s.facts };
+  }
   const parts = ([[s.lines, 'line'], [s.choices, 'choice'], [s.conditions, 'condition'], [s.doors, 'door']] as const)
     .filter(([n]) => n > 0).map(([n, w]) => `${n} ${w}${n === 1 ? '' : 's'}`);
   return { text: parts.length ? `Reads as ${parts.join(', ')}.` : 'Nothing written yet.', error: false, facts: s.facts };
@@ -159,7 +206,7 @@ export function viewLook(p: Project, r: Room): string {
   const L = p.look;
   const demo = choicesHTML([{ text: 'A choice looks like this' }, { text: 'And another one' }], false).replace('class="choices"', 'class="choices demo"')
     + sayHTML('Mara', 'This is how a line of dialogue looks in your game.', false);
-  return `<div class="work"><div>${stageHTML(r, { mode: 'look', look: L, game: demo })}</div><aside class="side"><h2>The look of your game</h2>
+  return `<div class="work"><div>${stageHTML(r, { mode: 'look', look: L, game: demo, characters: p.characters })}</div><aside class="side"><h2>The look of your game</h2>
       <div class="field"><span>Theme</span><div class="row">${Object.entries(THEMES).map(([k, t]) => `<button class="btn small${L.theme === k ? ' ink' : ''}" data-act="theme" data-k="${k}" aria-pressed="${L.theme === k}">${t.name}</button>`).join('')}</div></div>
       <label class="field"><span>Typeface</span><select id="look-font" data-in="look-font">${Object.keys(FONTS).map(f => `<option${f === L.font ? ' selected' : ''}>${f}</option>`).join('')}</select></label>
       <label class="field"><span>Corners</span><input type="range" id="look-radius" data-in="look-radius" min="0" max="28" value="${L.radius}"></label>

@@ -55,12 +55,39 @@ export interface Backdrop {
 
 export type ElementKind = 'char' | 'object';
 
+/**
+ * One picture of a character: an expression or a pose. Lines pick a look by name.
+ * dx and dy move the picture by a share of its own width and height, and scale
+ * resizes it, so it lines up with the character's base picture.
+ */
+export interface CharacterLook {
+  id: string;
+  name: string;
+  img: string;
+  dx: number;
+  dy: number;
+  scale: number;
+  /** A picture used for one moment only; kept out of the character's look list. */
+  once?: boolean;
+}
+
+/** A character made from the author's own pictures, shared by every room it appears in. */
+export interface Character {
+  id: string;
+  name: string;
+  /** The base picture, shown as the look called "default". */
+  base: string;
+  looks: CharacterLook[];
+}
+
 export interface StoryElement {
   id: string;
   kind: ElementKind;
   name: string;
   /** Starter art id, such as "mara" or "cup". */
   preset?: string;
+  /** For characters made from the author's pictures: the character in project.characters. */
+  characterId?: string;
   /** An imported image as a data URL. */
   img?: string;
   /** Bottom-centre position as a percentage of the stage width. */
@@ -69,7 +96,7 @@ export interface StoryElement {
   y: number;
   /** Height as a percentage of the stage height. */
   size: number;
-  /** Starting expression for characters. */
+  /** Starting expression or look for characters. */
   expr?: string;
   /** The written conversation opened by clicking this element. */
   script: string;
@@ -97,4 +124,5 @@ export interface Project {
   version: 1;
   rooms: Room[];
   look: Look;
+  characters: Character[];
 }

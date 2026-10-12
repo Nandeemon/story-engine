@@ -41,7 +41,7 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
   function render(): void {
     const ev = s.event;
     const game = !ev ? '' : ev.t === 'say' ? sayHTML(ev.who, ev.text) : choicesHTML(ev.options);
-    host.innerHTML = stageHTML(room(), { mode: 'play', look: project.look, expr: s.expr, clickable: canTalk, game });
+    host.innerHTML = stageHTML(room(), { mode: 'play', look: project.look, expr: s.expr, clickable: canTalk, game, characters: project.characters });
     opts.onChange?.(s);
   }
 

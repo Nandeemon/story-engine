@@ -7,6 +7,9 @@
 
 .el { position: absolute; transform: translate(-50%, -100%); padding: 0; border: 0; background: none; display: block; touch-action: none; }
 .el svg, .el img { height: 100%; width: auto; max-width: none; display: block; pointer-events: none; }
+.el .base.off { visibility: hidden; }
+.el .look { position: absolute; left: 50%; bottom: 0; transform-origin: 50% 100%; }
+.el .look.ghost { opacity: .55; }
 .stage.play .el { cursor: default; }
 .stage.play .el.can { cursor: pointer; animation: se-breathe 2.4s ease-in-out infinite; }
 .stage.play .el.can:hover { filter: brightness(1.15) drop-shadow(0 0 10px rgba(255, 255, 255, .55)); }

@@ -1,26 +1,91 @@
 import { createProject, newId, normalizeProject } from '@story-engine/engine-core';
 import type { Project } from '@story-engine/engine-core';
 
-const KEY = 'story-engine:project';
+/*
+ * Projects are kept in IndexedDB, which holds far more than localStorage, so a
+ * story with many pictures keeps saving. Older projects in localStorage are
+ * moved over on first load.
+ */
+
+const DB_NAME = 'story-engine';
+const STORE = 'projects';
+const KEY = 'current';
+const LEGACY_KEY = 'story-engine:project';
+
+let dbPromise: Promise<IDBDatabase | null> | null = null;
+function openDb(): Promise<IDBDatabase | null> {
+  dbPromise ??= new Promise(resolve => {
+    try {
+      const req = indexedDB.open(DB_NAME, 1);
+      req.onupgradeneeded = () => req.result.createObjectStore(STORE);
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => resolve(null);
+      req.onblocked = () => resolve(null);
+    } catch {
+      resolve(null);
+    }
+  });
+  return dbPromise;
+}
+
+function idb<T>(mode: IDBTransactionMode, run: (s: IDBObjectStore) => IDBRequest): Promise<T | undefined> {
+  return openDb().then(db => new Promise<T | undefined>((resolve, reject) => {
+    if (!db) return reject(new Error('IndexedDB is not available'));
+    const tx = db.transaction(STORE, mode);
+    const req = run(tx.objectStore(STORE));
+    tx.oncomplete = () => resolve(req.result as T);
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error);
+  }));
+}
 
 /** Loads the project saved in this browser, or a new one. */
-export function loadProject(): Project {
+export async function loadProject(): Promise<Project> {
   try {
-    const saved = normalizeProject(JSON.parse(localStorage.getItem(KEY) ?? 'null'));
+    const saved = normalizeProject(JSON.parse((await idb<string>('readonly', s => s.get(KEY))) ?? 'null'));
     if (saved) return saved;
+  } catch {
+    /* fall through to the older storage */
+  }
+  try {
+    const legacy = normalizeProject(JSON.parse(localStorage.getItem(LEGACY_KEY) ?? 'null'));
+    if (legacy) return legacy;
   } catch {
     /* blocked or corrupt storage: start fresh */
   }
   return createProject();
 }
 
-export function saveProject(project: Project): boolean {
-  try {
-    localStorage.setItem(KEY, JSON.stringify(project));
-    return true;
-  } catch {
-    return false; // storage full or blocked; the session keeps working
+/* Saves are queued so only the newest copy is written, and never two at once. */
+let writing = false;
+let queued: string | null = null;
+let waiters: ((ok: boolean) => void)[] = [];
+
+async function flush(): Promise<void> {
+  writing = true;
+  let ok = true;
+  while (queued !== null) {
+    const json = queued;
+    queued = null;
+    try {
+      await idb('readwrite', s => s.put(json, KEY));
+      ok = true;
+    } catch {
+      try { localStorage.setItem(LEGACY_KEY, json); ok = true; } catch { ok = false; }
+    }
   }
+  writing = false;
+  const done = waiters;
+  waiters = [];
+  done.forEach(w => w(ok));
+}
+
+/** Saves the project. Resolves to false when the browser could not store it. */
+export function saveProject(project: Project): Promise<boolean> {
+  queued = JSON.stringify(project);
+  const result = new Promise<boolean>(resolve => waiters.push(resolve));
+  if (!writing) void flush();
+  return result;
 }
 
 /** A small finished story that shows every feature of step 1. */

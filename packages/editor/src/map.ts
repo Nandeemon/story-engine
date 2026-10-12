@@ -7,7 +7,8 @@
  * script and the map always show the same conversation.
  */
 import { CONDITION_WORDS, conditionText, effectText, findRoomByName, getList, getStep, parseScript, splitPath, stepPathOf, summarize, toValue, valueText, walkSteps, writeScript } from '@story-engine/engine-core';
-import type { ChoiceStep, CompareOp, Effect, Project, Room, Step, StoryElement } from '@story-engine/engine-core';
+import { characterOf, findLook, hasLook } from '@story-engine/engine-core';
+import type { Character, ChoiceStep, CompareOp, Effect, Project, Room, Step, StoryElement } from '@story-engine/engine-core';
 import { EXPRESSIONS, esc, sayHTML, stageHTML } from '@story-engine/runtime';
 
 export interface MapCtx {
@@ -16,6 +17,26 @@ export interface MapCtx {
   el: StoryElement;
   /** What is selected: a step path, "<path>#o<k>" for an answer, or "add:<list>:<index>". */
   sel: string | null;
+}
+
+/* ---------- Speakers and their looks ---------- */
+
+/** Who a speaker name means: a placed element in this room, or one of the author's characters. */
+export function speakerOf(project: Project, room: Room, who: string): { el?: StoryElement; character?: Character } {
+  const key = who.trim().toLowerCase();
+  if (!key) return {};
+  const el = room.els.find(x => x.kind === 'char' && x.name.trim().toLowerCase() === key);
+  const character = (el && characterOf(project, el)) ?? project.characters.find(c => c.name.trim().toLowerCase() === key);
+  return { el, character };
+}
+
+/** A line's look that the speaker does not have, or '' when the look is fine. */
+export function missingLook(project: Project, room: Room, who: string, expr: string): string {
+  if (!expr.trim()) return '';
+  const { el, character } = speakerOf(project, room, who);
+  if (character) return hasLook(character, expr) ? '' : expr;
+  if (el && !el.img) return EXPRESSIONS.some(x => x === expr.toLowerCase()) || ['smile', 'happy'].includes(expr.toLowerCase()) ? '' : expr;
+  return '';
 }
 
 /* ---------- Drawing ---------- */
@@ -53,12 +74,19 @@ export function mapHTML(ctx: MapCtx): string {
     return `<button class="madd${kind ? ` ${kind}` : ''}${on(key)}" data-map-act="sel" data-k="${key}" aria-label="${title}" title="${title}">${label || '+'}</button>`;
   };
 
+  const exprTag = (who: string, expr: string): string => {
+    const look = speakerOf(ctx.project, ctx.room, who).character;
+    const once = look && findLook(look, expr)?.once;
+    if (missingLook(ctx.project, ctx.room, who, expr)) return `<span class="expr bad" title="${esc(who)} has no look called ${esc(expr)}; the base picture shows">${esc(expr)}?</span>`;
+    return `<span class="expr">${once ? 'own picture' : esc(expr)}</span>`;
+  };
+
   const row = (s: Step, path: string): string => {
     const attrs = `class="mrow k-${s.t}${on(path)}"${pick(path)}`;
     if (s.t === 'say') {
       const text = s.text === '...' ? '<em>Empty line</em>' : esc(s.text);
       return s.who
-        ? `<button ${attrs}><span class="who">${esc(s.who)}</span>${s.expr ? `<span class="expr">${esc(s.expr)}</span>` : ''}<span class="txt">${text}</span></button>`
+        ? `<button ${attrs}><span class="who">${esc(s.who)}</span>${s.expr ? exprTag(s.who, s.expr) : ''}<span class="txt">${text}</span></button>`
         : `<button ${attrs}><span class="txt narr">${text}</span></button>`;
     }
     if (s.t === 'change') return `<button ${attrs}><span class="tag">Change</span><span class="txt">${esc(s.effects.map(effectText).join(', '))}</span></button>`;
@@ -278,9 +306,31 @@ function effectRows(effects: Effect[]): string {
 }
 
 function preview(ctx: MapCtx, who: string, expr: string, text: string): string {
-  const speaker = ctx.room.els.find(x => lower(x.name) === lower(who));
+  const speaker = speakerOf(ctx.project, ctx.room, who).el;
   const game = sayHTML(who, text === '...' ? '' : text, false);
-  return `<div class="mpreview">${stageHTML(ctx.room, { mode: 'look', look: ctx.project.look, expr: speaker && expr ? { [speaker.id]: expr } : {}, game })}</div>`;
+  return `<div class="mpreview">${stageHTML(ctx.room, { mode: 'look', look: ctx.project.look, expr: speaker && expr ? { [speaker.id]: expr } : {}, game, characters: ctx.project.characters })}</div>`;
+}
+
+/** The look picker for a line: the speaker's own looks, or the starter figure's expressions. */
+function lookField(ctx: MapCtx, who: string, expr: string): string {
+  if (!who.trim()) return '';
+  const { el, character } = speakerOf(ctx.project, ctx.room, who);
+  const missing = missingLook(ctx.project, ctx.room, who, expr);
+  const warn = missing ? `<p class="hint err">${esc(who)} has no look called "${esc(missing)}", so the base picture shows. Pick one of ${esc(who)}'s looks.</p>` : '';
+  if (character) {
+    const current = findLook(character, expr);
+    if (current?.once) {
+      return `<div class="field"><span>Look</span><div class="oncepic"><img src="${esc(current.img)}" alt=""><span>This line shows a picture of its own.</span></div>
+        <div class="row"><button class="btn small quiet" data-act="once-picture">Replace picture</button><button class="btn small quiet" data-act="once-remove">Use a regular look</button></div></div>`;
+    }
+    const names = ['default', ...character.looks.filter(l => !l.once).map(l => l.name)];
+    return `<label class="field"><span>Look</span><select id="m-expr" data-map-in="say-expr"><option value="">No change</option>${names.map(n => `<option${lower(n) === lower(expr) ? ' selected' : ''}>${esc(n)}</option>`).join('')}${missing ? `<option selected>${esc(missing)}</option>` : ''}</select></label>${warn}
+      <button class="btn small quiet" data-act="once-picture">Use a different picture here</button>`;
+  }
+  if (el && !el.img) {
+    return `<label class="field"><span>Expression</span><select id="m-expr" data-map-in="say-expr"><option value="">No change</option>${EXPRESSIONS.map(x => `<option${x === expr ? ' selected' : ''}>${x}</option>`).join('')}${missing ? `<option selected>${esc(missing)}</option>` : ''}</select></label>${warn}`;
+  }
+  return `<p class="hint">${esc(who)} is not placed in this room, so there are no looks to pick here yet.</p>`;
 }
 
 const kinds = (top: boolean, hasParts: boolean) => [
@@ -331,12 +381,12 @@ export function mapSide(ctx: MapCtx): string {
 
   switch (step.t) {
     case 'say': {
-      const speakers = new Set(ctx.room.els.filter(x => x.kind === 'char').map(x => x.name));
+      const speakers = new Set([...ctx.room.els.filter(x => x.kind === 'char').map(x => x.name), ...ctx.project.characters.map(c => c.name)]);
       walkSteps(steps, x => { if (x.t === 'say' && x.who) speakers.add(x.who); });
       return `${header('Line')}${preview(ctx, step.who, step.expr, step.text)}
         <label class="field"><span>Who speaks</span><input type="text" list="m-who" id="m-who-in" data-map-in="say-who" value="${esc(step.who)}" placeholder="Leave empty for narration"></label>
         <datalist id="m-who">${[...speakers].map(n => `<option value="${esc(n)}">`).join('')}</datalist>
-        ${step.who ? `<label class="field"><span>Expression</span><select id="m-expr" data-map-in="say-expr"><option value="">No change</option>${EXPRESSIONS.map(x => `<option${x === step.expr ? ' selected' : ''}>${x}</option>`).join('')}</select></label>` : ''}
+        ${lookField(ctx, step.who, step.expr)}
         <label class="field"><span>${step.who ? 'What they say' : 'Narration'}</span><textarea id="m-text" data-map-in="say-text" rows="3" placeholder="Type the line here">${step.text === '...' ? '' : esc(step.text)}</textarea></label>
         <div class="row"><button class="btn small" data-map-act="add-after">+ Line after this</button>${del()}</div>`;
     }

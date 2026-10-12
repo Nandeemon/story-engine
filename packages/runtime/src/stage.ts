@@ -1,4 +1,5 @@
-import type { Backdrop, Look, Room, StoryElement } from '@story-engine/engine-core';
+import { findLook } from '@story-engine/engine-core';
+import type { Backdrop, Character, Look, Room, StoryElement } from '@story-engine/engine-core';
 import { BACKDROPS, CHARACTERS, FONTS, OBJECTS, THEMES, characterSVG, esc } from './art';
 
 export type StageMode = 'edit' | 'look' | 'play';
@@ -14,6 +15,10 @@ export interface StageOptions {
   clickable?: (el: StoryElement) => boolean;
   /** HTML for the game layer: dialogue box, choices. */
   game?: string;
+  /** Characters made from the author's pictures (project.characters). */
+  characters?: Character[];
+  /** Lining up a look: that look is drawn see-through over the base picture of that element. */
+  lineup?: { elId: string; lookId: string };
 }
 
 export function backdropHTML(bg: Backdrop | null): string {
@@ -22,7 +27,20 @@ export function backdropHTML(bg: Backdrop | null): string {
   return (BACKDROPS[bg.preset ?? ''] ?? BACKDROPS.cafe).svg;
 }
 
-export function elementArt(el: StoryElement, expr?: string): string {
+/**
+ * Draws a look over the character's base picture. The base stays in place (hidden)
+ * so every look of a character takes up the same box on the stage.
+ */
+function characterArt(el: StoryElement, c: Character, expr: string | undefined, lineupLook?: string): string {
+  const look = lineupLook ? c.looks.find(l => l.id === lineupLook) : findLook(c, expr ?? el.expr);
+  if (!look) return `<img class="base" src="${esc(c.base)}" alt="${esc(el.name)}">`;
+  const t = `translate(${((look.dx - 0.5) * 100).toFixed(2)}%, ${(look.dy * 100).toFixed(2)}%) scale(${look.scale})`;
+  return `<img class="base${lineupLook ? '' : ' off'}" src="${esc(c.base)}" alt="${lineupLook ? '' : esc(el.name)}"><img class="look${lineupLook ? ' ghost' : ''}" src="${esc(look.img)}" alt="${esc(`${el.name}, ${look.name}`)}" style="transform:${t}">`;
+}
+
+export function elementArt(el: StoryElement, expr?: string, characters: Character[] = [], lineupLook?: string): string {
+  const c = el.characterId ? characters.find(x => x.id === el.characterId) : undefined;
+  if (c) return characterArt(el, c, expr, lineupLook);
   if (el.img) return `<img src="${esc(el.img)}" alt="${esc(el.name)}">`;
   if (el.kind === 'char') return characterSVG({ ...(CHARACTERS[el.preset ?? ''] ?? CHARACTERS.mara), name: el.name }, expr ?? el.expr);
   return (OBJECTS[el.preset ?? ''] ?? OBJECTS.cup).svg;
@@ -39,7 +57,8 @@ export function stageHTML(room: Room, o: StageOptions): string {
     const can = o.mode === 'play' && !!o.clickable?.(el);
     const cls = ['el', o.mode === 'edit' && el.id === o.selected ? 'sel' : '', can ? 'can' : ''].filter(Boolean).join(' ');
     const focus = o.mode === 'play' && !can ? ' tabindex="-1"' : '';
-    return `<button class="${cls}" data-el="${esc(el.id)}" style="left:${el.x}%;top:${el.y}%;height:${el.size}%" aria-label="${esc(el.name)}"${focus}>${elementArt(el, o.expr?.[el.id])}</button>`;
+    const lineup = o.lineup?.elId === el.id ? o.lineup.lookId : undefined;
+    return `<button class="${cls}${lineup ? ' lining' : ''}" data-el="${esc(el.id)}" style="left:${el.x}%;top:${el.y}%;height:${el.size}%" aria-label="${esc(el.name)}"${focus}>${elementArt(el, o.expr?.[el.id], o.characters, lineup)}</button>`;
   }).join('');
   return `<div class="stage ${o.mode}" data-stage style="${lookStyle(o.look)}"><div class="bg">${backdropHTML(room.bg)}</div>${els}<div class="game">${o.game ?? ''}</div></div>`;
 }

@@ -39,3 +39,11 @@ describe('renameSpeakerInScript', () => {
     expect(renameSpeakerInScript('Mara: hi', 'Mara', 'Narration')).toBe('Mara: hi');
   });
 });
+
+describe('renameLookInScript', () => {
+  it('renames the look on that speaker\'s lines only', async () => {
+    const { renameLookInScript } = await import('../src');
+    const src = 'Lin (happy): Hi.\n  Lin (Happy, shake): Hey!\nMara (happy): Hello.\nLin: Plain.';
+    expect(renameLookInScript(src, 'lin', 'happy', 'glad')).toBe('Lin (glad): Hi.\n  Lin (glad, shake): Hey!\nMara (happy): Hello.\nLin: Plain.');
+  });
+});
