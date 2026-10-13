@@ -1,5 +1,5 @@
 import { characterOf, findRoomByName, parseScript, summarize, walkSteps } from '@story-engine/engine-core';
-import { missingLook } from './map';
+import { missingLook, unknownSpeaker } from './map';
 import type { Character, Project, Room, StoryElement } from '@story-engine/engine-core';
 import { BACKDROPS, CHARACTERS, EXPRESSIONS, FONTS, OBJECTS, THEMES, backdropHTML, characterSVG, choicesHTML, esc, sayHTML, stageHTML } from '@story-engine/runtime';
 import type { Preset } from '@story-engine/runtime';
@@ -209,6 +209,18 @@ export function scriptStatus(p: Project, r: Room, script: string): { text: strin
   if (missing) return { text: `There is no room called "${missing}" yet. Add it in the story map.`, error: true, facts: s.facts };
   let badLook: { who: string; expr: string } | null = null;
   walkSteps(steps, x => { if (!badLook && x.t === 'say' && missingLook(p, r, x.who, x.expr)) badLook = { who: x.who, expr: x.expr }; });
+  let stranger: { who: string; stage: boolean } | null = null;
+  walkSteps(steps, x => {
+    if (stranger) return;
+    if (x.t === 'say' && unknownSpeaker({ project: p, room: r }, x.who)) stranger = { who: x.who, stage: false };
+    if ((x.t === 'show' || x.t === 'move' || x.t === 'hide') && unknownSpeaker({ project: p, room: r }, x.who)) stranger = { who: x.who, stage: true };
+  });
+  if (stranger) {
+    const st = stranger as { who: string; stage: boolean };
+    return { text: st.stage
+      ? `There is no character called "${st.who}". If that line is narration, start it with Narration:`
+      : `"${st.who}" is read as someone speaking, but no character has that name. If the line is narration with a colon in it, start it with Narration:`, error: true, facts: s.facts };
+  }
   if (badLook) {
     const b = badLook as { who: string; expr: string };
     return { text: `${b.who} has no look called "${b.expr}", so the base picture shows.`, error: true, facts: s.facts };

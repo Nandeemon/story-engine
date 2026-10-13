@@ -1,5 +1,6 @@
 import type { Character, CharacterLook, Look, Project, Room, StoryElement } from './types';
 import { isLineEffect } from './staging';
+import { renameLookInScript } from './refs';
 
 export const DEFAULT_LOOK: Look = { theme: 'velvet', font: 'Lora', radius: 14, size: 2 };
 
@@ -63,6 +64,11 @@ export function normalizeProject(raw: unknown): Project | null {
           dx: num(l.dx, 0), dy: num(l.dy, 0), scale: num(l.scale, 1), ...(l.once === true ? { once: true } : {})
         }))
     }));
+  // A look whose name is now an effect word was renamed above: its lines follow.
+  for (const c of characters) for (const l of c.looks) {
+    if (!/ look$/.test(l.name) || !isLineEffect(l.name.replace(/ look$/, ''))) continue;
+    for (const room of rooms) for (const el of room.els) el.script = renameLookInScript(el.script, c.name, l.name.replace(/ look$/, ''), l.name);
+  }
   // Characters made from one uploaded picture, from before characters had looks.
   for (const room of rooms) for (const el of room.els) {
     if (el.characterId && !characters.some(c => c.id === el.characterId)) el.characterId = undefined;

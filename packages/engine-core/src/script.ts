@@ -126,7 +126,7 @@ export function parseScript(src: string): ParseResult {
       } else if (/^end$/i.test(l.text)) {
         pos++;
         steps.push({ t: 'end' });
-      } else if ((m = l.text.match(/^show\s+(.+?)(?:\s+as\s+(.+?))?(?:\s+at\s+(.+?))?(?:\s+size\s+(\d+(?:\.\d+)?))?(\s+flipped)?(?:\s+with\s+(.+?))?$/i))) {
+      } else if ((m = l.text.match(/^show\s+(.+?)(?:\s+as\s+(.+?))?(?:\s+at\s+(.+?))?(?:\s+size\s+(\d+(?:\.\d+)?))?(\s+flipped)?(?:\s+with\s+(.+?))?$/i)) && looksLikeName(m[1])) {
         pos++;
         const at = placeOf(m[3], l.n, errors);
         if (m[4]) at.size = Number(m[4]);
@@ -138,7 +138,7 @@ export function parseScript(src: string): ParseResult {
         if (m[3]) at.size = Number(m[3]);
         if (m[4]) at.flip = /^\s*flipped/i.test(m[4]);
         steps.push({ t: 'move', who: m[1].trim(), at });
-      } else if ((m = l.text.match(/^hide\s+(.+?)(?:\s+with\s+(.+?))?$/i)) && m[1].split(/\s+/).length <= 3) {
+      } else if ((m = l.text.match(/^hide\s+(.+?)(?:\s+with\s+(.+?))?$/i)) && looksLikeName(m[1]) && !/[.!?]$/.test(l.text)) {
         pos++;
         steps.push({ t: 'hide', who: m[1].trim(), fx: (m[2] ?? '').trim().toLowerCase() });
       } else if ((m = l.text.match(/^([^:"()]{1,40}?)\s*(?:\(([^)]+)\))?\s*:\s*(.+)$/))) {
@@ -167,6 +167,12 @@ export function parseScript(src: string): ParseResult {
     }
   }
   return { steps, errors };
+}
+
+/** A stage command names a character: a few words, no commas, not ending like a sentence. */
+function looksLikeName(who: string): boolean {
+  const w = who.trim();
+  return !!w && !/[,;!?]/.test(w) && !/\.$/.test(w) && w.split(/\s+/).length <= 3 && !/^(and|the|a|an|your|my|his|her|their|our|it|me|him|them|us)$/i.test(w.split(/\s+/)[0]);
 }
 
 function placeOf(text: string | undefined, n: number, errors: ScriptError[]): Placement {

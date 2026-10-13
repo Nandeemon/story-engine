@@ -30,8 +30,8 @@ describe('stage steps', () => {
   });
 
   it('keeps narration that only starts like a command', () => {
-    const { steps } = parseScript('Move along, nothing to see.\nHide and seek was her favourite game.');
-    expect(steps.map(s => s.t)).toEqual(['say', 'say']);
+    const { steps } = parseScript('Move along, nothing to see.\nHide and seek was her favourite game.\nShow your ticket, please.\nHide the gun.\nHide Lin');
+    expect(steps.map(s => s.t)).toEqual(['say', 'say', 'say', 'say', 'hide']);
   });
 
   it('reports a place it cannot read', () => {

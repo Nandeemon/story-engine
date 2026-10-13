@@ -31,6 +31,15 @@ export function speakerOf(project: Project, room: Room, who: string): { el?: Sto
   return { el, character };
 }
 
+/** True when a name is used for someone who is neither placed in this room nor one of the author's characters. */
+export function unknownSpeaker(ctx: { project: Project; room: Room }, who: string): boolean {
+  const key = who.trim().toLowerCase();
+  if (!key) return false;
+  return !ctx.room.els.some(e => e.kind === 'char' && e.name.trim().toLowerCase() === key)
+    && !ctx.project.characters.some(c => c.name.trim().toLowerCase() === key)
+    && !ctx.project.rooms.some(r => r.els.some(e => e.kind === 'char' && e.name.trim().toLowerCase() === key));
+}
+
 /** A line's look that the speaker does not have, or '' when the look is fine. */
 export function missingLook(project: Project, room: Room, who: string, expr: string): string {
   if (!expr.trim()) return '';
@@ -63,7 +72,7 @@ export function sceneAt(ctx: MapCtx, steps: Step[], path: string): Scene {
 function castNames(ctx: MapCtx): string[] {
   const names = new Map<string, string>();
   for (const c of ctx.project.characters) names.set(lower(c.name), c.name);
-  for (const e of ctx.room.els) if (e.kind === 'char') names.set(lower(e.name), e.name);
+  for (const r of ctx.project.rooms) for (const e of r.els) if (e.kind === 'char') names.set(lower(e.name), e.name);
   return [...names.values()];
 }
 
@@ -114,12 +123,15 @@ export function mapHTML(ctx: MapCtx): string {
     if (s.t === 'say') {
       const text = s.text === '...' ? '<em>Empty line</em>' : esc(s.text);
       return s.who
-        ? `<button ${attrs}><span class="who">${esc(s.who)}</span>${s.expr ? exprTag(s.who, s.expr) : ''}<span class="txt">${text}</span></button>`
+        ? `<button ${attrs}><span class="who${unknownSpeaker(ctx, s.who) ? ' bad" title="No character has this name. Narration? Clear Who speaks.' : ''}">${esc(s.who)}</span>${s.expr ? exprTag(s.who, s.expr) : ''}<span class="txt">${text}</span></button>`
         : `<button ${attrs}><span class="txt narr">${text}</span></button>`;
     }
     if (s.t === 'change') return `<button ${attrs}><span class="tag">Change</span><span class="txt">${esc(s.effects.map(effectText).join(', '))}</span></button>`;
     if (s.t === 'note') return `<button ${attrs}><span class="tag">Note</span><span class="txt">${esc(s.text)}</span></button>`;
-    if (s.t === 'show' || s.t === 'move' || s.t === 'hide') return `<button ${attrs}><span class="tag">Stage</span><span class="txt">${esc(stageText(s))}</span></button>`;
+    if (s.t === 'show' || s.t === 'move' || s.t === 'hide') {
+      const bad = unknownSpeaker(ctx, s.who) ? ' bad" title="No character has this name. If this is narration, write Narration: in front of it in the script.' : '';
+      return `<button ${attrs}><span class="tag">Stage</span><span class="txt${bad}">${esc(stageText(s))}</span></button>`;
+    }
     return '';
   };
 
@@ -441,11 +453,12 @@ export function mapSide(ctx: MapCtx): string {
       walkSteps(steps, x => { if (x.t === 'say' && x.who) speakers.add(x.who); });
       const scene = sceneAt(ctx, steps, path);
       return `${header('Line')}${preview(ctx, scene, step.who, step.text)}
-        ${lookField(ctx, step.who, step.expr)}
-        ${stageField(ctx, scene, step.who, step.fx ?? '')}
         <label class="field"><span>Who speaks</span><input type="text" list="m-who" id="m-who-in" data-map-in="say-who" value="${esc(step.who)}" placeholder="Leave empty for narration"></label>
         <datalist id="m-who">${[...speakers].map(n => `<option value="${esc(n)}">`).join('')}</datalist>
+        ${unknownSpeaker(ctx, step.who) ? `<p class="hint err">There is no character called "${esc(step.who)}". If this line is narration, clear Who speaks.</p>` : ''}
         <label class="field"><span>${step.who ? 'What they say' : 'Narration'}</span><textarea id="m-text" data-map-in="say-text" rows="3" placeholder="Type the line here">${step.text === '...' ? '' : esc(step.text)}</textarea></label>
+        ${lookField(ctx, step.who, step.expr)}
+        ${stageField(ctx, scene, step.who, step.fx ?? '')}
         <div class="row"><button class="btn small" data-map-act="add-after">+ Line after this</button>${del()}</div>`;
     }
     case 'show':

@@ -250,3 +250,6 @@ button.mnode:hover, .mrow:hover { box-shadow: 0 0 0 3px color-mix(in srgb, var(-
 .cast { display: flex; flex-wrap: wrap; gap: 6px; }
 .cast .chip { display: inline-flex; align-items: center; gap: 6px; font-family: var(--body); }
 .linkbtn { padding: 0; border: 0; background: none; color: var(--violet); font: inherit; font-size: 12px; text-decoration: underline; cursor: pointer; }
+
+.mpreview .game, .mpreview .game * { pointer-events: none; }
+.mrow .who.bad, .mrow .txt.bad { color: var(--bad); text-decoration: underline wavy; }

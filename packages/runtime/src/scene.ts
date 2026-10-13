@@ -37,13 +37,18 @@ const SPOT_ORDER = [50, 30, 70, 15, 85];
 const ENTER: Record<string, string> = { fade: 'in-fade', 'slide from left': 'in-left', 'slide from right': 'in-right', pop: 'in-pop' };
 const EXIT: Record<string, string> = { fade: 'out-fade', 'slide to left': 'out-left', 'slide to right': 'out-right' };
 
-/** Names of everyone who speaks or is staged in a conversation. */
+/**
+ * Names of everyone who is part of a conversation from its start: they speak or
+ * are moved before anything brings them in. Someone whose first appearance is a
+ * "Show" starts off stage and enters there.
+ */
 function castOf(steps: Step[]): Set<string> {
-  const names = new Set<string>();
+  const first = new Map<string, string>();
   walkSteps(steps, s => {
-    if ((s.t === 'say' && s.who) || s.t === 'show' || s.t === 'move') names.add(lower(s.who));
+    const who = s.t === 'say' || s.t === 'show' || s.t === 'move' || s.t === 'hide' ? lower(s.who) : '';
+    if (who && !first.has(who)) first.set(who, s.t);
   });
-  return names;
+  return new Set([...first].filter(([, t]) => t === 'say' || t === 'move').map(([name]) => name));
 }
 
 /**
@@ -53,13 +58,15 @@ function castOf(steps: Step[]): Set<string> {
  */
 export function startScene(room: Room, owner: StoryElement, steps: Step[]): Scene {
   const cast = castOf(steps);
-  if (owner.kind === 'char') cast.add(lower(owner.name));
+  const entering = new Set<string>();
+  walkSteps(steps, s => { if (s.t === 'show') entering.add(lower(s.who)); });
+  if (owner.kind === 'char' && !(entering.has(lower(owner.name)) && !cast.has(lower(owner.name)))) cast.add(lower(owner.name));
   const aside = (owner.staging ?? 'aside') === 'aside';
   return {
     chars: room.els.filter(e => e.kind === 'char').map(e => ({
       key: e.id, name: e.name, elId: e.id, characterId: e.characterId, preset: e.preset, img: e.img,
       x: e.x, y: e.y, size: e.size, flip: false, look: e.expr ?? '', lineLook: '',
-      visible: !aside || cast.has(lower(e.name)), fx: ''
+      visible: aside ? cast.has(lower(e.name)) : !(entering.has(lower(e.name)) && !cast.has(lower(e.name))), fx: ''
     }))
   };
 }
@@ -85,10 +92,14 @@ function cast(scene: Scene, project: Project, who: string): StagedChar | undefin
   if (!key) return undefined;
   const found = scene.chars.find(c => lower(c.name) === key);
   if (found) return found;
-  const character = project.characters.find(c => lower(c.name) === key);
-  if (!character) return undefined;
   const size = scene.chars.find(c => c.visible)?.size ?? 76;
-  const c: StagedChar = { key: `c:${character.id}`, name: character.name, characterId: character.id, x: freeSpot(scene), y: 98, size, flip: false, look: '', lineLook: '', visible: false, fx: '' };
+  const character = project.characters.find(c => lower(c.name) === key);
+  // Someone placed in another room (such as a starter figure) can be brought in too.
+  const elsewhere = character ? undefined : project.rooms.flatMap(r => r.els).find(e => e.kind === 'char' && lower(e.name) === key);
+  if (!character && !elsewhere) return undefined;
+  const c: StagedChar = character
+    ? { key: `c:${character.id}`, name: character.name, characterId: character.id, x: freeSpot(scene), y: 98, size, flip: false, look: '', lineLook: '', visible: false, fx: '' }
+    : { key: `e:${elsewhere!.id}`, name: elsewhere!.name, preset: elsewhere!.preset, characterId: elsewhere!.characterId, img: elsewhere!.img, x: freeSpot(scene), y: 98, size: elsewhere!.size || size, flip: false, look: elsewhere!.expr ?? '', lineLook: '', visible: false, fx: '' };
   scene.chars.push(c);
   return c;
 }
