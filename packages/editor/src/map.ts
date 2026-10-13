@@ -123,7 +123,7 @@ export function mapHTML(ctx: MapCtx): string {
     if (s.t === 'say') {
       const text = s.text === '...' ? '<em>Empty line</em>' : esc(s.text);
       return s.who
-        ? `<button ${attrs}><span class="who${unknownSpeaker(ctx, s.who) ? ' bad" title="No character has this name. Narration? Clear Who speaks.' : ''}">${esc(s.who)}</span>${s.expr ? exprTag(s.who, s.expr) : ''}<span class="txt">${text}</span></button>`
+        ? `<button ${attrs}><span class="who${unknownSpeaker(ctx, s.who) ? ' voice" title="A voice without a picture: no character has this name' : ''}">${esc(s.who)}</span>${s.expr ? exprTag(s.who, s.expr) : ''}<span class="txt">${text}</span></button>`
         : `<button ${attrs}><span class="txt narr">${text}</span></button>`;
     }
     if (s.t === 'change') return `<button ${attrs}><span class="tag">Change</span><span class="txt">${esc(s.effects.map(effectText).join(', '))}</span></button>`;
@@ -455,7 +455,7 @@ export function mapSide(ctx: MapCtx): string {
       return `${header('Line')}${preview(ctx, scene, step.who, step.text)}
         <label class="field"><span>Who speaks</span><input type="text" list="m-who" id="m-who-in" data-map-in="say-who" value="${esc(step.who)}" placeholder="Leave empty for narration"></label>
         <datalist id="m-who">${[...speakers].map(n => `<option value="${esc(n)}">`).join('')}</datalist>
-        ${unknownSpeaker(ctx, step.who) ? `<p class="hint err">There is no character called "${esc(step.who)}". If this line is narration, clear Who speaks.</p>` : ''}
+        ${unknownSpeaker(ctx, step.who) ? `<p class="hint">No character is called "${esc(step.who)}", so this line is a voice without a picture. If it is narration, clear Who speaks.</p>` : ''}
         <label class="field"><span>${step.who ? 'What they say' : 'Narration'}</span><textarea id="m-text" data-map-in="say-text" rows="3" placeholder="Type the line here">${step.text === '...' ? '' : esc(step.text)}</textarea></label>
         ${lookField(ctx, step.who, step.expr)}
         ${stageField(ctx, scene, step.who, step.fx ?? '')}

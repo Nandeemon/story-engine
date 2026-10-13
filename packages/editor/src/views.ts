@@ -150,7 +150,7 @@ export function viewRoom(p: Project, ui: UI, r: Room, e: StoryElement | undefine
 export function inserts(p: Project, r: Room, e: StoryElement): { label: string; text: string }[] {
   const other = p.rooms.find(x => x.id !== r.id) ?? r;
   return [
-    { label: 'Line', text: `${e.kind === 'char' ? e.name : 'Narrator'}: ` },
+    { label: 'Line', text: e.kind === 'char' ? `${e.name}: ` : '' },
     { label: 'Choice', text: 'Choice\n  "First answer"\n    \n  "Second answer"\n    ' },
     { label: 'Only if', text: 'Only if affection is at least 5\n  ' },
     { label: 'Change something', text: 'Change affection + 1' },
@@ -209,25 +209,26 @@ export function scriptStatus(p: Project, r: Room, script: string): { text: strin
   if (missing) return { text: `There is no room called "${missing}" yet. Add it in the story map.`, error: true, facts: s.facts };
   let badLook: { who: string; expr: string } | null = null;
   walkSteps(steps, x => { if (!badLook && x.t === 'say' && missingLook(p, r, x.who, x.expr)) badLook = { who: x.who, expr: x.expr }; });
-  let stranger: { who: string; stage: boolean } | null = null;
-  walkSteps(steps, x => {
-    if (stranger) return;
-    if (x.t === 'say' && unknownSpeaker({ project: p, room: r }, x.who)) stranger = { who: x.who, stage: false };
-    if ((x.t === 'show' || x.t === 'move' || x.t === 'hide') && unknownSpeaker({ project: p, room: r }, x.who)) stranger = { who: x.who, stage: true };
-  });
-  if (stranger) {
-    const st = stranger as { who: string; stage: boolean };
-    return { text: st.stage
-      ? `There is no character called "${st.who}". If that line is narration, start it with Narration:`
-      : `"${st.who}" is read as someone speaking, but no character has that name. If the line is narration with a colon in it, start it with Narration:`, error: true, facts: s.facts };
-  }
   if (badLook) {
     const b = badLook as { who: string; expr: string };
     return { text: `${b.who} has no look called "${b.expr}", so the base picture shows.`, error: true, facts: s.facts };
   }
+  let stranger: { who: string; stage: boolean } | null = null;
+  walkSteps(steps, x => {
+    if (stranger?.stage) return;
+    if ((x.t === 'show' || x.t === 'move' || x.t === 'hide') && unknownSpeaker({ project: p, room: r }, x.who)) stranger = { who: x.who, stage: true };
+    else if (!stranger && x.t === 'say' && unknownSpeaker({ project: p, room: r }, x.who)) stranger = { who: x.who, stage: false };
+  });
+  if (stranger) {
+    const st = stranger as { who: string; stage: boolean };
+    if (st.stage) return { text: `There is no character called "${st.who}". If that line is narration, start it with Narration:`, error: true, facts: s.facts };
+  }
   const parts = ([[s.lines, 'line'], [s.choices, 'choice'], [s.conditions, 'condition'], [s.doors, 'door']] as const)
     .filter(([n]) => n > 0).map(([n, w]) => `${n} ${w}${n === 1 ? '' : 's'}`);
-  return { text: parts.length ? `Reads as ${parts.join(', ')}.` : 'Nothing written yet.', error: false, facts: s.facts };
+  const reads = parts.length ? `Reads as ${parts.join(', ')}.` : 'Nothing written yet.';
+  // A speaker with no character is fine (a voice, "???"): only a gentle note, in case it was meant as narration.
+  const note = stranger ? ` "${(stranger as { who: string }).who}" has no character, so that line is a voice without a picture. If it is narration with a colon in it, start it with Narration:` : '';
+  return { text: reads + note, error: false, facts: s.facts };
 }
 
 export function viewLook(p: Project, r: Room): string {

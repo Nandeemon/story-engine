@@ -253,3 +253,4 @@ button.mnode:hover, .mrow:hover { box-shadow: 0 0 0 3px color-mix(in srgb, var(-
 
 .mpreview .game, .mpreview .game * { pointer-events: none; }
 .mrow .who.bad, .mrow .txt.bad { color: var(--bad); text-decoration: underline wavy; }
+.mrow .who.voice { font-style: italic; text-decoration: underline dotted; }
