@@ -4,8 +4,9 @@ import { walkSteps, characterOf, cleanLookName, createProject, createRoom, findL
 import type { Character, CharacterLook, Facts, Project, Room, StoryElement } from '@story-engine/engine-core';
 import { BACKDROPS, CHARACTERS, OBJECTS, backdropHTML, createPlayer, elementArt, esc, lookStyle, sayHTML } from '@story-engine/runtime';
 import type { Player, PlayState } from '@story-engine/runtime';
-import { loadProject, sampleProject, saveProject } from './store';
-import { inserts, lookStage, scriptStatus, viewCheck, viewConvo, viewLook, viewMap, viewPlay, viewRoom } from './views';
+import { addStory, deleteStory, duplicateStory, listStories, loadStory, sampleProject, saveStory, whenSaved } from './store';
+import type { StoryInfo } from './store';
+import { inserts, lookStage, scriptStatus, viewCheck, viewConvo, viewHome, viewLook, viewMap, viewPlay, viewRoom } from './views';
 import { factKind, findProblems, storyFacts } from './problems';
 import type { Problem } from './problems';
 import type { Adding, ConvoMode, LookTab, UI, View } from './views';
@@ -16,7 +17,11 @@ import { readProjectFile, saveToFile } from './files';
 const $ = <T extends HTMLElement = HTMLElement>(s: string) => document.querySelector<T>(s);
 
 let project: Project = createProject();
-const ui: UI = { view: 'room', roomId: project.rooms[0].id, sel: null, adding: null, confirmReset: false, back: 'room', lookEdit: null };
+/** The story being worked on, by its id in this browser; null on the home screen before one is opened. */
+let storyId: string | null = null;
+/** The stories listed on the home screen. */
+let stories: StoryInfo[] = [];
+const ui: UI = { view: 'home', roomId: project.rooms[0].id, sel: null, adding: null, confirmReset: false, back: 'room', lookEdit: null };
 let player: Player | null = null;
 
 const MODE_KEY = 'story-engine:convo-mode';
@@ -26,9 +31,13 @@ let mapSel: string | null = null;
 
 /* Test values for story facts: kept in this browser for testing only, never part of the story. */
 const TEST_KEY = 'story-engine:test-facts';
+const testKey = () => `${TEST_KEY}:${storyId ?? ''}`;
 let test: { use: boolean; values: Record<string, string> } = { use: false, values: {} };
-try { const t = JSON.parse(localStorage.getItem(TEST_KEY) ?? 'null'); if (t && typeof t === 'object') test = { use: !!t.use, values: t.values ?? {} }; } catch { /* none saved */ }
-const saveTest = () => { try { localStorage.setItem(TEST_KEY, JSON.stringify(test)); } catch { /* this session only */ } };
+function loadTest(): void {
+  test = { use: false, values: {} };
+  try { const t = JSON.parse(localStorage.getItem(testKey()) ?? 'null'); if (t && typeof t === 'object') test = { use: !!t.use, values: t.values ?? {} }; } catch { /* none saved */ }
+}
+const saveTest = () => { try { localStorage.setItem(testKey(), JSON.stringify(test)); } catch { /* this session only */ } };
 function testFacts(): Facts | undefined {
   if (!test.use) return undefined;
   const out: Facts = {};
@@ -73,7 +82,8 @@ function pruneOncePictures(): void {
 }
 
 function save(): void {
-  void saveProject(project).then(ok => {
+  if (!storyId) return;
+  void saveStory(storyId, project).then(ok => {
     const warn = $('#savewarn');
     if (warn) warn.hidden = ok;
   });
@@ -137,6 +147,7 @@ function restore(json: string, message: string): void {
 }
 
 function undo(): void {
+  if (ui.view === 'home') return;
   const prev = past.pop();
   if (prev === undefined) return;
   future.push(snapshot());
@@ -144,6 +155,7 @@ function undo(): void {
 }
 
 function redo(): void {
+  if (ui.view === 'home') return;
   const next = future.pop();
   if (next === undefined) return;
   past.push(snapshot());
@@ -158,7 +170,8 @@ function crumbs(): [string, string][] {
     const playing = project.rooms.find(x => x.id === player?.state().roomId) ?? r;
     return [['play', `Playing: ${playing.name}`]];
   }
-  const list: [string, string][] = [['map', 'Story map']];
+  if (ui.view === 'home') return [['home', 'Your stories']];
+  const list: [string, string][] = [['home', 'Your stories'], ['map', project.title?.trim() || 'Story map']];
   if (ui.view !== 'map') list.push(['room', r.name]);
   if (ui.view === 'convo' && e) list.push(['el', e.name], ['convo', 'Conversation']);
   if (ui.view === 'look') list.push(['look', 'Look']);
@@ -179,7 +192,8 @@ function renderBar(): void {
   const list = crumbs();
   $('#crumbs')!.innerHTML = list.map(([k, n], i) =>
     `${i ? '<i>›</i>' : ''}<button data-act="crumb" data-k="${k}"${i === list.length - 1 ? ' aria-current="page"' : ''}>${esc(n)}</button>`).join('');
-  $('#tools')!.innerHTML = ui.view === 'play'
+  $('#tools')!.innerHTML = ui.view === 'home' ? ''
+    : ui.view === 'play'
     ? '<button class="btn ink" data-act="stop">Stop</button>'
     : `<button class="btn small quiet" data-act="undo" title="Undo (Ctrl+Z)"${past.length ? '' : ' disabled'}>Undo</button>
        <button class="btn small quiet" data-act="redo" title="Redo (Ctrl+Shift+Z)"${future.length ? '' : ' disabled'}>Redo</button>
@@ -194,6 +208,7 @@ function render(): void {
   renderBar();
   const main = $('#main')!;
   switch (ui.view) {
+    case 'home': main.innerHTML = viewHome(stories, storyId); break;
     case 'map': main.innerHTML = viewMap(project, ui, problems.filter(x => x.level === 'error').length); break;
     case 'room': main.innerHTML = viewRoom(project, ui, r, e); break;
     case 'convo': {
@@ -372,6 +387,50 @@ function replaceProject(p: Project): void {
   go('room');
 }
 
+/* ---------- Stories ---------- */
+
+/** Starts a fresh editing session on a project: nothing to undo, nothing selected. */
+function enterProject(p: Project, id: string, view: View): void {
+  project = p;
+  storyId = id;
+  past.length = 0; future.length = 0; images.clear(); imageKeys.clear();
+  fieldSnapshot = null;
+  ui.roomId = project.rooms[0].id;
+  ui.sel = null;
+  mapSel = null;
+  hudSel = null;
+  lookTab = 'style';
+  loadTest();
+  pruneOncePictures();
+  go(view);
+}
+
+async function openStory(id: string): Promise<void> {
+  await whenSaved();
+  const p = await loadStory(id);
+  if (!p) { toast('This story could not be opened.'); return refreshHome(); }
+  enterProject(p, id, 'map');
+}
+
+async function newStory(p: Project, view: View): Promise<void> {
+  await whenSaved();
+  const id = await addStory(p);
+  enterProject(p, id, view);
+}
+
+async function refreshHome(message?: string): Promise<void> {
+  await whenSaved();
+  stories = await listStories();
+  if (ui.view === 'home') render();
+  if (message) toast(message);
+}
+
+function goHome(): void {
+  if (player) { player.destroy(); player = null; }
+  go('home');
+  void refreshHome();
+}
+
 /** Reads an image file, scaled down so the project stays small enough to save. */
 function readImage(f: File, max: number, type: 'image/jpeg' | 'image/webp'): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -438,10 +497,11 @@ let lookReturn: { elId: string | null; mapSel: string | null } | null = null;
 let lookCompare: 'see-through' | 'difference' = 'see-through';
 
 /** Actions that never change the project, so they are not recorded for Undo. */
-const NOT_RECORDED = new Set(['test-off', 'look-tab', 'make-game', 'hud-sel', 'play-here', 'check', 'goto-problem', 'test-clear', 'once-lineup', 'look-compare', 'undo', 'redo', 'save-file', 'open-file', 'upload', 'play', 'play-convo', 'stop', 'convo-mode', 'look', 'crumb', 'add-looks', 'look-replace', 'once-picture', 'look-open', 'look-done']);
+const NOT_RECORDED = new Set(['home', 'open-story', 'new-story', 'new-sample', 'import-story', 'duplicate-story', 'delete-story', 'test-off', 'look-tab', 'make-game', 'hud-sel', 'play-here', 'check', 'goto-problem', 'test-clear', 'once-lineup', 'look-compare', 'undo', 'redo', 'save-file', 'open-file', 'upload', 'play', 'play-convo', 'stop', 'convo-mode', 'look', 'crumb', 'add-looks', 'look-replace', 'once-picture', 'look-open', 'look-done']);
 
 const actions: Record<string, (k: string) => void> = {
   crumb(k) {
+    if (k === 'home') return goHome();
     if (k === 'map' || k === 'room') ui.sel = null;
     if (k === 'map') go('map');
     else if (k === 'room' || k === 'el') go('room');
@@ -583,6 +643,16 @@ const actions: Record<string, (k: string) => void> = {
     });
   },
   'save-file'() { pruneOncePictures(); saveToFile(project); toast('Saved to a file in your downloads'); },
+  home() { goHome(); },
+  'open-story'(k) { void openStory(k); },
+  'new-story'() { void newStory(createProject(), 'room'); },
+  'new-sample'() { const p = sampleProject(); p.title = 'Last order (sample)'; void newStory(p, 'map'); },
+  'import-story'() { const input = $<HTMLInputElement>('#projectfile')!; input.value = ''; input.click(); },
+  'duplicate-story'(k) { void duplicateStory(k).then(() => refreshHome('Duplicated')); },
+  'delete-story'(k) {
+    if (k === storyId) storyId = null;
+    void deleteStory(k).then(() => refreshHome('Deleted'));
+  },
   'open-file'() { const input = $<HTMLInputElement>('#projectfile')!; input.value = ''; input.click(); },
   theme(k) { project.look.theme = k; save(); render(); },
   'look-choices'(k) { if (k === 'center') project.look.choices = 'center'; else delete project.look.choices; save(); render(); },
@@ -639,10 +709,8 @@ $('#projectfile')!.addEventListener('change', async ev => {
   if (!f) return;
   const p = await readProjectFile(f);
   if (!p) { toast('That file is not a Story Engine project.'); return; }
-  const before = snapshot();
-  replaceProject(p);
-  record(before);
-  toast(`Opened ${f.name}. Undo brings back what you had.`);
+  await newStory(p, 'map');
+  toast(`Opened ${f.name} as a new story.`);
 });
 
 $('#lookfile')!.addEventListener('change', async ev => {
@@ -1192,10 +1260,7 @@ document.addEventListener('pointercancel', drop);
 
 /* ---------- Start ---------- */
 
-void loadProject().then(p => {
-  project = p;
-  pruneOncePictures();
-  ui.roomId = project.rooms[0].id;
+void listStories().then(list => {
+  stories = list;
   render();
-  save();
 });

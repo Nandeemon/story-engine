@@ -2,11 +2,12 @@ import { characterOf, findRoomByName, parseScript, summarize, walkSteps } from '
 import { missingLook, unknownSpeaker } from './map';
 import { factKind, storyFacts } from './problems';
 import type { Problem } from './problems';
+import type { StoryInfo } from './store';
 import type { Character, FactValue, Project, Room, StoryElement } from '@story-engine/engine-core';
 import { BACKDROPS, CHARACTERS, EXPRESSIONS, FONTS, OBJECTS, THEMES, backdropHTML, characterSVG, choicesHTML, esc, hudHTML, sayHTML, stageHTML } from '@story-engine/runtime';
 import type { Preset } from '@story-engine/runtime';
 
-export type View = 'map' | 'room' | 'convo' | 'look' | 'play' | 'check';
+export type View = 'home' | 'map' | 'room' | 'convo' | 'look' | 'play' | 'check';
 export type Adding = 'char' | 'object' | 'bg' | null;
 
 export interface UI {
@@ -30,15 +31,41 @@ const svgOf = (v: Preset) => v.svg;
 /** True once the author has made anything worth keeping. */
 export const hasContent = (p: Project) => p.rooms.length > 1 || p.rooms.some(r => r.bg || r.els.length);
 
+function ago(t: number): string {
+  const m = Math.round((Date.now() - t) / 60000);
+  if (m < 1) return 'just now';
+  if (m < 60) return `${m} min ago`;
+  const h = Math.round(m / 60);
+  if (h < 24) return `${h} ${h === 1 ? 'hour' : 'hours'} ago`;
+  const d = Math.round(h / 24);
+  if (d < 14) return `${d} ${d === 1 ? 'day' : 'days'} ago`;
+  return new Date(t).toLocaleDateString();
+}
+
+/** The home screen: every story kept in this browser. */
+export function viewHome(stories: StoryInfo[], currentId: string | null): string {
+  const cover = (x: StoryInfo) => x.cover?.thumb ? `<img src="${esc(x.cover.thumb)}" alt="">` : x.cover?.preset ? backdropHTML({ preset: x.cover.preset }) : '';
+  const cards = stories.map(x => `<div class="storycard${x.id === currentId ? ' current' : ''}">
+      <button class="card" data-act="open-story" data-k="${esc(x.id)}"><span class="pic">${cover(x)}</span><span class="meta"><b>${esc(x.title)}</b><span>${x.rooms} ${x.rooms === 1 ? 'room' : 'rooms'} · changed ${ago(x.updated)}</span></span></button>
+      <div class="cardacts"><button class="btn small quiet" data-act="duplicate-story" data-k="${esc(x.id)}">Duplicate</button><button class="btn small quiet danger" data-act="delete-story" data-k="${esc(x.id)}" data-confirm="Delete for good?">Delete</button></div>
+    </div>`).join('');
+  const first = stories.length ? '' : `<div class="offer"><span>First time here?</span><button class="btn small play" data-act="new-sample">Open the sample story</button></div>`;
+  return `<div class="side home"><div class="maphead"><div><h2>Your stories</h2><p class="hint">Every story you make is kept in this browser. Click one to work on it.</p></div>
+      <div class="row"><button class="btn play" data-act="new-story">+ New story</button><button class="btn small" data-act="import-story">Open a file</button>${stories.length ? '<button class="btn small quiet" data-act="new-sample">Add the sample story</button>' : ''}</div></div>
+    ${first}
+    <div class="map stories">${cards}<button class="card new" data-act="new-story">+ New story</button></div>
+    <p class="hint">To keep a backup or move a story to another computer, open it and use Save to file on its Story map. Open a file adds it here as a new story.</p></div>`;
+}
+
 export function viewMap(p: Project, ui: UI, errors = 0): string {
   const actions = ui.confirmReset
     ? `<span class="hint">Erase everything?</span><button class="btn small danger" data-act="reset">Yes, start over</button><button class="btn small quiet" data-act="cancel">Keep it</button>`
-    : `<button class="btn small" data-act="save-file">Save to file</button><button class="btn small" data-act="open-file">Open a file</button><button class="btn small quiet" data-act="sample"${hasContent(p) ? ' data-confirm="This replaces your story. Click again"' : ''}>Load the sample scene</button><button class="btn small quiet" data-act="ask-reset">Start over</button>`;
+    : `<button class="btn small" data-act="save-file">Save to file</button><button class="btn small quiet" data-act="ask-reset">Start over</button>`;
   const cards = p.rooms.map(r => `<button class="card" data-act="open-room" data-k="${esc(r.id)}"><span class="pic">${backdropHTML(r.bg)}</span><span class="meta"><b>${esc(r.name)}</b><span>${r.els.length} ${r.els.length === 1 ? 'thing' : 'things'} placed${r.auto ? ' · starts talking right away' : ''}</span></span></button>`).join('');
   const publish = `<div class="publish">
       <label class="field"><span>Name of your story</span><input type="text" id="story-title" data-in="story-title" value="${esc(p.title ?? '')}" placeholder="${esc(p.rooms[0]?.name ?? 'Untitled story')}"></label>
       <div class="publishgo"><button class="btn play" data-act="make-game"${errors ? ` data-confirm="Check found ${errors} ${errors === 1 ? 'error' : 'errors'}. Make it anyway?"` : ''}>Make a game file</button><p class="hint">One file with your whole game. Open it in any browser, or upload it to itch.io (as an HTML game) or any website so others can play. Its typeface loads from the internet; offline a similar one shows.</p></div></div>`;
-  return `<div class="side"><div class="maphead"><div><h2>Story map</h2><p class="hint">Every room in your story. Click one to work in it. Your story is kept in this browser; Save to file keeps a copy you can move or back up.</p></div><div class="row">${actions}</div></div>
+  return `<div class="side"><div class="maphead"><div><h2>Story map</h2><p class="hint">Every room in this story. Click one to work in it. Save to file keeps a copy you can move or back up.</p></div><div class="row">${actions}</div></div>
     ${publish}
     <div class="map">${cards}<button class="card new" data-act="new-room">+ New room</button></div></div>`;
 }

@@ -18,7 +18,7 @@ npm run check    # type-check, tests and build
 
 ## Your work
 
-The editor keeps your story in this browser and warns you if it stops being able to save. **Save to file** on the Story map downloads the whole project, images included, as one `.story.json` file, and **Open a file** brings it back. Undo and Redo (Ctrl+Z, Ctrl+Shift+Z) cover every change to the project. Renaming a room updates every `Go to` that points at it, and renaming a character updates their lines.
+The editor opens on **Your stories**: every story kept in this browser, each saved on its own. Make a **New story**, open one, **Duplicate** it to try something out, or **Delete** it. Click Story Engine at the top left (or Your stories in the path) to get back. The editor warns you if the browser stops being able to save. **Save to file** on a story's Story map downloads it, images included, as one `.story.json` file, and **Open a file** on Your stories adds such a file as a new story. Undo and Redo (Ctrl+Z, Ctrl+Shift+Z) cover every change to the project. Renaming a room updates every `Go to` that points at it, and renaming a character updates their lines.
 
 ## Sharing your game
 
