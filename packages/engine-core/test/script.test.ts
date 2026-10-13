@@ -174,3 +174,29 @@ Mara: Bye.
     expect(writeScript(steps)).toBe(AUTHOR.replace('\nMara: You came back.\n', ''));
   });
 });
+
+describe('line effects and sounds', () => {
+  it('reads an effect with its settings and a sound, in any order', () => {
+    const [s] = parseScript('Mara (sound laugh, happy, shake strength 5 speed 1 x2): Ha!').steps;
+    expect(s).toMatchObject({ t: 'say', who: 'Mara', expr: 'happy', fx: 'shake', fxOpts: { strength: 5, speed: 1, times: 2 }, sound: 'laugh', text: 'Ha!' });
+  });
+  it('leaves normal settings out and writes the line back', () => {
+    const steps = parseScript('Mara (pulse strength 3): Oh.').steps;
+    expect(steps[0]).toMatchObject({ fx: 'pulse' });
+    expect((steps[0] as { fxOpts?: unknown }).fxOpts).toBeUndefined();
+    const s = steps[0] as Step & { t: 'say' };
+    s.fxOpts = { speed: 5 };
+    s.sound = 'gasp';
+    expect(writeScript(steps)).toBe('Mara (pulse speed 5, sound gasp): Oh.');
+  });
+  it('gives narration a sound', () => {
+    const [s] = parseScript('Narration (sound door): The door creaks.').steps;
+    expect(s).toMatchObject({ who: '', sound: 'door', text: 'The door creaks.' });
+    expect(writeScript([s])).toBe('Narration (sound door): The door creaks.');
+  });
+  it('keeps a look whose name only starts with an effect word', () => {
+    const [s] = parseScript('Mara (shake it off): Fine.').steps;
+    expect(s).toMatchObject({ expr: 'shake it off' });
+    expect((s as { fx?: string }).fx).toBeUndefined();
+  });
+});

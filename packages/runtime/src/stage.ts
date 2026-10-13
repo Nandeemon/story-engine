@@ -73,13 +73,27 @@ export function lookStyle(look: Look): string {
   return `--g-font:${FONTS[look.font] ?? FONTS.Lora};--g-box:${t.box};--g-fg:${t.fg};--g-accent:${t.accent};--g-on:${t.on};--g-radius:${look.radius}px;--g-size:${look.size}`;
 }
 
+/** Where an element sits: bottom centre, height, and for areas the width, in percent of the stage. */
+export function elementStyle(el: StoryElement): string {
+  return `left:${el.x}%;top:${el.y}%;height:${el.size}%${el.kind === 'area' ? `;width:${el.w ?? 20}%` : ''}`;
+}
+
+/** An invisible area: nothing in the game, a dashed box with its name in the editor. */
+export function areaArt(el: StoryElement, editing: boolean): string {
+  return editing ? `<span class="areabox"><b>${esc(el.name)}</b></span>` : '';
+}
+
 export function stageHTML(room: Room, o: StageOptions): string {
-  const els = room.els.map(el => {
+  const els = room.els.filter(el => o.mode !== 'look' || el.kind !== 'area').map(el => {
+    if (el.kind === 'area') {
+      const sel = o.mode === 'edit' && el.id === o.selected;
+      return `<button class="el area${sel ? ' sel' : ''}" data-el="${esc(el.id)}" style="${elementStyle(el)}" aria-label="${esc(el.name)}">${areaArt(el, o.mode === 'edit')}${sel ? '<span class="rz" data-resize aria-hidden="true"></span>' : ''}</button>`;
+    }
     const can = o.mode === 'play' && !!o.clickable?.(el);
     const cls = ['el', o.mode === 'edit' && el.id === o.selected ? 'sel' : '', can ? 'can' : ''].filter(Boolean).join(' ');
     const focus = o.mode === 'play' && !can ? ' tabindex="-1"' : '';
     const lineup = o.lineup?.elId === el.id ? o.lineup.lookId : undefined;
-    return `<button class="${cls}${lineup ? ' lining' : ''}" data-el="${esc(el.id)}" style="left:${el.x}%;top:${el.y}%;height:${el.size}%" aria-label="${esc(el.name)}"${focus}>${elementArt(el, o.expr?.[el.id], o.characters, lineup)}</button>`;
+    return `<button class="${cls}${lineup ? ' lining' : ''}" data-el="${esc(el.id)}" style="${elementStyle(el)}" aria-label="${esc(el.name)}"${focus}>${elementArt(el, o.expr?.[el.id], o.characters, lineup)}</button>`;
   }).join('');
   return `<div class="stage ${o.mode}" data-stage style="${lookStyle(o.look)}"><div class="bg">${backdropHTML(room.bg)}</div>${els}<div class="game">${o.game ?? ''}</div></div>`;
 }

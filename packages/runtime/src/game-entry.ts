@@ -28,7 +28,7 @@ body { display: grid; place-items: center; overflow: hidden; }
 }
 `;
 
-interface Saved { roomId: string; facts: Facts }
+interface Saved { roomId: string; facts: Facts; seen?: string[] }
 
 /** Progress is kept in this browser, so a player can close the game and continue later. */
 function saveStore(p: Project) {
@@ -84,10 +84,11 @@ function start(): void {
     createPlayer(frame, story, {
       roomId: from?.roomId,
       facts: from?.facts,
+      seen: from?.seen,
       hint: from ? undefined : 'Click someone or something to begin',
       // Saved on entering a room and whenever no conversation is running.
       onChange(st) {
-        if (st.roomId !== lastRoom || !st.scene) { lastRoom = st.roomId; store.save({ roomId: st.roomId, facts: st.facts }); }
+        if (st.roomId !== lastRoom || !st.scene) { lastRoom = st.roomId; store.save({ roomId: st.roomId, facts: st.facts, seen: st.seen }); }
       }
     });
   });

@@ -15,6 +15,8 @@ export interface Problem {
   path?: string;
   /** Script line, for problems the map cannot show. */
   line?: number;
+  /** Shown on the thing in its room rather than in its conversation. */
+  inRoom?: boolean;
   /** An on-screen display item, shown in Look. */
   hud?: string;
   where: string;
@@ -54,6 +56,15 @@ export function findProblems(p: Project): Problem[] {
     if (i > 0 && !doorsTo.has(room.name.trim().toLowerCase())) out.push({ level: 'warning', roomId: room.id, where: room.name, text: 'No conversation leads here, so the player cannot reach this room.' });
   });
   const used = new Set(storyFacts(p));
+  const sounds = new Set((p.sounds ?? []).map(x => x.name.toLowerCase()));
+  for (const room of p.rooms) for (const el of room.els) {
+    const base = { roomId: room.id, elId: el.id, where: `${room.name} › ${el.name}` };
+    if (el.cond && !used.has(el.cond.fact)) out.push({ ...base, inRoom: true, level: 'warning', text: `${el.name} is only in the room while "${el.cond.fact}" says so, but no conversation changes or checks "${el.cond.fact}", so ${el.name} may never show.` });
+    if (el.sound && !sounds.has(el.sound.toLowerCase())) out.push({ ...base, inRoom: true, level: 'warning', text: `The sound "${el.sound}" played on click is not among your sounds.` });
+    walkWithPaths(parseScript(el.script).steps, (st, path) => {
+      if (st.t === 'say' && st.sound && !sounds.has(st.sound.toLowerCase())) out.push({ ...base, level: 'warning', path, text: `The sound "${st.sound}" is not among your sounds. Add it on the Story map, or pick another.` });
+    });
+  }
   for (const w of p.hud ?? []) {
     if (!used.has(w.fact)) out.push({ level: 'warning', roomId: p.rooms[0]?.id ?? '', hud: w.id, where: 'Look › On-screen display', text: `"${w.text || w.fact}" shows the story fact "${w.fact}", but no conversation changes or checks it.` });
   }

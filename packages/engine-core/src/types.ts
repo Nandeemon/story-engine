@@ -22,8 +22,12 @@ export interface SayStep {
   /** The look (or expression) the speaker shows from this line on. */
   expr: string;
   text: string;
-  /** An effect on the speaker for this line: shake, bounce, jump or flash. */
+  /** An effect on the speaker for this line: shake, tremble, pulse, pop, bounce, jump or flash. */
   fx?: string;
+  /** How the effect plays; anything left out is normal. */
+  fxOpts?: { strength?: number; speed?: number; times?: number };
+  /** A sound from the story's sounds, by name, played as the line appears. */
+  sound?: string;
 }
 
 /** Where a character stands on stage: x and y are the bottom centre in percent of the stage, size is height in percent. */
@@ -81,7 +85,8 @@ export interface Backdrop {
   color?: string;
 }
 
-export type ElementKind = 'char' | 'object';
+/** A character, an object with a picture, or an invisible area the player can click (over a door, say). */
+export type ElementKind = 'char' | 'object' | 'area';
 
 /**
  * One picture of a character: an expression or a pose. Lines pick a look by name.
@@ -103,6 +108,8 @@ export interface CharacterLook {
 export interface Character {
   id: string;
   name: string;
+  /** The author's own notes about the character: who they are, what they want. */
+  about?: string;
   /** The base picture, shown as the look called "default". */
   base: string;
   looks: CharacterLook[];
@@ -124,6 +131,14 @@ export interface StoryElement {
   y: number;
   /** Height as a percentage of the stage height. */
   size: number;
+  /** For areas: width as a percentage of the stage width. */
+  w?: number;
+  /** Only in the room while this is true; otherwise the player does not see it. */
+  cond?: Condition;
+  /** A conversation for one time only: afterwards it stays but cannot be clicked, or it is gone. */
+  once?: 'stay' | 'hide';
+  /** A sound from the story's sounds, by name, played when the player clicks it. */
+  sound?: string;
   /** Starting expression or look for characters. */
   expr?: string;
   /** How this element's conversation opens: other characters step aside (default) or the room stays. */
@@ -136,8 +151,12 @@ export interface Room {
   id: string;
   name: string;
   bg: Backdrop | null;
-  /** Start the first conversation as soon as the player enters. */
+  /** Start a conversation as soon as the player enters. */
   auto: boolean;
+  /** The element whose conversation starts on entering; the first one with a conversation when not set. */
+  autoEl?: string;
+  /** Start it on the first visit only, instead of every visit. */
+  autoOnce?: boolean;
   els: StoryElement[];
 }
 
@@ -170,6 +189,14 @@ export interface HudWidget {
   hideUnset?: boolean;
 }
 
+/** A sound the author uploaded, played by name. */
+export interface Sound {
+  id: string;
+  name: string;
+  /** The sound as a data URL. */
+  data: string;
+}
+
 export interface Project {
   version: 1;
   /** The story's name, shown on the start screen of the game. */
@@ -179,4 +206,6 @@ export interface Project {
   characters: Character[];
   /** The on-screen display. */
   hud?: HudWidget[];
+  /** Sounds the author uploaded. */
+  sounds?: Sound[];
 }

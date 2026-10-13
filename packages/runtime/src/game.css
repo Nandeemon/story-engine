@@ -9,6 +9,8 @@
 .stage .bg .bgedge.blur { object-fit: cover; filter: blur(18px) brightness(.7); transform: scale(1.1); }
 
 .el { position: absolute; transform: translate(-50%, -100%); padding: 0; border: 0; background: none; display: block; touch-action: none; }
+.el[hidden] { display: none; }
+.el.area { padding: 0; }
 .el svg, .el img { height: 100%; width: auto; max-width: none; display: block; pointer-events: none; }
 .el .base.off { visibility: hidden; }
 .el .look { position: absolute; left: 50%; bottom: 0; transform-origin: 50% 100%; }
@@ -53,20 +55,26 @@
 .el.fx-in-pop .art { animation: se-in-pop .4s ease-out both; }
 .el.fx-out-left .art { animation: se-out-left .45s ease-in both; }
 .el.fx-out-right .art { animation: se-out-right .45s ease-in both; }
-.el.fx-shake .art { animation: se-shake .5s ease both; }
-.el.fx-bounce .art { animation: se-bounce .6s ease both; }
-.el.fx-jump .art { animation: se-jump .45s ease-out both; }
-.el.fx-flash .art { animation: se-flash .5s ease both; }
+.el.fx-shake .art { animation: se-shake calc(.5s * var(--fxd, 1)) ease var(--fxn, 1) both; }
+.el.fx-tremble .art { animation: se-tremble calc(.12s * var(--fxd, 1)) linear calc(var(--fxn, 1) * 5) both; }
+.el.fx-pulse .art { animation: se-pulse calc(.55s * var(--fxd, 1)) ease-in-out var(--fxn, 1) both; transform-origin: 50% 70%; }
+.el.fx-pop .art { animation: se-pop calc(.32s * var(--fxd, 1)) ease-out var(--fxn, 1) both; transform-origin: 50% 100%; }
+.el.fx-bounce .art { animation: se-bounce calc(.6s * var(--fxd, 1)) ease var(--fxn, 1) both; }
+.el.fx-jump .art { animation: se-jump calc(.45s * var(--fxd, 1)) ease-out var(--fxn, 1) both; }
+.el.fx-flash .art { animation: se-flash calc(.5s * var(--fxd, 1)) ease var(--fxn, 1) both; }
 @keyframes se-in-fade { from { opacity: 0; } }
 @keyframes se-in-left { from { translate: -60cqw 0; } }
 @keyframes se-in-right { from { translate: 60cqw 0; } }
 @keyframes se-in-pop { 0% { scale: .6; opacity: 0; } 70% { scale: 1.06; opacity: 1; } 100% { scale: 1; } }
 @keyframes se-out-left { to { translate: -60cqw 0; } }
 @keyframes se-out-right { to { translate: 60cqw 0; } }
-@keyframes se-shake { 0%, 100% { translate: 0 0; } 20% { translate: -3% 0; } 40% { translate: 3% 0; } 60% { translate: -2% 0; } 80% { translate: 2% 0; } }
-@keyframes se-bounce { 0%, 100% { translate: 0 0; } 30% { translate: 0 -4%; } 50% { translate: 0 0; } 70% { translate: 0 -2%; } }
-@keyframes se-jump { 0%, 100% { translate: 0 0; } 40% { translate: 0 -10%; } }
-@keyframes se-flash { 0%, 100% { filter: none; } 30% { filter: brightness(2.2); } }
+@keyframes se-shake { 0%, 100% { translate: 0 0; } 20% { translate: calc(-3% * var(--fxk, 1)) 0; } 40% { translate: calc(3% * var(--fxk, 1)) 0; } 60% { translate: calc(-2% * var(--fxk, 1)) 0; } 80% { translate: calc(2% * var(--fxk, 1)) 0; } }
+@keyframes se-tremble { 0%, 100% { translate: 0 0; } 25% { translate: calc(-.6% * var(--fxk, 1)) calc(.3% * var(--fxk, 1)); } 50% { translate: calc(.6% * var(--fxk, 1)) 0; } 75% { translate: calc(-.3% * var(--fxk, 1)) calc(-.3% * var(--fxk, 1)); } }
+@keyframes se-pulse { 0%, 100% { scale: 1; } 20% { scale: calc(1 + .05 * var(--fxk, 1)); } 40% { scale: 1; } 60% { scale: calc(1 + .035 * var(--fxk, 1)); } 80% { scale: 1; } }
+@keyframes se-pop { 0%, 100% { scale: 1; } 40% { scale: calc(1 + .12 * var(--fxk, 1)); } }
+@keyframes se-bounce { 0%, 100% { translate: 0 0; } 30% { translate: 0 calc(-4% * var(--fxk, 1)); } 50% { translate: 0 0; } 70% { translate: 0 calc(-2% * var(--fxk, 1)); } }
+@keyframes se-jump { 0%, 100% { translate: 0 0; } 40% { translate: 0 calc(-10% * var(--fxk, 1)); } }
+@keyframes se-flash { 0%, 100% { filter: none; } 30% { filter: brightness(calc(1 + 1.2 * var(--fxk, 1))); } }
 @media (prefers-reduced-motion: reduce) {
   .stage.play .el.staged { transition: opacity .2s; }
   .el[class*="fx-"] .art { animation: none; }

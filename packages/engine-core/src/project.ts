@@ -1,4 +1,4 @@
-import type { Backdrop, Character, CharacterLook, HudWidget, Look, Project, Room, StoryElement } from './types';
+import type { Backdrop, Character, CharacterLook, CompareOp, Condition, HudWidget, Look, Project, Room, Sound, StoryElement } from './types';
 import { isLineEffect } from './staging';
 import { renameLookInScript } from './refs';
 
@@ -25,6 +25,17 @@ const num = (v: unknown, fallback: number): number => (typeof v === 'number' && 
 const str = (v: unknown, fallback: string): string => (typeof v === 'string' ? v : fallback);
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
+
+const OPS: CompareOp[] = ['>=', '<=', '>', '<', '!=', '=', 'truthy'];
+function normalizeCondition(raw: unknown): Condition | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const c = raw as Record<string, unknown>;
+  const fact = str(c.fact, '').replace(/[^\w.]/g, '_');
+  if (!fact) return undefined;
+  const op = OPS.includes(c.op as CompareOp) ? c.op as CompareOp : 'truthy';
+  const value = typeof c.value === 'number' || typeof c.value === 'boolean' || typeof c.value === 'string' ? c.value : true;
+  return { fact, op, value };
+}
 
 function normalizeBackdrop(raw: unknown): Backdrop | null {
   if (!raw || typeof raw !== 'object') return null;
@@ -55,7 +66,7 @@ export function normalizeProject(raw: unknown): Project | null {
     const bg = normalizeBackdrop(x.bg);
     const els: StoryElement[] = (Array.isArray(x.els) ? x.els : []).filter(e => e && typeof e === 'object').map((e: Record<string, unknown>) => ({
       id: str(e.id, newId()),
-      kind: e.kind === 'char' ? 'char' : 'object',
+      kind: e.kind === 'char' ? 'char' : e.kind === 'area' ? 'area' : 'object',
       name: str(e.name, 'Thing'),
       preset: typeof e.preset === 'string' ? e.preset : undefined,
       characterId: typeof e.characterId === 'string' ? e.characterId : undefined,
@@ -63,11 +74,20 @@ export function normalizeProject(raw: unknown): Project | null {
       x: num(e.x, 50),
       y: num(e.y, 98),
       size: num(e.size, 50),
+      ...(e.kind === 'area' ? { w: clamp(num(e.w, 20), 1, 100) } : {}),
+      ...(normalizeCondition(e.cond) ? { cond: normalizeCondition(e.cond) } : {}),
+      ...(e.once === 'stay' || e.once === 'hide' ? { once: e.once } : {}),
+      ...(typeof e.sound === 'string' && e.sound ? { sound: e.sound } : {}),
       expr: typeof e.expr === 'string' ? e.expr : undefined,
       staging: e.staging === 'room' ? 'room' : undefined,
       script: str(e.script, '')
     }));
-    return { id: str(x.id, newId()), name: str(x.name, 'Room'), bg, auto: x.auto === true, els };
+    return {
+      id: str(x.id, newId()), name: str(x.name, 'Room'), bg, auto: x.auto === true,
+      ...(typeof x.autoEl === 'string' && els.some(e => e.id === x.autoEl) ? { autoEl: x.autoEl } : {}),
+      ...(x.autoOnce === true ? { autoOnce: true } : {}),
+      els
+    };
   });
   if (!rooms.length) return null;
   const characters: Character[] = (Array.isArray(r.characters) ? r.characters : [])
@@ -75,6 +95,7 @@ export function normalizeProject(raw: unknown): Project | null {
     .map((c: Record<string, unknown>) => ({
       id: str(c.id, newId()),
       name: str(c.name, 'Character'),
+      ...(typeof c.about === 'string' && c.about ? { about: c.about } : {}),
       base: c.base as string,
       looks: (Array.isArray(c.looks) ? c.looks : []).filter(l => l && typeof l === 'object' && typeof (l as Record<string, unknown>).img === 'string')
         .map((l: Record<string, unknown>): CharacterLook => ({
@@ -109,12 +130,15 @@ export function normalizeProject(raw: unknown): Project | null {
     w: clamp(num(w.w, 24), 5, 90),
     ...(w.hideUnset === true ? { hideUnset: true } : {})
   }));
+  const sounds: Sound[] = (Array.isArray(r.sounds) ? r.sounds : []).filter(x => x && typeof x === 'object' && typeof (x as Record<string, unknown>).data === 'string')
+    .map((x: Record<string, unknown>) => ({ id: str(x.id, newId()), name: cleanSoundName(str(x.name, 'sound')), data: x.data as string }));
   return {
     version: 1,
     ...(typeof r.title === 'string' && r.title.trim() ? { title: r.title.trim().slice(0, 80) } : {}),
     rooms,
     characters,
     ...(hud.length ? { hud } : {}),
+    ...(sounds.length ? { sounds } : {}),
     look: {
       theme: str(look.theme, DEFAULT_LOOK.theme),
       font: str(look.font, DEFAULT_LOOK.font),
@@ -130,10 +154,15 @@ export function normalizeProject(raw: unknown): Project | null {
 /** The name a line uses for a character's base picture. */
 export const DEFAULT_LOOK_NAME = 'default';
 
+/** Sound names sit inside "(sound laugh)" in the script, so they cannot hold ( ) : , or quotes. */
+export function cleanSoundName(name: string): string {
+  return name.replace(/\.[a-z0-9]{2,4}$/i, '').replace(/[():,"_]/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase().slice(0, 30) || 'sound';
+}
+
 /** Look names sit inside "Lin (happy): ..." in the script, so they cannot hold ( ) : , or quotes, or be an effect word. */
 export function cleanLookName(name: string): string {
   const n = name.replace(/[():,"]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 30) || 'look';
-  return isLineEffect(n) ? `${n} look` : n;
+  return isLineEffect(n) || /^sound\s/i.test(n) ? `${n} look` : n;
 }
 
 export function characterOf(project: Project, el: StoryElement): Character | undefined {

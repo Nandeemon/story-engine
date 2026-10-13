@@ -1,13 +1,14 @@
-import { characterOf, findRoomByName, parseScript, summarize, walkSteps } from '@story-engine/engine-core';
+import { CONDITION_WORDS, characterOf, findRoomByName, parseScript, summarize, valueText, walkSteps } from '@story-engine/engine-core';
 import { missingLook, unknownSpeaker } from './map';
 import { factKind, storyFacts } from './problems';
+import { soundSelect } from './widgets';
 import type { Problem } from './problems';
 import type { StoryInfo } from './store';
-import type { Character, FactValue, Project, Room, StoryElement } from '@story-engine/engine-core';
+import type { Character, CompareOp, FactValue, Project, Room, StoryElement } from '@story-engine/engine-core';
 import { BACKDROPS, CHARACTERS, EXPRESSIONS, FONTS, OBJECTS, THEMES, backdropHTML, characterSVG, choicesHTML, esc, hudHTML, sayHTML, stageHTML } from '@story-engine/runtime';
 import type { Preset } from '@story-engine/runtime';
 
-export type View = 'home' | 'map' | 'room' | 'convo' | 'look' | 'play' | 'check';
+export type View = 'home' | 'cast' | 'map' | 'room' | 'convo' | 'look' | 'play' | 'check';
 export type Adding = 'char' | 'object' | 'bg' | null;
 
 export interface UI {
@@ -57,6 +58,31 @@ export function viewHome(stories: StoryInfo[], currentId: string | null): string
     <p class="hint">To keep a backup or move a story to another computer, open it and use Save to file on its Story map. Open a file adds it here as a new story.</p></div>`;
 }
 
+function soundUses(p: Project, name: string): number {
+  const key = name.toLowerCase();
+  let n = 0;
+  for (const r of p.rooms) for (const e of r.els) {
+    if ((e.sound ?? '').toLowerCase() === key) n++;
+    walkSteps(parseScript(e.script).steps, st => { if (st.t === 'say' && (st.sound ?? '').toLowerCase() === key) n++; });
+  }
+  return n;
+}
+
+/** The story's sounds: listen, rename, remove, add. */
+function soundsSection(p: Project): string {
+  const rows = (p.sounds ?? []).map(x => {
+    const n = soundUses(p, x.name);
+    return `<div class="soundrow"><button class="btn small quiet" data-act="sound-play" data-k="${esc(x.id)}" aria-label="Play ${esc(x.name)}">▶</button>
+      <input type="text" id="sound-${esc(x.id)}" data-in="sound-name" data-k="${esc(x.id)}" value="${esc(x.name)}" aria-label="Sound name">
+      <span class="hint">${n ? `used ${n}×` : 'not used yet'}</span>
+      <button class="btn small quiet danger" data-act="sound-delete" data-k="${esc(x.id)}" data-confirm="${n ? 'Also taken off where it is used. Sure?' : 'Delete?'}">Delete</button></div>`;
+  }).join('');
+  return `<section class="soundsec"><div class="label">Sounds</div>
+    ${rows || '<p class="hint">No sounds yet. Add your own, such as a laugh, a gasp or a door.</p>'}
+    <div class="row"><button class="btn small" data-act="sound-add">+ Add a sound</button></div>
+    <p class="hint">A sound plays when something is clicked (under More on the thing) or with a line (in the line's Effect and sound).</p></section>`;
+}
+
 export function viewMap(p: Project, ui: UI, errors = 0): string {
   const actions = ui.confirmReset
     ? `<span class="hint">Erase everything?</span><button class="btn small danger" data-act="reset">Yes, start over</button><button class="btn small quiet" data-act="cancel">Keep it</button>`
@@ -67,7 +93,8 @@ export function viewMap(p: Project, ui: UI, errors = 0): string {
       <div class="publishgo"><button class="btn play" data-act="make-game"${errors ? ` data-confirm="Check found ${errors} ${errors === 1 ? 'error' : 'errors'}. Make it anyway?"` : ''}>Make a game file</button><p class="hint">One file with your whole game. Open it in any browser, or upload it to itch.io (as an HTML game) or any website so others can play. Its typeface loads from the internet; offline a similar one shows.</p></div></div>`;
   return `<div class="side"><div class="maphead"><div><h2>Story map</h2><p class="hint">Every room in this story. Click one to work in it. Save to file keeps a copy you can move or back up.</p></div><div class="row">${actions}</div></div>
     ${publish}
-    <div class="map">${cards}<button class="card new" data-act="new-room">+ New room</button></div></div>`;
+    <div class="map">${cards}<button class="card new" data-act="new-room">+ New room</button></div>
+    ${soundsSection(p)}</div>`;
 }
 
 function emptyRoom(): string {
@@ -89,7 +116,9 @@ function addingPanel(p: Project, a: Exclude<Adding, null>): string {
     : a === 'object' ? thumbs(OBJECTS, 'add-object', 'obj', svgOf)
     : thumbs(BACKDROPS, 'set-bg', '', svgOf);
   const upload = a === 'char' ? 'Use your own picture' : 'Use your own image';
-  return `<h2>${title}</h2>${own}${grid}
+  const area = a === 'object' ? `<div class="thumbs"><button class="thumb" data-act="add-area"><span class="pic obj areapic"><span class="areabox"><b>Click</b></span></span><b>Clickable area</b></button></div>
+    <p class="hint">A clickable area is invisible in the game. Put it over a door, a window or a sign in the backdrop.</p><div class="label">Objects</div>` : '';
+  return `<h2>${title}</h2>${own}${area}${grid}
     <div class="row"><button class="btn small" data-act="upload" data-k="${a}">${upload}</button><button class="btn small quiet" data-act="cancel">Cancel</button></div>`;
 }
 
@@ -133,7 +162,49 @@ function lookPanel(p: Project, c: Character, lookId: string): string {
     <div class="row"><button class="btn small danger" data-act="look-delete" data-confirm="${used ? `${used} line${used === 1 ? ' uses' : 's use'} it. Click again` : 'Click again to delete the look'}">Delete this look</button></div>`;
 }
 
-function elementPanel(p: Project, e: StoryElement): string {
+const OPS: [CompareOp, string][] = [...CONDITION_WORDS.map(([w, op]) => [op, w] as [CompareOp, string]), ['truthy', 'is yes']];
+
+/** Settings every room thing shares, under More: when it is there, how often it talks, its sound. */
+function moreFields(p: Project, e: StoryElement): string {
+  const c = e.cond;
+  const cond = `<div class="field"><span>In the room</span>
+      <select id="el-cond-on" data-in="el-cond-on"><option value=""${c ? '' : ' selected'}>Always</option><option value="on"${c ? ' selected' : ''}>Only if a story fact says so</option></select>
+      ${c ? `<div class="condrow"><input type="text" list="el-facts" id="el-cond-fact" data-in="el-cond-fact" value="${esc(c.fact)}" aria-label="Story fact">
+        <select id="el-cond-op" data-in="el-cond-op" aria-label="Test">${OPS.map(([op, w]) => `<option value="${op}"${op === c.op ? ' selected' : ''}>${w}</option>`).join('')}</select>
+        ${c.op === 'truthy' ? '' : `<input type="text" id="el-cond-val" data-in="el-cond-val" value="${esc(valueText(c.value))}" aria-label="Value">`}</div>
+        <datalist id="el-facts">${storyFacts(p).map(f => `<option value="${esc(f)}">`).join('')}</datalist>
+        <p class="hint">${esc(e.name)} is only in the room while this is true, so a conversation can bring ${e.kind === 'char' ? 'them' : 'it'} in with a Change.</p>` : ''}</div>`;
+  const once = e.script.trim() ? `<label class="field"><span>How often it can be clicked</span><select id="el-once" data-in="el-once">
+      <option value=""${e.once ? '' : ' selected'}>Every time</option>
+      <option value="stay"${e.once === 'stay' ? ' selected' : ''}>Once, then it stays but cannot be clicked</option>
+      <option value="hide"${e.once === 'hide' ? ' selected' : ''}>Once, then it is gone</option></select></label>` : '';
+  const sound = `<label class="field"><span>Sound when clicked</span>${soundSelect(p, 'el-sound', 'data-in="el-sound"', e.sound)}</label>`;
+  return cond + once + sound;
+}
+
+function areaPanel(p: Project, r: Room, e: StoryElement): string {
+  const door = e.script.trim().match(/^go to\s+(.+)$/i);
+  const simple = !e.script.trim() || (door && !e.script.trim().includes('\n'));
+  const target = door ? door[1].trim().toLowerCase() : '';
+  const rooms = p.rooms.filter(x => x.id !== r.id);
+  const leads = simple
+    ? `<label class="field"><span>Clicking it goes to</span><select id="area-door" data-in="area-door"><option value="">Nowhere yet</option>${rooms.map(x => `<option${x.name.toLowerCase() === target ? ' selected' : ''}>${esc(x.name)}</option>`).join('')}<option value="__new">A new room…</option></select></label>`
+    : '';
+  return `<h2>${esc(e.name)}</h2>
+    <button class="btn${simple ? '' : ' play'} block" data-act="convo">${e.script.trim() ? 'Edit what happens on click' : 'Make it say or do something'}</button>
+    ${leads}
+    <label class="field"><span>Name (only you see it)</span><input type="text" id="el-name" data-in="el-name" value="${esc(e.name)}"></label>
+    <details class="more" id="el-more"><summary>More</summary><div>
+      <label class="field"><span>Width</span><input type="range" id="el-w" data-in="el-w" min="2" max="100" value="${e.w ?? 20}"></label>
+      <label class="field"><span>Height</span><input type="range" id="el-size" data-in="el-size" min="2" max="110" value="${e.size}"></label>
+      ${moreFields(p, e)}
+      <div class="row"><button class="btn small danger" data-act="remove" data-confirm="Click again to remove">Remove</button></div>
+    </div></details>
+    <p class="hint">Invisible in the game; players see a hand pointer over it. Drag it to move, drag its corner to change its size.</p>`;
+}
+
+function elementPanel(p: Project, e: StoryElement, r?: Room): string {
+  if (e.kind === 'area' && r) return areaPanel(p, r, e);
   const name = esc(e.name);
   const c = characterOf(p, e);
   const has = e.script.trim() !== '';
@@ -154,6 +225,7 @@ function elementPanel(p: Project, e: StoryElement): string {
     <label class="field"><span>Size</span><input type="range" id="el-size" data-in="el-size" min="6" max="110" value="${e.size}"></label>
     ${c ? looksStrip(c, e) : ''}
     <details class="more" id="el-more"><summary>More</summary><div>${expr}${builtIn}
+      ${moreFields(p, e)}
       <div class="row"><button class="btn small quiet" data-act="front">Bring to front</button><button class="btn small danger" data-act="remove" data-confirm="Click again to remove">Remove</button></div>
     </div></details>
     <p class="hint">Drag ${name} in the picture to move. Click empty space to go back to the room.</p>`;
@@ -175,14 +247,25 @@ function backdropField(r: Room): string {
   return `<div class="field"><span>Backdrop</span><div class="row">${modes.map(([k, n, d]) => `<button class="btn small${fit === k ? ' ink' : ' quiet'}" data-act="bg-fit" data-k="${k}" title="${d}" aria-pressed="${fit === k}">${n}</button>`).join('')}</div>${extra}</div>`;
 }
 
+/** What happens when the player walks in: nothing, or a conversation, every visit or the first one. */
+function enterField(r: Room): string {
+  const talkers = r.els.filter(e => e.script.trim());
+  if (!talkers.length) return '';
+  const cur = r.auto ? (r.autoEl && talkers.some(e => e.id === r.autoEl) ? r.autoEl : talkers[0].id) : '';
+  return `<div class="field"><span>When the player enters</span><select id="room-auto" data-in="room-auto">
+      <option value=""${cur ? '' : ' selected'}>Nothing starts: the player looks around</option>
+      ${talkers.map(e => `<option value="${esc(e.id)}"${cur === e.id ? ' selected' : ''}>${e.kind === 'char' ? `${esc(e.name)} starts talking` : `${esc(e.name)}'s conversation starts`}</option>`).join('')}</select>
+    ${cur ? `<div class="row"><button class="btn small${r.autoOnce ? ' quiet' : ' ink'}" data-act="room-auto-once" data-k="" aria-pressed="${!r.autoOnce}">Every visit</button><button class="btn small${r.autoOnce ? ' ink' : ' quiet'}" data-act="room-auto-once" data-k="1" aria-pressed="${!!r.autoOnce}">First visit only</button></div>` : ''}</div>`;
+}
+
 function roomPanel(p: Project, r: Room): string {
   return `<h2>${esc(r.name)}</h2>
     <div class="row"><button class="btn ink" data-act="adding" data-k="char">Add a character</button><button class="btn" data-act="adding" data-k="object">Add an object</button></div>
     <label class="field"><span>Room name</span><input type="text" id="room-name" data-in="room-name" value="${esc(r.name)}"></label>
+    ${enterField(r)}
     ${r.bg ? backdropField(r) : ''}
     <details class="more" id="room-more"><summary>More</summary><div>
       <button class="btn small quiet" data-act="adding" data-k="bg">Change the backdrop</button>
-      <label class="check"><input type="checkbox" id="room-auto" data-in="room-auto"${r.auto ? ' checked' : ''}><span>Start talking right away when the player enters, like a classic visual novel</span></label>
       ${p.rooms.length > 1 ? '<button class="btn small danger" data-act="del-room" data-confirm="Click again to delete the room">Delete this room</button>' : ''}
     </div></details>
     <p class="hint">${r.els.length ? 'Click anything in the picture to change it.' : 'The room is ready. Add someone to talk to.'}</p>`;
@@ -192,7 +275,7 @@ export function viewRoom(p: Project, ui: UI, r: Room, e: StoryElement | undefine
   if (!r.bg && !r.els.length) return emptyRoom();
   const c = e ? characterOf(p, e) : undefined;
   const lining = e && c && ui.lookEdit && c.looks.some(l => l.id === ui.lookEdit) ? { elId: e.id, lookId: ui.lookEdit } : undefined;
-  const side = ui.adding ? addingPanel(p, ui.adding) : lining && c ? lookPanel(p, c, lining.lookId) : e ? elementPanel(p, e) : roomPanel(p, r);
+  const side = ui.adding ? addingPanel(p, ui.adding) : lining && c ? lookPanel(p, c, lining.lookId) : e ? elementPanel(p, e, r) : roomPanel(p, r);
   return `<div class="work"><div>${stageHTML(r, { mode: 'edit', look: p.look, selected: lining ? null : ui.sel, characters: p.characters, lineup: lining })}</div><aside class="side">${side}</aside></div>`;
 }
 
@@ -214,6 +297,8 @@ export type ConvoMode = 'map' | 'script';
 const CHEAT = `Mara: Hello.
 Mara (smiling): Hi again.
 Mara (sad, shake): With an effect.
+Mara (pulse strength 4 speed 2 x2): Settings 1-5.
+Mara (happy, sound laugh): With a sound.
 A line with no name is narration.
 Narration: Move on, it said.
 Show Lin as happy at left with fade
@@ -239,9 +324,9 @@ function convoBar(mode: ConvoMode): string {
     <button class="btn small play" data-act="play-convo">Play this conversation</button></div>`;
 }
 
-export function viewConvo(p: Project, r: Room, e: StoryElement, mode: ConvoMode, map: { canvas: string; side: string }): string {
+export function viewConvo(p: Project, r: Room, e: StoryElement, mode: ConvoMode, map: { canvas: string; side: string; scene: string }): string {
   if (mode === 'map') {
-    return `<div class="work"><div class="mapwrap">${convoBar(mode)}<div id="mapholder">${map.canvas}</div></div><aside class="side" id="mside">${map.side}</aside></div>`;
+    return `<div class="work"><div class="mapwrap">${convoBar(mode)}<div id="mscene">${map.scene}</div><div id="mapholder">${map.canvas}</div></div><aside class="side" id="mside">${map.side}</aside></div>`;
   }
   const who = e.kind === 'char' ? esc(e.name) : 'Narrator';
   return `<div class="work"><div class="mapwrap">${convoBar(mode)}<div class="paper">

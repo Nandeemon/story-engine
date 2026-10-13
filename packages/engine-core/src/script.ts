@@ -1,5 +1,5 @@
 import type { CompareOp, Condition, Effect, FactValue, ParseResult, Placement, ScriptError, Step } from './types';
-import { isLineEffect, parsePlace, placeText } from './staging';
+import { lineFxText, parseLineFx, parsePlace, placeText } from './staging';
 
 /**
  * Writing mode: turns a conversation written like a script into steps, and back.
@@ -174,12 +174,19 @@ function parse(src: string, noteSources: boolean): ParseResult {
       } else if ((m = l.text.match(/^([^:"()]{1,40}?)\s*(?:\(([^)]+)\))?\s*:\s*(.+)$/))) {
         pos++;
         const who = m[1].trim();
-        // "(sad, shake)": a look and a line effect, in any order.
+        // "(sad, shake strength 4, sound laugh)": a look, a line effect and a sound, in any order.
         const parts = (m[2] ?? '').split(',').map(x => x.trim()).filter(Boolean);
-        const fx = parts.find(isLineEffect);
-        const expr = parts.filter(x => x !== fx).join(', ');
+        let fx: ReturnType<typeof parseLineFx> = null, sound = '';
+        const looks: string[] = [];
+        for (const part of parts) {
+          const f: ReturnType<typeof parseLineFx> = !fx ? parseLineFx(part) : null;
+          const snd = part.match(/^sound\s+(.+)$/i);
+          if (f) fx = f; else if (snd && !sound) sound = snd[1].trim(); else looks.push(part);
+        }
+        const expr = looks.join(', ');
         const say: Step = /^narration$/i.test(who) ? { t: 'say', who: '', expr: '', text: m[3] } : { t: 'say', who, expr, text: m[3] };
-        if (fx && say.who) say.fx = fx.toLowerCase();
+        if (fx && say.who) { say.fx = fx.fx; if (Object.keys(fx.opts).length) say.fxOpts = fx.opts; }
+        if (sound) say.sound = sound;
         steps.push(mark(say, l));
       } else {
         pos++;
@@ -273,8 +280,10 @@ function headerOf(s: Step): string | null {
     case 'say': {
       const text = oneLine(s.text) || '...';
       const who = cleanName(s.who);
-      const paren = [cleanName(s.expr).replace(/,/g, ' '), s.fx ?? ''].filter(Boolean).join(', ');
+      const sound = s.sound ? `sound ${cleanName(s.sound).replace(/,/g, ' ')}` : '';
+      const paren = [cleanName(s.expr).replace(/,/g, ' '), s.fx && who ? lineFxText(s.fx, s.fxOpts) : '', sound].filter(Boolean).join(', ');
       if (who) return `${who}${paren ? ` (${paren})` : ''}: ${text}`;
+      if (sound) return `Narration (${sound}): ${text}`;
       return plainNarration(text) ? text : `Narration: ${text}`;
     }
     case 'choice': return 'Choice';

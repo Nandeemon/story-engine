@@ -1,8 +1,8 @@
 import '@story-engine/runtime/game.css';
 import './editor.css';
-import { walkSteps, characterOf, cleanLookName, createProject, createRoom, findLook, findRoomByName, newId, normalizeProject, parseScript, renameLookInScript, renameRoomInScript, renameSpeakerInScript, uniqueLookName, writeScript, getStep } from '@story-engine/engine-core';
+import { walkSteps, characterOf, cleanLookName, cleanSoundName, renameSoundInScript, toValue, createProject, createRoom, findLook, findRoomByName, newId, normalizeProject, parseScript, renameLookInScript, renameRoomInScript, renameSpeakerInScript, uniqueLookName, writeScript, getStep } from '@story-engine/engine-core';
 import type { Character, CharacterLook, Facts, Project, Room, StoryElement } from '@story-engine/engine-core';
-import { BACKDROPS, CHARACTERS, OBJECTS, backdropHTML, createPlayer, elementArt, esc, lookStyle, sayHTML } from '@story-engine/runtime';
+import { BACKDROPS, CHARACTERS, OBJECTS, backdropHTML, createPlayer, elementArt, esc, fxVars, lookStyle, sayHTML } from '@story-engine/runtime';
 import type { Player, PlayState } from '@story-engine/runtime';
 import { addStory, deleteStory, duplicateStory, listStories, loadStory, sampleProject, saveStory, whenSaved } from './store';
 import type { StoryInfo } from './store';
@@ -10,9 +10,10 @@ import { inserts, lookStage, scriptStatus, viewCheck, viewConvo, viewHome, viewL
 import { factKind, findProblems, storyFacts } from './problems';
 import type { Problem } from './problems';
 import type { Adding, ConvoMode, LookTab, UI, View } from './views';
-import { applyZoom, drawEdges, mapAction, mapHTML, mapInput, mapSide, mapView, openView, setZoom } from './map';
+import { applyZoom, drawEdges, mapAction, mapHTML, mapInput, mapScene, mapSide, mapView, openView, setZoom } from './map';
 import type { MapCtx, MapResult } from './map';
 import { readProjectFile, saveToFile } from './files';
+import { viewCast } from './cast';
 
 const $ = <T extends HTMLElement = HTMLElement>(s: string) => document.querySelector<T>(s);
 
@@ -28,6 +29,9 @@ const MODE_KEY = 'story-engine:convo-mode';
 let convoMode: ConvoMode = 'map';
 try { if (localStorage.getItem(MODE_KEY) === 'script') convoMode = 'script'; } catch { /* default to the map */ }
 let mapSel: string | null = null;
+const SCENE_KEY = 'story-engine:scene-open';
+let sceneOpen = true;
+try { sceneOpen = localStorage.getItem(SCENE_KEY) !== 'no'; } catch { /* shown */ }
 
 /* Test values for story facts: kept in this browser for testing only, never part of the story. */
 const TEST_KEY = 'story-engine:test-facts';
@@ -51,6 +55,8 @@ let problems: Problem[] = [];
 /** The on-screen display widget being edited in Look. */
 let hudSel: string | null = null;
 let lookTab: LookTab = 'style';
+/** The character open in the Characters view; null shows the list. */
+let castSel: string | null = null;
 const hudWidget = (id: string | undefined) => project.hud?.find(w => w.id === id);
 function refreshLookStage(): void {
   const host = $('#lookstage');
@@ -175,6 +181,7 @@ function crumbs(): [string, string][] {
   if (ui.view !== 'map') list.push(['room', r.name]);
   if (ui.view === 'convo' && e) list.push(['el', e.name], ['convo', 'Conversation']);
   if (ui.view === 'look') list.push(['look', 'Look']);
+  if (ui.view === 'cast') { list.splice(2); list.push(['cast', 'Characters']); const c = project.characters.find(x => x.id === castSel); if (c) list.push(['cast-one', c.name]); }
   if (ui.view === 'check') list.push(['check', 'Check']);
   return list;
 }
@@ -197,7 +204,7 @@ function renderBar(): void {
     ? '<button class="btn ink" data-act="stop">Stop</button>'
     : `<button class="btn small quiet" data-act="undo" title="Undo (Ctrl+Z)"${past.length ? '' : ' disabled'}>Undo</button>
        <button class="btn small quiet" data-act="redo" title="Redo (Ctrl+Shift+Z)"${future.length ? '' : ' disabled'}>Redo</button>
-       ${checkButton()}<button class="btn${ui.view === 'look' ? ' ink' : ''}" data-act="look">Look</button><button class="btn play" data-act="play">Play</button>`;
+       ${checkButton()}<button class="btn${ui.view === 'cast' ? ' ink' : ''}" data-act="cast">Characters</button><button class="btn${ui.view === 'look' ? ' ink' : ''}" data-act="look">Look</button><button class="btn play" data-act="play">Play</button>`;
 }
 
 function render(): void {
@@ -209,11 +216,12 @@ function render(): void {
   const main = $('#main')!;
   switch (ui.view) {
     case 'home': main.innerHTML = viewHome(stories, storyId); break;
+    case 'cast': main.innerHTML = viewCast(project, castSel); break;
     case 'map': main.innerHTML = viewMap(project, ui, problems.filter(x => x.level === 'error').length); break;
     case 'room': main.innerHTML = viewRoom(project, ui, r, e); break;
     case 'convo': {
       const ctx = mapCtx()!;
-      main.innerHTML = viewConvo(project, r, e!, convoMode, { canvas: convoMode === 'map' ? mapHTML(ctx) : '', side: convoMode === 'map' ? mapSide(ctx) : '' });
+      main.innerHTML = viewConvo(project, r, e!, convoMode, { canvas: convoMode === 'map' ? mapHTML(ctx) : '', side: convoMode === 'map' ? mapSide(ctx) : '', scene: convoMode === 'map' ? mapScene(ctx, sceneOpen) : '' });
       if (convoMode === 'map') {
         if (freshConvo) openView(); else applyZoom();
         afterMap();
@@ -269,6 +277,8 @@ function refreshMap(): void {
     : active!.dataset.mapAct ? `[data-map-act="${active!.dataset.mapAct}"]${active!.dataset.k ? `[data-k="${CSS.escape(active!.dataset.k)}"]` : ''}` : '';
   holder.innerHTML = mapHTML(ctx);
   side.innerHTML = mapSide(ctx);
+  const sceneHost = $('#mscene');
+  if (sceneHost) sceneHost.innerHTML = mapScene(ctx, sceneOpen);
   applyZoom();
   const next = $('#mscroll');
   if (next) { next.scrollLeft = scroll[0]; next.scrollTop = scroll[1]; }
@@ -481,7 +491,7 @@ function onceSpeaker(): { character: Character } | null {
 }
 
 /** What the shared look-file input is for right now. */
-let lookFileMode: { kind: 'add' } | { kind: 'replace'; lookId: string } | { kind: 'once' } = { kind: 'add' };
+let lookFileMode: { kind: 'add' } | { kind: 'replace'; lookId: string } | { kind: 'once' } | { kind: 'cast'; characterId: string } = { kind: 'add' };
 function pickLookFiles(mode: typeof lookFileMode, multiple: boolean): void {
   lookFileMode = mode;
   const input = $<HTMLInputElement>('#lookfile')!;
@@ -497,11 +507,13 @@ let lookReturn: { elId: string | null; mapSel: string | null } | null = null;
 let lookCompare: 'see-through' | 'difference' = 'see-through';
 
 /** Actions that never change the project, so they are not recorded for Undo. */
-const NOT_RECORDED = new Set(['home', 'open-story', 'new-story', 'new-sample', 'import-story', 'duplicate-story', 'delete-story', 'test-off', 'look-tab', 'make-game', 'hud-sel', 'play-here', 'check', 'goto-problem', 'test-clear', 'once-lineup', 'look-compare', 'undo', 'redo', 'save-file', 'open-file', 'upload', 'play', 'play-convo', 'stop', 'convo-mode', 'look', 'crumb', 'add-looks', 'look-replace', 'once-picture', 'look-open', 'look-done']);
+const NOT_RECORDED = new Set(['sound-add', 'sound-play', 'cast', 'cast-open', 'cast-back', 'cast-new', 'cast-promote', 'cast-add-looks', 'cast-goto-room', 'cast-goto-convo', 'fx-try', 'scene-toggle', 'home', 'open-story', 'new-story', 'new-sample', 'import-story', 'duplicate-story', 'delete-story', 'test-off', 'look-tab', 'make-game', 'hud-sel', 'play-here', 'check', 'goto-problem', 'test-clear', 'once-lineup', 'look-compare', 'undo', 'redo', 'save-file', 'open-file', 'upload', 'play', 'play-convo', 'stop', 'convo-mode', 'look', 'crumb', 'add-looks', 'look-replace', 'once-picture', 'look-open', 'look-done']);
 
 const actions: Record<string, (k: string) => void> = {
   crumb(k) {
     if (k === 'home') return goHome();
+    if (k === 'cast') { castSel = null; return go('cast'); }
+    if (k === 'cast-one') return;
     if (k === 'map' || k === 'room') ui.sel = null;
     if (k === 'map') go('map');
     else if (k === 'room' || k === 'el') go('room');
@@ -593,6 +605,59 @@ const actions: Record<string, (k: string) => void> = {
     save();
     refreshMap();
   },
+  'fx-try'() { tryEffect(); },
+  'sound-add'() { pickSound(() => undefined); },
+  'sound-play'(k) { const x = project.sounds?.find(y => y.id === k); if (x) previewSound(x.name); },
+  'sound-delete'(k) {
+    const x = project.sounds?.find(y => y.id === k);
+    if (!x || !project.sounds) return;
+    project.sounds = project.sounds.filter(y => y !== x);
+    if (!project.sounds.length) delete project.sounds;
+    for (const r of project.rooms) for (const e of r.els) {
+      if ((e.sound ?? '').toLowerCase() === x.name) delete e.sound;
+      e.script = renameSoundInScript(e.script, x.name, '');
+    }
+    save(); render();
+  },
+  cast() { castSel = null; go(ui.view === 'cast' ? 'room' : 'cast'); },
+  'cast-open'(k) { castSel = k; render(); window.scrollTo(0, 0); },
+  'cast-back'() { castSel = null; render(); },
+  'cast-new'() { pickCharacter(c => { castSel = c.id; go('cast'); toast(`${c.name} is ready. Add looks, or place ${c.name} in a room.`); }); },
+  'cast-promote'(k) {
+    pickCharacter(c => {
+      // The new character keeps the speaker's name, so their lines are theirs; starter figures with that name use it now.
+      c.name = k;
+      for (const r of project.rooms) for (const e of r.els) if (e.kind === 'char' && !e.characterId && e.name.trim().toLowerCase() === k.trim().toLowerCase()) { e.characterId = c.id; e.preset = undefined; e.expr = undefined; }
+      castSel = c.id;
+      go('cast');
+      toast(`${k} now has your picture. Add looks for more expressions.`);
+    });
+  },
+  'cast-add-looks'() { if (castSel) pickLookFiles({ kind: 'cast', characterId: castSel }, true); },
+  'cast-look-delete'(k) {
+    const c = project.characters.find(x => x.id === castSel);
+    if (!c) return;
+    c.looks = c.looks.filter(l => l.id !== k);
+    save(); render();
+  },
+  'cast-goto-room'(k) { const [roomId, elId] = k.split('|'); ui.roomId = roomId; ui.sel = elId; go('room'); },
+  'cast-goto-convo'(k) { const [roomId, elId] = k.split('|'); ui.roomId = roomId; ui.sel = elId; mapSel = null; freshConvo = true; go('convo'); },
+  'cast-delete'() {
+    const c = project.characters.find(x => x.id === castSel);
+    if (!c) return;
+    project.characters = project.characters.filter(x => x !== c);
+    for (const r of project.rooms) r.els = r.els.filter(e => e.characterId !== c.id);
+    if (!room().els.some(e => e.id === ui.sel)) ui.sel = null;
+    castSel = null;
+    save(); render();
+    toast(`Deleted ${c.name}. Their lines stay, as a voice without a picture. Undo brings ${c.name} back.`);
+  },
+  'scene-toggle'() { sceneOpen = !sceneOpen; try { localStorage.setItem(SCENE_KEY, sceneOpen ? 'yes' : 'no'); } catch { /* this session */ } refreshMap(); },
+  'add-area'() {
+    const n = room().els.filter(x => x.kind === 'area').length + 1;
+    place({ id: newId(), kind: 'area', name: n === 1 ? 'Clickable area' : `Clickable area ${n}`, x: 50, y: 72, size: 44, w: 14, script: '' });
+  },
+  'room-auto-once'(k) { room().autoOnce = k === '1' || undefined; save(); render(); },
   'add-object'(k) {
     place({ id: newId(), kind: 'object', preset: k, name: OBJECTS[k].name, x: 60, y: 78, size: 16, script: '' });
   },
@@ -669,6 +734,7 @@ const actions: Record<string, (k: string) => void> = {
     if (pr.hud) { hudSel = pr.hud; lookTab = 'hud'; go('look'); return; }
     ui.roomId = pr.roomId;
     if (!pr.elId) { ui.sel = null; go('room'); return; }
+    if (pr.inRoom) { ui.sel = pr.elId; go('room'); const more = $<HTMLDetailsElement>('#el-more'); if (more) more.open = true; return; }
     ui.sel = pr.elId;
     convoMode = pr.line !== undefined ? 'script' : 'map';
     mapSel = pr.path ?? null;
@@ -702,6 +768,105 @@ const actions: Record<string, (k: string) => void> = {
   }
 };
 
+/** Plays the selected line's effect on the speaker in the scene picture, and its sound. */
+function tryEffect(): void {
+  const ctx = mapCtx();
+  if (!ctx || !mapSel) return;
+  const step = getStep(parseScript(ctx.el.script).steps, mapSel);
+  if (step?.t !== 'say') return;
+  if (step.sound) previewSound(step.sound);
+  if (!step.fx) return;
+  const node = [...document.querySelectorAll<HTMLElement>('.mpreview .el.staged')].find(n => (n.dataset.who ?? '').toLowerCase() === step.who.trim().toLowerCase());
+  if (!node) return;
+  node.className = node.className.replace(/\bfx-[\w-]+/g, '').trim();
+  node.style.cssText = node.style.cssText.replace(/--fx[a-z]:[^;]*;?/g, '') + `;${fxVars(step.fxOpts)}`;
+  void node.offsetWidth;
+  node.classList.add(`fx-${step.fx}`);
+}
+
+/* ---------- New characters from a picture ---------- */
+
+let charDone: ((c: Character) => void) | null = null;
+/** Asks for a picture and makes a new main character from it, without placing it anywhere. */
+function pickCharacter(done: (c: Character) => void): void {
+  charDone = done;
+  const input = $<HTMLInputElement>('#charfile')!;
+  input.value = '';
+  input.click();
+}
+$('#charfile')!.addEventListener('change', async ev => {
+  const f = (ev.target as HTMLInputElement).files?.[0];
+  const done = charDone;
+  charDone = null;
+  if (!f) return;
+  let img: string;
+  try { img = await readImage(f, 900, 'image/webp'); } catch { toast('That picture could not be opened.'); return; }
+  const before = snapshot();
+  let name = characterNameFromFile(f), i = 2;
+  const base = name;
+  while (project.characters.some(c => c.name.toLowerCase() === name.toLowerCase())) name = `${base} ${i++}`;
+  const c: Character = { id: newId(), name, base: img, looks: [] };
+  project.characters.push(c);
+  done?.(c);
+  save();
+  record(before);
+});
+
+/* ---------- Sounds ---------- */
+
+let soundDone: ((name: string) => void) | null = null;
+/** Asks for a sound file; when it is added, done gets its name. */
+function pickSound(done: (name: string) => void): void {
+  soundDone = done;
+  const input = $<HTMLInputElement>('#soundfile')!;
+  input.value = '';
+  input.click();
+}
+
+const SOUND_LIMIT = 3 * 1024 * 1024;
+$('#soundfile')!.addEventListener('change', ev => {
+  const f = (ev.target as HTMLInputElement).files?.[0];
+  const done = soundDone;
+  soundDone = null;
+  if (!f) return;
+  if (f.size > SOUND_LIMIT) { toast('That sound is larger than 3 MB. Short sounds work best: trim it, or save it as MP3 or OGG.'); return; }
+  const reader = new FileReader();
+  reader.onload = () => {
+    const before = snapshot();
+    const name = addSound(f.name, String(reader.result));
+    done?.(name);
+    save(); record(before);
+    if (ui.view === 'convo') refreshMap(); else render();
+    toast(`Added the sound "${name}".`);
+  };
+  reader.onerror = () => toast('That sound could not be read.');
+  reader.readAsDataURL(f);
+});
+
+function addSound(fileName: string, data: string): string {
+  project.sounds ??= [];
+  const base = cleanSoundName(fileName);
+  let name = base, i = 2;
+  while (project.sounds.some(x => x.name === name)) name = `${base} ${i++}`;
+  project.sounds.push({ id: newId(), name, data });
+  return name;
+}
+
+let previewAudio: HTMLAudioElement | null = null;
+function previewSound(name: string): void {
+  const snd = project.sounds?.find(x => x.name === name.toLowerCase());
+  if (!snd) return;
+  previewAudio?.pause();
+  previewAudio = new Audio(snd.data);
+  void previewAudio.play().catch(() => undefined);
+}
+
+function uniqueRoomName(base: string): string {
+  let name = base, i = 2;
+  while (findRoomByName(project, name)) name = `${base} ${i++}`;
+  return name;
+}
+
 /* ---------- Files ---------- */
 
 $('#projectfile')!.addEventListener('change', async ev => {
@@ -717,7 +882,7 @@ $('#lookfile')!.addEventListener('change', async ev => {
   const files = [...((ev.target as HTMLInputElement).files ?? [])];
   if (!files.length) return;
   const mode = lookFileMode;
-  const c = mode.kind === 'once' ? onceSpeaker()?.character : selectedCharacter();
+  const c = mode.kind === 'once' ? onceSpeaker()?.character : mode.kind === 'cast' ? project.characters.find(x => x.id === mode.characterId) : selectedCharacter();
   if (!c) return;
   const before = snapshot();
   const added: CharacterLook[] = [];
@@ -748,6 +913,7 @@ $('#lookfile')!.addEventListener('change', async ev => {
   }
   save();
   record(before);
+  if (mode.kind === 'cast') { render(); if (added.length) toast(`Added ${added.length === 1 ? 'a look' : `${added.length} looks`} to ${c.name}.`); return; }
   if (added.length === 1) { ui.lookEdit = added[0].id; render(); toast('Drag the new look until it lines up with the base picture underneath.'); }
   else { render(); if (added.length) toast(`Added ${added.length} looks to ${c.name}. Click one to line it up.`); }
 });
@@ -825,8 +991,7 @@ document.addEventListener('pointerup', () => {
   const before = snapshot();
   const step = mapSel ? getStep(parseScript(ctx.el.script).steps, mapSel) : null;
   if (!step) return;
-  const act = step.t === 'say' ? 'stage-place' : 'stg-place';
-  applyMap(mapAction(ctx, act, `${d.who}|${d.x}|${Math.abs(d.y - 98) < 2 ? '' : d.y}`));
+  applyMap(mapAction(ctx, 'scene-place', `${d.who}|${d.x}|${Math.abs(d.y - 98) < 2 ? '' : d.y}`));
   record(before);
 });
 
@@ -969,6 +1134,27 @@ function renameEverywhere(kind: 'room' | 'speaker', from: string, to: string): n
 function commitMapField(t: HTMLInputElement): void {
   const ctx = mapCtx();
   if (!ctx) return;
+  if (t.dataset.mapIn === 'say-sound' && t.value === '__upload') {
+    const at = mapSel;
+    pickSound(name => { const c = mapCtx(); if (c && at) { mapSel = at; mapInput({ ...c, sel: at }, 'say-sound', '', name); } });
+    refreshMap();
+    return;
+  }
+  if (t.dataset.mapIn === 'say-sound' && t.value) previewSound(t.value);
+  if ((t.dataset.mapIn === 'stage-show' || t.dataset.mapIn === 'stg-who') && t.value === '__new') {
+    const at = mapSel, field = t.dataset.mapIn;
+    pickCharacter(c => {
+      const cx = mapCtx();
+      if (!cx || !at) return;
+      const res = mapInput({ ...cx, sel: at }, field, '', c.name);
+      mapSel = res?.sel ?? at;
+      refreshMap();
+      toast(`${c.name} is a new character. Open Characters to add looks.`);
+    });
+    refreshMap();
+    return;
+  }
+  if (t.dataset.mapIn?.startsWith('say-fx')) setTimeout(tryEffect, 60);
   const before = fieldSnapshot ?? snapshot();
   const value = t.type === 'checkbox' ? String(t.checked) : t.value;
   const res = mapInput(ctx, t.dataset.mapIn!, t.dataset.k ?? '', value);
@@ -1005,7 +1191,39 @@ document.addEventListener('input', ev => {
     case 'el-expr': if (e) { e.expr = t.value; if (node) node.innerHTML = elementArt(e, undefined, project.characters); } break;
     case 'look-scale': { const l = editedLook(); if (l && e) { l.scale = Number(t.value); if (node) node.innerHTML = elementArt(e, undefined, project.characters, l.id); } break; }
     case 'room-name': { room().name = t.value; const c = $('#crumbs [aria-current]'); if (c) c.textContent = t.value; break; }
-    case 'room-auto': room().auto = t.checked; break;
+    case 'room-auto': { const r = room(); r.auto = !!t.value; if (t.value) r.autoEl = t.value; else { delete r.autoEl; delete r.autoOnce; } save(); render(); return; }
+    case 'cast-about': { const c = project.characters.find(x => x.id === castSel); if (c) { if (t.value.trim()) c.about = t.value; else delete c.about; } break; }
+    case 'cast-place': {
+      const c = project.characters.find(x => x.id === castSel), r = project.rooms.find(x => x.id === t.value);
+      if (!c || !r) return;
+      r.els.push({ id: newId(), kind: 'char', characterId: c.id, name: c.name, x: 30 + (r.els.length * 14) % 50, y: 98, size: 76, script: '' });
+      save(); render(); toast(`${c.name} is now in ${r.name}.`); return;
+    }
+    case 'el-w': if (e) { e.w = Number(t.value); if (node) node.style.width = `${e.w}%`; } break;
+    case 'el-cond-on': if (e) { if (t.value) e.cond = { fact: storyFacts(project)[0] ?? 'met', op: '>=', value: 1 }; else delete e.cond; save(); render(); } return;
+    case 'el-cond-fact': if (e?.cond) e.cond.fact = t.value.trim().replace(/[^\w.]/g, '_') || 'fact'; break;
+    case 'el-cond-op': if (e?.cond) { e.cond.op = t.value as typeof e.cond.op; if (e.cond.op === 'truthy') e.cond.value = true; else if (typeof e.cond.value === 'boolean') e.cond.value = 1; save(); render(); } return;
+    case 'el-cond-val': if (e?.cond) e.cond.value = toValue(t.value); break;
+    case 'el-once': if (e) { if (t.value === 'stay' || t.value === 'hide') e.once = t.value; else delete e.once; } break;
+    case 'el-sound': {
+      if (!e) break;
+      if (t.value === '__upload') { pickSound(name => { e.sound = name; }); t.value = e.sound ?? ''; return; }
+      if (t.value) { e.sound = t.value; previewSound(t.value); } else delete e.sound;
+      break;
+    }
+    case 'area-door': {
+      if (!e) break;
+      if (t.value === '__new') {
+        const r = createRoom(uniqueRoomName('New room'));
+        project.rooms.push(r);
+        e.script = `Go to ${r.name}`;
+        save(); render();
+        toast(`Added the room "${r.name}". Open it from the Story map to set it up.`);
+        return;
+      }
+      e.script = t.value ? `Go to ${t.value}` : '';
+      save(); render(); return;
+    }
     case 'story-title': { const v = t.value.replace(/\s+/g, ' '); if (v.trim()) project.title = v; else delete project.title; break; }
     case 'test-use': test.use = t.checked; saveTest(); renderBar(); return;
     case 'hud-fact': { const w = hudWidget(t.dataset.k); if (w) { w.fact = t.value.trim().replace(/[^\w.]/g, '_') || 'fact'; refreshLookStage(); } break; }
@@ -1036,6 +1254,44 @@ document.addEventListener('change', ev => {
     if (n) toast(`Updated "Go to" in ${n} conversation${n === 1 ? '' : 's'}`);
     renameFrom = room().name;
     save();
+  }
+  if (t.dataset.in === 'sound-name') {
+    const x = project.sounds?.find(y => y.id === t.dataset.k);
+    if (x) {
+      let name = cleanSoundName(t.value || x.name);
+      if (project.sounds!.some(y => y !== x && y.name === name)) name = x.name;
+      const old = x.name;
+      x.name = name;
+      for (const r of project.rooms) for (const e of r.els) {
+        if ((e.sound ?? '').toLowerCase() === old) e.sound = name;
+        e.script = renameSoundInScript(e.script, old, name);
+      }
+      save(); render();
+    }
+  }
+  if (t.dataset.in === 'cast-name') {
+    const c = project.characters.find(x => x.id === castSel);
+    const name = t.value.replace(/[:"()]/g, '').trim();
+    if (c && name && name !== c.name) {
+      const old = c.name;
+      c.name = name;
+      for (const r of project.rooms) for (const x of r.els) if (x.characterId === c.id) x.name = name;
+      const n = renameEverywhere('speaker', old, name);
+      if (n) toast(`Updated ${name}'s lines in ${n} conversation${n === 1 ? '' : 's'}`);
+      save(); render();
+    } else if (c) t.value = c.name;
+  }
+  if (t.dataset.in === 'cast-look-name') {
+    const c = project.characters.find(x => x.id === castSel), l = c?.looks.find(x => x.id === t.dataset.k);
+    if (c && l) {
+      const old = l.name;
+      l.name = uniqueLookName({ ...c, looks: c.looks.filter(x => x !== l) }, cleanLookName(t.value || old));
+      for (const r of project.rooms) for (const el of r.els) {
+        el.script = renameLookInScript(el.script, c.name, old, l.name);
+        if (el.characterId === c.id && (el.expr ?? '').toLowerCase() === old.toLowerCase()) el.expr = l.name;
+      }
+      save(); render();
+    }
   }
   if (t.dataset.in === 'look-name') {
     const c = selectedCharacter(), l = editedLook();
@@ -1202,6 +1458,16 @@ document.addEventListener('pointerdown', ev => {
   const target = ev.target as HTMLElement;
   const stage = target.closest<HTMLElement>('.stage.edit');
   if (!stage) return;
+  const handle = target.closest<HTMLElement>('[data-resize]');
+  const areaNode = handle?.closest<HTMLElement>('.el');
+  const area = areaNode ? room().els.find(x => x.id === areaNode.dataset.el) : undefined;
+  if (handle && areaNode && area) {
+    const box = stage.getBoundingClientRect();
+    resize = { e: area, node: areaNode, box, left: area.x - (area.w ?? 20) / 2, top: area.y - area.size, before: snapshot() };
+    try { handle.setPointerCapture(ev.pointerId); } catch { /* not supported */ }
+    ev.preventDefault();
+    return;
+  }
   const node = target.closest<HTMLElement>('.el');
   if (!node) {
     if (ui.lookEdit) return; // lining up: clicks beside the picture do nothing
@@ -1245,6 +1511,24 @@ document.addEventListener('pointermove', ev => {
   e.y = clamp((ev.clientY - drag.dy - box.top) / box.height * 100, 12, 118);
   node.style.left = `${e.x}%`;
   node.style.top = `${e.y}%`;
+});
+
+/* Resizing a clickable area by its corner: the top left corner stays put. */
+let resize: { e: StoryElement; node: HTMLElement; box: DOMRect; left: number; top: number; before: string } | null = null;
+document.addEventListener('pointermove', ev => {
+  if (!resize) return;
+  const { e, node, box, left, top } = resize;
+  const r1 = (v: number) => Math.round(v * 10) / 10;
+  const w = r1(Math.max(2, Math.min(100 - left, (ev.clientX - box.left) / box.width * 100 - left)));
+  const h = r1(Math.max(2, Math.min(118 - top, (ev.clientY - box.top) / box.height * 100 - top)));
+  e.w = w; e.size = h; e.x = r1(left + w / 2); e.y = r1(top + h);
+  node.style.cssText = `left:${e.x}%;top:${e.y}%;height:${e.size}%;width:${e.w}%`;
+});
+document.addEventListener('pointerup', () => {
+  if (!resize) return;
+  const before = resize.before;
+  resize = null;
+  save(); record(before); render();
 });
 
 const drop = () => {

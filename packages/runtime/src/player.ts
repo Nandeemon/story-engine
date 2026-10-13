@@ -1,8 +1,8 @@
 import { createRunner, findRoomByName, parseScript, stepsBefore } from '@story-engine/engine-core';
 import type { ChoiceEvent, Facts, Project, Room, Runner, SayStep, StoryElement } from '@story-engine/engine-core';
-import { applyToScene, nextMoment, roomScene, staged, stagedAttrs, startScene } from './scene';
+import { applyToScene, fxVars, nextMoment, present, roomScene, staged, stagedAttrs, startScene } from './scene';
 import type { Scene } from './scene';
-import { backdropHTML, choicesHTML, elementArt, lookStyle, sayHTML } from './stage';
+import { areaArt, backdropHTML, choicesHTML, elementArt, elementStyle, lookStyle, sayHTML } from './stage';
 import { esc } from './art';
 import { hudHTML } from './hud';
 
@@ -15,6 +15,8 @@ export interface PlayState {
   problem: string;
   /** The scene while a conversation runs; null while the player explores the room. */
   scene: Scene | null;
+  /** Conversations finished (element ids) and rooms visited ("room:<id>"), for one-time conversations and first visits. */
+  seen: string[];
 }
 
 export interface PlayerOptions {
@@ -24,8 +26,10 @@ export interface PlayerOptions {
   elementId?: string;
   /** Start the element's conversation at this step instead of its first line (for testing). */
   startPath?: string;
-  /** Story facts to start with (for testing); otherwise every fact starts unset. */
+  /** Story facts to start with (for testing, or a saved game); otherwise every fact starts unset. */
   facts?: Facts;
+  /** Conversations had and rooms visited, from a saved game. */
+  seen?: string[];
   /** A short line shown over the first room until the player starts a conversation, for published games. */
   hint?: string;
   /** Called after every change, so the editor can show story facts beside the game. */
@@ -37,7 +41,7 @@ export interface Player {
   destroy(): void;
 }
 
-const FX_CLASSES = ['in-fade', 'in-left', 'in-right', 'in-pop', 'out-fade', 'out-left', 'out-right', 'shake', 'bounce', 'jump', 'flash'].map(f => `fx-${f}`);
+const FX_CLASSES = ['in-fade', 'in-left', 'in-right', 'in-pop', 'out-fade', 'out-left', 'out-right', 'shake', 'tremble', 'pulse', 'pop', 'bounce', 'jump', 'flash'].map(f => `fx-${f}`);
 
 /**
  * Runs a project inside a host element. The same player runs the editor's Play
@@ -46,7 +50,19 @@ const FX_CLASSES = ['in-fade', 'in-left', 'in-right', 'in-pop', 'out-fade', 'out
  */
 export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOptions = {}): Player {
   const first = project.rooms.find(r => r.id === opts.roomId) ?? project.rooms[0];
-  const s: PlayState = { roomId: first.id, facts: { ...(opts.facts ?? {}) }, event: null, problem: '', scene: null };
+  const s: PlayState = { roomId: first.id, facts: { ...(opts.facts ?? {}) }, event: null, problem: '', scene: null, seen: [...(opts.seen ?? [])] };
+  /** The element whose conversation is running. */
+  let talking: StoryElement | null = null;
+  const sounds = new Map<string, HTMLAudioElement>();
+  function playSound(name: string | undefined): void {
+    const key = (name ?? '').trim().toLowerCase();
+    const snd = key ? project.sounds?.find(x => x.name.toLowerCase() === key) : undefined;
+    if (!snd) return;
+    let a = sounds.get(snd.id);
+    if (!a) { a = new Audio(snd.data); sounds.set(snd.id, a); }
+    a.currentTime = 0;
+    void a.play().catch(() => { /* the browser may block sound until the player interacts */ });
+  }
   let runner: Runner | null = null;
   let builtRoom = '';
   /** The last line shown, so a choice can keep the question in the dialogue box. */
@@ -58,13 +74,14 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
   const tooSoon = () => performance.now() - choiceShownAt < 400;
 
   const room = (): Room => project.rooms.find(r => r.id === s.roomId) ?? project.rooms[0];
-  const canTalk = (el: StoryElement) => !s.event && !s.scene && el.script.trim() !== '';
+  const here = (el: StoryElement) => present(el, s);
+  const canTalk = (el: StoryElement) => !s.event && !s.scene && el.script.trim() !== '' && here(el) && !(el.once && s.seen.includes(el.id));
 
   /** Draws the room's backdrop and objects once per room; characters are kept up to date by render. */
   function build(): void {
     const r = room();
     const objects = r.els.filter(e => e.kind !== 'char').map(e =>
-      `<button class="el" data-el="${esc(e.id)}" style="left:${e.x}%;top:${e.y}%;height:${e.size}%" aria-label="${esc(e.name)}">${elementArt(e, undefined, project.characters)}</button>`).join('');
+      `<button class="el${e.kind === 'area' ? ' area' : ''}" data-el="${esc(e.id)}" style="${elementStyle(e)}" aria-label="${esc(e.name)}">${e.kind === 'area' ? areaArt(e, false) : elementArt(e, undefined, project.characters)}</button>`).join('');
     host.innerHTML = `<div class="stage play" data-stage style="${lookStyle(project.look)}"><div class="bg">${backdropHTML(r.bg)}</div>${objects}<div class="hudlayer"></div><div class="game"></div></div>`;
     builtRoom = r.id;
   }
@@ -74,7 +91,7 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
     const stage = host.querySelector<HTMLElement>('[data-stage]')!;
     const game = stage.querySelector<HTMLElement>('.game')!;
     const r = room();
-    const scene = s.scene ?? roomScene(r);
+    const scene = s.scene ?? roomScene(r, s);
     const keep = new Set<string>();
 
     for (const c of scene.chars) {
@@ -92,6 +109,7 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
       node.className = `${a.cls}${clickable ? ' can' : ''}`;
       fx.forEach(x => node!.classList.add(x));
       node.style.cssText = a.style;
+      if (c.fx) node.style.cssText += `;${fxVars(c.fxOpts)}`;
       node.setAttribute('aria-label', c.name);
       node.tabIndex = clickable ? 0 : -1;
       const artKey = `${c.characterId ?? c.preset ?? ''}|${c.lineLook || c.look}`;
@@ -113,6 +131,7 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
     });
     stage.querySelectorAll<HTMLElement>('.el:not(.staged)').forEach(n => {
       const el = r.els.find(e => e.id === n.dataset.el);
+      n.hidden = !el || !here(el);
       n.classList.toggle('can', !!el && canTalk(el));
       n.tabIndex = el && canTalk(el) ? 0 : -1;
     });
@@ -132,18 +151,30 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
     s.event = null;
     s.scene = null;
     runner = null;
-    const auto = r.auto ? r.els.find(el => el.script.trim()) : undefined;
+    const visit = `room:${r.id}`;
+    const firstVisit = !s.seen.includes(visit);
+    if (firstVisit) s.seen.push(visit);
+    const chosen = r.autoEl ? r.els.find(el => el.id === r.autoEl) : r.els.find(el => el.script.trim() && canTalk(el));
+    const auto = r.auto && (firstVisit || !r.autoOnce) && chosen && canTalk(chosen) ? chosen : undefined;
     if (auto) talk(auto); else render();
+  }
+
+  /** A conversation has run to its end (or out through a door): one-time conversations are now used up. */
+  function done(): void {
+    if (talking && !s.seen.includes(talking.id)) s.seen.push(talking.id);
+    talking = null;
   }
 
   function talk(el: StoryElement, startAt?: string): void {
     lastLine = null;
     talked = true;
+    talking = el;
+    playSound(el.sound);
     // The clicked character keeps focus otherwise, and keys on a button would not reach the dialogue.
     const focused = document.activeElement as HTMLElement | null;
     if (focused && host.contains(focused)) focused.blur();
     const steps = parseScript(el.script).steps;
-    const scene = startScene(room(), el, steps);
+    const scene = startScene(room(), el, steps, s);
     // Starting partway: the scene is set as it would stand by then.
     if (startAt) for (const st of stepsBefore(steps, startAt)) { applyToScene(scene, st, project); nextMoment(scene); }
     s.scene = scene;
@@ -152,6 +183,7 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
   }
 
   function finish(problem = ''): void {
+    done();
     runner = null;
     s.event = null;
     s.scene = null;
@@ -168,10 +200,12 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
       if (s.scene) applyToScene(s.scene, ev, project);
       s.event = ev;
       lastLine = ev;
+      playSound(ev.sound);
     } else if (ev.t === 'choice') {
       s.event = ev;
     } else if (ev.t === 'door') {
       const target = findRoomByName(project, ev.room);
+      done();
       if (target) return enter(target);
       return finish(`There is no room called "${ev.room}".`);
     } else {

@@ -38,13 +38,28 @@ The script keeps what you wrote. Changing a line in the map rewrites only that l
 
 In **Look**, under On-screen display, add a **Meter** (a bar, such as affection out of 10) or a **Number or word** (such as gold), pick the story fact it shows and drag it into place on the picture. It is shown over the game at all times, and can stay hidden until the story first sets the fact.
 
+## Rooms that react
+
+- **Clickable area:** under Add an object, a clickable area is an invisible box you put over a door, a window or a sign in the backdrop. Drag it, drag its corner to resize it, and pick where clicking it goes (or give it a conversation of its own).
+- **Only if:** under More, anything in a room can be there only while a story fact says so, for example Jon only `if met_jon is yes`. A conversation brings him in with a Change.
+- **Once:** a conversation can happen every time, or once, after which the thing cannot be clicked or is gone.
+- **When the player enters:** a room can start a conversation straight away, on every visit or only the first.
+
+## Effects and sounds
+
+A line can give the speaker an effect: shake, tremble, pulse, pop, bounce, jump or flash, each with Strength, Speed and Times (1 to 5). Upload your own sounds (a laugh, a gasp, a door) and play them with a line or when something is clicked. In the script: `Mara (happy, pulse strength 4 x2, sound laugh): Ha!`. The Story map lists the sounds, to listen, rename or remove.
+
+## Characters
+
+**Characters** in the top bar lists your main characters (made from your own pictures). Open one to see and rename their looks, which lines use each look, the rooms they are in, every conversation they take part in, and the story facts used there, with notes of your own. Make a new character there, give a starter figure or a voice your own picture, or pick **+ New character from a picture** when bringing someone in during a conversation.
+
 ## Characters and looks
 
 Add a character with **Use your own picture**: that picture is the character's base. **Add looks** takes one or more pictures (expressions or poses), named after their files (`lin_happy.png` becomes `happy`). Click a look to line it up over the base picture, so the character stays still when the look changes. In a conversation, pick a look per line, or write `Lin (happy): Hi.` in the script; **Use a different picture here** gives one line a picture of its own. A character made from your pictures can be placed in any room and keeps its looks.
 
 ## Staging a conversation
 
-When a conversation starts, characters who take no part step aside until it ends (or choose "The room stays as it is"). Click a line in the map: the picture at the top of the panel shows the scene at that line. Drag a character there, or use the place buttons, size, and turn around; the place holds until it changes. Pick an effect for the line (shake, bounce, jump, flash), bring someone in or take someone out. Someone who speaks but is not on stage comes in by themselves.
+When a conversation starts, characters who take no part step aside until it ends (or choose "The room stays as it is"). Click a step in the map: the scene above the map shows the stage at that step. Drag anyone there to place them from that step on, or use the place buttons, size, and turn around; the place holds until it changes. Pick an effect for the line (shake, bounce, jump, flash), bring someone in or take someone out. Someone who speaks but is not on stage comes in by themselves.
 
 In the script these are plain lines:
 

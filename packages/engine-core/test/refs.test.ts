@@ -47,3 +47,12 @@ describe('renameLookInScript', () => {
     expect(renameLookInScript(src, 'lin', 'happy', 'glad')).toBe('Lin (glad): Hi.\n  Lin (glad, shake): Hey!\nMara (happy): Hello.\nLin: Plain.');
   });
 });
+
+describe('renaming sounds', () => {
+  it('renames and removes a sound on lines', async () => {
+    const { renameSoundInScript } = await import('../src');
+    const s = 'Mara (happy, sound laugh): Ha!\n  Narration (sound laugh): Ha.\nJon: Hi.';
+    expect(renameSoundInScript(s, 'laugh', 'giggle')).toBe('Mara (happy, sound giggle): Ha!\n  Narration (sound giggle): Ha.\nJon: Hi.');
+    expect(renameSoundInScript(s, 'laugh', '')).toBe('Mara (happy): Ha!\n  Narration: Ha.\nJon: Hi.');
+  });
+});

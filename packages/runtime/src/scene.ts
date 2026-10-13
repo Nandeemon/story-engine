@@ -3,8 +3,8 @@
  * look. The editor's line preview and the player both build it with the same
  * functions, so the preview shows what the player will see.
  */
-import { findLook, walkSteps } from '@story-engine/engine-core';
-import type { Character, Look, Placement, Project, Room, Step, StoryElement } from '@story-engine/engine-core';
+import { findLook, testCondition, walkSteps } from '@story-engine/engine-core';
+import type { Character, Facts, FxOptions, Look, Placement, Project, Room, Step, StoryElement } from '@story-engine/engine-core';
 import { backdropHTML, elementArt, lookStyle } from './stage';
 import { esc } from './art';
 
@@ -27,6 +27,18 @@ export interface StagedChar {
   visible: boolean;
   /** A one-shot effect for this moment: in-fade, out-left, shake... */
   fx: string;
+  /** How a line effect plays. */
+  fxOpts?: FxOptions;
+}
+
+/** Where the player is in the story beyond facts: conversations had and rooms visited. */
+export interface Progress { facts: Facts; seen: string[] }
+
+/** Whether something is in the room right now: its condition holds, and a one-time conversation that hides it has not happened. */
+export function present(el: StoryElement, progress?: Progress): boolean {
+  if (!progress) return true;
+  if (el.cond && !testCondition(progress.facts, el.cond)) return false;
+  return !(el.once === 'hide' && progress.seen.includes(el.id));
 }
 
 export interface Scene { chars: StagedChar[] }
@@ -56,14 +68,14 @@ function castOf(steps: Step[]): Set<string> {
  * characters in the room who take no part leave the stage for a while; the
  * owner and everyone in the conversation stay where they stand in the room.
  */
-export function startScene(room: Room, owner: StoryElement, steps: Step[]): Scene {
+export function startScene(room: Room, owner: StoryElement, steps: Step[], progress?: Progress): Scene {
   const cast = castOf(steps);
   const entering = new Set<string>();
   walkSteps(steps, s => { if (s.t === 'show') entering.add(lower(s.who)); });
   if (owner.kind === 'char' && !(entering.has(lower(owner.name)) && !cast.has(lower(owner.name)))) cast.add(lower(owner.name));
   const aside = (owner.staging ?? 'aside') === 'aside';
   return {
-    chars: room.els.filter(e => e.kind === 'char').map(e => ({
+    chars: room.els.filter(e => e.kind === 'char' && (e === owner || present(e, progress))).map(e => ({
       key: e.id, name: e.name, elId: e.id, characterId: e.characterId, preset: e.preset, img: e.img,
       x: e.x, y: e.y, size: e.size, flip: false, look: e.expr ?? '', lineLook: '',
       visible: aside ? cast.has(lower(e.name)) : !(entering.has(lower(e.name)) && !cast.has(lower(e.name))), fx: ''
@@ -72,9 +84,9 @@ export function startScene(room: Room, owner: StoryElement, steps: Step[]): Scen
 }
 
 /** The scene outside conversations: everyone where they stand in the room. */
-export function roomScene(room: Room): Scene {
+export function roomScene(room: Room, progress?: Progress): Scene {
   return {
-    chars: room.els.filter(e => e.kind === 'char').map(e => ({
+    chars: room.els.filter(e => e.kind === 'char' && present(e, progress)).map(e => ({
       key: e.id, name: e.name, elId: e.id, characterId: e.characterId, preset: e.preset, img: e.img,
       x: e.x, y: e.y, size: e.size, flip: false, look: e.expr ?? '', lineLook: '', visible: true, fx: ''
     }))
@@ -119,7 +131,7 @@ function enter(c: StagedChar, fx = 'in-fade'): void {
 
 /** Clears what belongs to one moment only: effects and pictures for a single line. */
 export function nextMoment(scene: Scene): void {
-  for (const c of scene.chars) { c.fx = ''; c.lineLook = ''; }
+  for (const c of scene.chars) { c.fx = ''; c.fxOpts = undefined; c.lineLook = ''; }
 }
 
 /** Applies one step to the scene. Lines bring their speaker on stage if needed. */
@@ -157,7 +169,7 @@ export function applyToScene(scene: Scene, step: Step, project: Project): void {
         if (character && findLook(character, step.expr)?.once) c.lineLook = step.expr;
         else c.look = step.expr;
       }
-      if (step.fx) c.fx = step.fx;
+      if (step.fx) { c.fx = step.fx; c.fxOpts = step.fxOpts; }
       return;
     }
   }
@@ -172,15 +184,22 @@ export function staged(c: StagedChar, characters: Character[]): string {
   return elementArt(asElement(c), c.lineLook || c.look || undefined, characters);
 }
 
+/** CSS settings for a line effect: strength, speed and repeats. */
+export function fxVars(o: FxOptions = {}): string {
+  const k = (o.strength ?? 3) / 3;
+  const d = [1.8, 1.35, 1, 0.7, 0.5][(o.speed ?? 3) - 1] ?? 1;
+  return `--fxk:${k.toFixed(2)};--fxd:${d};--fxn:${o.times ?? 1}`;
+}
+
 /** Classes and style for one staged character. */
 export function stagedAttrs(c: StagedChar): { cls: string; style: string } {
   const cls = ['el', 'staged', c.flip ? 'flip' : '', c.visible ? '' : 'gone'].filter(Boolean).join(' ');
-  return { cls, style: `left:${c.x}%;top:${c.y}%;height:${c.size}%` };
+  return { cls, style: `left:${c.x}%;top:${c.y}%;height:${c.size}%${c.fx ? `;${fxVars(c.fxOpts)}` : ''}` };
 }
 
 /** Draws the room with a scene, for still pictures such as the editor's line preview. */
 export function sceneHTML(project: Project, room: Room, scene: Scene, look: Look, game = '', opts: { draggable?: boolean; focus?: string } = {}): string {
-  const objects = room.els.filter(e => e.kind !== 'char').map(e =>
+  const objects = room.els.filter(e => e.kind === 'object').map(e =>
     `<span class="el" style="left:${e.x}%;top:${e.y}%;height:${e.size}%">${elementArt(e, undefined, project.characters)}</span>`).join('');
   const chars = scene.chars.filter(c => c.visible).map(c => {
     const a = stagedAttrs(c);

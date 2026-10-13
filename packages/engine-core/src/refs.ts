@@ -45,3 +45,20 @@ export function renameLookInScript(script: string, speaker: string, oldLook: str
     return `${m[1]}${m[2]}${m[3]}${parts.join(',')}${m[5]}`;
   }).join('\n');
 }
+
+/** Points every "(sound <old>)" on a line at the new sound name; an empty new name takes the sound off. */
+export function renameSoundInScript(script: string, oldName: string, newName: string): string {
+  const from = lower(oldName), to = newName.trim().replace(/[():,"]/g, ' ').trim();
+  if (!from || from === lower(to)) return script;
+  return script.split('\n').map(line => {
+    const m = line.match(/^(\s*[^:"()#]{1,40}?\s*\()([^)]*)(\)\s*:.*)$/);
+    if (!m) return line;
+    const parts = m[2].split(',');
+    const i = parts.findIndex(p => { const s = p.trim().match(/^sound\s+(.+)$/i); return !!s && lower(s[1]) === from; });
+    if (i < 0) return line;
+    if (to) parts[i] = parts[i].replace(/sound\s+.+/i, `sound ${to}`);
+    else parts.splice(i, 1);
+    const inner = parts.join(',').trim();
+    return inner ? `${m[1]}${parts.join(',').replace(/^\s+/, '')}${m[3]}` : `${m[1].replace(/\s*\($/, '')}${m[3].replace(/^\)/, '')}`;
+  }).join('\n');
+}
