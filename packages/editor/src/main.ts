@@ -576,7 +576,8 @@ $('#file')!.addEventListener('change', ev => {
   const url = URL.createObjectURL(f);
   img.onload = () => {
     const isBg = pendingUpload === 'bg';
-    const k = Math.min(1, (isBg ? 1600 : 900) / Math.max(img.width, img.height));
+    // Backdrops keep enough detail to fill the stage and be zoomed: limited by their short side.
+    const k = isBg ? Math.min(1, 1440 / Math.min(img.width, img.height), 4096 / Math.max(img.width, img.height)) : Math.min(1, 900 / Math.max(img.width, img.height));
     const c = document.createElement('canvas');
     c.width = Math.round(img.width * k);
     c.height = Math.round(img.height * k);
@@ -718,14 +719,18 @@ document.addEventListener('focusin', ev => {
 document.addEventListener('focusout', ev => {
   const lost = ev.target as HTMLElement;
   if (!isField(lost) || fieldSnapshot === null) return;
-  setTimeout(() => {
-    const now = document.activeElement as HTMLElement | null;
-    // The same field drawn again (the map redraws its panel) is still the same visit.
-    if (now && lost.id && now.id === lost.id) return;
-    record(fieldSnapshot);
-    fieldSnapshot = now && isField(now) ? snapshot() : null;
-  }, 0);
+  const next = (ev as FocusEvent).relatedTarget as HTMLElement | null;
+  // Removed while focused (the map redraws its panel): the same field comes back, so the visit goes on.
+  if (!next && !lost.isConnected) return;
+  // Recorded now, before a click on a button records its own change.
+  record(fieldSnapshot);
+  fieldSnapshot = next && isField(next) ? snapshot() : null;
 });
+document.addEventListener('pointerdown', () => {
+  // Buttons that do not take focus (Safari): close the field visit before their change.
+  const a = document.activeElement as HTMLElement | null;
+  if (fieldSnapshot !== null && !(a && isField(a))) { record(fieldSnapshot); fieldSnapshot = null; }
+}, true);
 
 function renameEverywhere(kind: 'room' | 'speaker', from: string, to: string): number {
   const key = from.trim().toLowerCase();
@@ -899,7 +904,14 @@ document.addEventListener('pointerdown', ev => {
   const bg = room().bg;
   if (!stage || target.closest('.el') || !bg || (bg.fit ?? 'fill') !== 'fill') return;
   const box = stage.getBoundingClientRect();
-  bgPan = { x: ev.clientX, y: ev.clientY, fx: bg.fx ?? 50, fy: bg.fy ?? 50, w: box.width, h: box.height, before: snapshot(), moved: false };
+  const img = stage.querySelector<HTMLImageElement>('.bg img.bgimg');
+  if (!img?.naturalWidth) return;
+  // How far the picture reaches past the stage, so it follows the pointer exactly.
+  const zoom = bg.zoom ?? 1;
+  const cover = Math.max(box.width / img.naturalWidth, box.height / img.naturalHeight) * zoom;
+  const ow = img.naturalWidth * cover - box.width, oh = img.naturalHeight * cover - box.height;
+  if (ow < 1 && oh < 1) return;
+  bgPan = { x: ev.clientX, y: ev.clientY, fx: bg.fx ?? 50, fy: bg.fy ?? 50, w: ow, h: oh, before: snapshot(), moved: false };
   stage.classList.add('panning-bg');
   ev.preventDefault();
 });
@@ -907,10 +919,9 @@ document.addEventListener('pointermove', ev => {
   const bg = room().bg;
   if (!bgPan || !bg) return;
   bgPan.moved = true;
-  // Moving the picture right shows more of its left side; zoomed in, each pixel moves less of it.
-  const k = 160 / (bg.zoom ?? 1);
-  bg.fx = Math.round(Math.min(100, Math.max(0, bgPan.fx - (ev.clientX - bgPan.x) / bgPan.w * k)) * 10) / 10;
-  bg.fy = Math.round(Math.min(100, Math.max(0, bgPan.fy - (ev.clientY - bgPan.y) / bgPan.h * k)) * 10) / 10;
+  // Moving the picture right shows more of its left side. w and h are how far it reaches past the stage.
+  if (bgPan.w >= 1) bg.fx = Math.round(Math.min(100, Math.max(0, bgPan.fx - (ev.clientX - bgPan.x) / bgPan.w * 100)) * 10) / 10;
+  if (bgPan.h >= 1) bg.fy = Math.round(Math.min(100, Math.max(0, bgPan.fy - (ev.clientY - bgPan.y) / bgPan.h * 100)) * 10) / 10;
   refreshBackdrop();
 });
 document.addEventListener('pointerup', () => {

@@ -132,7 +132,7 @@ function backdropField(r: Room): string {
   const fit = bg.fit ?? 'fill';
   const modes: [string, string, string][] = [['fill', 'Fill', 'Covers the stage; you choose what shows'], ['fit', 'Fit', 'Shows the whole picture'], ['stretch', 'Stretch', 'Stretches the picture to the stage']];
   const extra = fit === 'fill'
-    ? `<p class="hint">Drag the backdrop in the picture to choose which part shows.</p>
+    ? `<p class="hint">When the picture is larger than the stage, or zoomed in, drag it to choose which part shows.</p>
        <label class="field"><span>Zoom</span><input type="range" id="bg-zoom" data-in="bg-zoom" min="1" max="3" step="0.05" value="${bg.zoom ?? 1}"></label>
        ${bg.fx !== undefined || bg.fy !== undefined || (bg.zoom ?? 1) !== 1 ? '<button class="btn small quiet" data-act="bg-reset">Show the middle again</button>' : ''}`
     : fit === 'fit'

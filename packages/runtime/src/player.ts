@@ -44,6 +44,9 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
   let builtRoom = '';
   /** The last line shown, so a choice can keep the question in the dialogue box. */
   let lastLine: SayStep | null = null;
+  /** When the current choice appeared: picks in the first moment are ignored, so a quick double tap on "continue" cannot choose. */
+  let choiceShownAt = 0;
+  const tooSoon = () => performance.now() - choiceShownAt < 400;
 
   const room = (): Room => project.rooms.find(r => r.id === s.roomId) ?? project.rooms[0];
   const canTalk = (el: StoryElement) => !s.event && !s.scene && el.script.trim() !== '';
@@ -108,7 +111,7 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
     const ev = s.event;
     game.innerHTML = !ev ? '' : ev.t === 'say' ? sayHTML(ev.who, ev.text)
       : choicesHTML(ev.options, true, project.look.choices ?? 'box', lastLine ?? undefined);
-    if (ev?.t === 'choice') game.querySelector<HTMLElement>('[data-pick]')?.focus({ preventScroll: true });
+    if (ev?.t === 'choice') choiceShownAt = performance.now();
     opts.onChange?.(s);
   }
 
@@ -164,6 +167,7 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
     if (t.closest('[data-next]')) return advance();
     const pick = t.closest<HTMLElement>('[data-pick]');
     if (pick && s.event?.t === 'choice') {
+      if (tooSoon()) return;
       s.event.pick(Number(pick.dataset.pick));
       s.event = null;
       return advance();
@@ -179,9 +183,11 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
     // Number keys pick an answer.
     if (s.event?.t === 'choice' && /^[1-9]$/.test(e.key) && !(e.target as HTMLElement).closest('input, textarea, select')) {
       const k = Number(e.key) - 1;
-      if (k < s.event.options.length) { e.preventDefault(); s.event.pick(k); s.event = null; advance(); }
+      if (k < s.event.options.length && !tooSoon()) { e.preventDefault(); s.event.pick(k); s.event = null; advance(); }
       return;
     }
+    // Space or Enter left over from reading must not choose an answer.
+    if (s.event?.t === 'choice' && (e.key === ' ' || e.key === 'Enter') && tooSoon()) { e.preventDefault(); return; }
     if (s.event?.t !== 'say' || (e.key !== ' ' && e.key !== 'Enter')) return;
     if ((e.target as HTMLElement).closest('button, input, textarea, select')) return;
     e.preventDefault();
