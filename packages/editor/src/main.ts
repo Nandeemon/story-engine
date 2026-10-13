@@ -209,6 +209,8 @@ function renderBar(): void {
 
 function render(): void {
   document.body.classList.toggle('compare-difference', lookCompare === 'difference');
+  // The conversation view stretches to the whole window; other views keep a reading width.
+  document.body.classList.toggle('wide', ui.view === 'convo');
   if (ui.view !== 'play' && player) { player.destroy(); player = null; }
   const r = room(), e = selected();
   if (ui.view === 'convo' && !e) ui.view = 'room';
@@ -221,7 +223,7 @@ function render(): void {
     case 'room': main.innerHTML = viewRoom(project, ui, r, e); break;
     case 'convo': {
       const ctx = mapCtx()!;
-      main.innerHTML = viewConvo(project, r, e!, convoMode, { canvas: convoMode === 'map' ? mapHTML(ctx) : '', side: convoMode === 'map' ? mapSide(ctx) : '', scene: convoMode === 'map' ? mapScene(ctx, sceneOpen) : '' });
+      main.innerHTML = viewConvo(project, r, e!, convoMode, { canvas: convoMode === 'map' ? mapHTML(ctx) : '', side: convoMode === 'map' ? mapSide(ctx) : '', scene: convoMode === 'map' ? mapScene(ctx, sceneOpen) : '', sceneOpen });
       if (convoMode === 'map') {
         if (freshConvo) openView(); else applyZoom();
         afterMap();
@@ -254,12 +256,16 @@ function afterMap(): void {
   sc?.addEventListener('wheel', onWheel, { passive: false });
 }
 
-/** Ctrl or Cmd with the wheel (or a trackpad pinch) zooms the map. */
+/** The wheel (or a trackpad pinch) zooms the map around the pointer; Shift with the wheel scrolls sideways. */
 function onWheel(ev: WheelEvent): void {
-  if (!ev.ctrlKey && !ev.metaKey) return;
+  if (ev.shiftKey) return;
   ev.preventDefault();
+  const sc = ev.currentTarget as HTMLElement;
+  const box = sc.getBoundingClientRect();
   const z = parseFloat($('#mzoomlabel')?.textContent ?? '100') / 100 || 1;
-  setZoom(z * (ev.deltaY < 0 ? 1.1 : 1 / 1.1));
+  // Lines and pixels feel the same: a notch is about 10%, a trackpad moves smoothly.
+  const dy = ev.deltaMode === 1 ? ev.deltaY * 33 : ev.deltaY;
+  setZoom(z * Math.exp(-Math.max(-120, Math.min(120, dy)) * 0.0016), { x: ev.clientX - box.left, y: ev.clientY - box.top });
   drawEdges();
 }
 
@@ -280,6 +286,7 @@ function refreshMap(): void {
   side.innerHTML = mapSide(ctx);
   const sceneHost = $('#mscene');
   if (sceneHost) sceneHost.innerHTML = mapScene(ctx, sceneOpen);
+  $('#mapwrap')?.classList.toggle('noscene', !sceneOpen);
   syncPlayFrom();
   applyZoom();
   const next = $('#mscroll');
@@ -515,7 +522,7 @@ let lookReturn: { elId: string | null; mapSel: string | null } | null = null;
 let lookCompare: 'see-through' | 'difference' = 'see-through';
 
 /** Actions that never change the project, so they are not recorded for Undo. */
-const NOT_RECORDED = new Set(['cast-sound-add', 'sound-add', 'sound-play', 'cast', 'cast-open', 'cast-back', 'cast-new', 'cast-promote', 'cast-add-looks', 'cast-goto-room', 'cast-goto-convo', 'fx-try', 'scene-toggle', 'home', 'open-story', 'new-story', 'new-sample', 'import-story', 'duplicate-story', 'delete-story', 'test-off', 'look-tab', 'make-game', 'hud-sel', 'play-here', 'check', 'goto-problem', 'test-clear', 'once-lineup', 'look-compare', 'undo', 'redo', 'save-file', 'open-file', 'upload', 'play', 'play-convo', 'stop', 'convo-mode', 'look', 'crumb', 'add-looks', 'look-replace', 'once-picture', 'look-open', 'look-done']);
+const NOT_RECORDED = new Set(['music-add', 'cast-sound-add', 'sound-add', 'sound-play', 'cast', 'cast-open', 'cast-back', 'cast-new', 'cast-promote', 'cast-add-looks', 'cast-goto-room', 'cast-goto-convo', 'fx-try', 'scene-toggle', 'home', 'open-story', 'new-story', 'new-sample', 'import-story', 'duplicate-story', 'delete-story', 'test-off', 'look-tab', 'make-game', 'hud-sel', 'play-here', 'check', 'goto-problem', 'test-clear', 'once-lineup', 'look-compare', 'undo', 'redo', 'save-file', 'open-file', 'upload', 'play', 'play-convo', 'stop', 'convo-mode', 'look', 'crumb', 'add-looks', 'look-replace', 'once-picture', 'look-open', 'look-done']);
 
 const actions: Record<string, (k: string) => void> = {
   crumb(k) {
@@ -615,7 +622,9 @@ const actions: Record<string, (k: string) => void> = {
   },
   'fx-try'() { tryEffect(); },
   'sound-add'() { pickSound(() => undefined); },
-  'sound-play'(k) { const x = project.sounds?.find(y => y.id === k); if (x) previewSound(x.name); },
+  'sound-play'(k) { const x = project.sounds?.find(y => y.id === k); if (x) previewSound(x.name, true); },
+  'music-add'() { pickSound(() => undefined, null, true); },
+  'room-music-once'(k) { room().musicOnce = k === '1' || undefined; save(); render(); },
   'sound-delete'(k) {
     const x = project.sounds?.find(y => y.id === k);
     if (!x || !project.sounds) return;
@@ -626,6 +635,7 @@ const actions: Record<string, (k: string) => void> = {
       e.script = renameSoundInScript(e.script, x.name, '');
     }
     for (const c of project.characters) for (const l of c.looks) if (l.sound === x.name) delete l.sound;
+    for (const r of project.rooms) if (r.music === x.name) { delete r.music; delete r.musicOnce; }
     save(); render();
   },
   cast() { castSel = null; go(ui.view === 'cast' ? 'room' : 'cast'); },
@@ -864,26 +874,30 @@ $('#charfile')!.addEventListener('change', async ev => {
 
 let soundDone: ((name: string) => void) | null = null;
 let soundOwner: Character | null = null;
+let soundIsMusic = false;
 /** Asks for a sound file; when it is added, done gets its name. With an owner, it joins that character's sounds. */
-function pickSound(done: (name: string) => void, owner: Character | null = null): void {
+function pickSound(done: (name: string) => void, owner: Character | null = null, music = false): void {
   soundDone = done;
   soundOwner = owner;
+  soundIsMusic = music;
   const input = $<HTMLInputElement>('#soundfile')!;
   input.value = '';
   input.click();
 }
 
-const SOUND_LIMIT = 3 * 1024 * 1024;
+const SOUND_LIMIT = 3 * 1024 * 1024, MUSIC_LIMIT = 15 * 1024 * 1024;
 $('#soundfile')!.addEventListener('change', ev => {
   const f = (ev.target as HTMLInputElement).files?.[0];
   const done = soundDone;
   soundDone = null;
   if (!f) return;
-  if (f.size > SOUND_LIMIT) { toast('That sound is larger than 3 MB. Short sounds work best: trim it, or save it as MP3 or OGG.'); return; }
+  const music = soundIsMusic;
+  if (!music && f.size > SOUND_LIMIT) { toast('That sound is larger than 3 MB. Short sounds work best: trim it, or save it as MP3 or OGG.'); return; }
+  if (music && f.size > MUSIC_LIMIT) { toast('That track is larger than 15 MB. Save it as MP3 or OGG at a lower quality (128 kbps is plenty).'); return; }
   const reader = new FileReader();
   reader.onload = () => {
     const before = snapshot();
-    const name = addSound(f.name, String(reader.result), soundOwner);
+    const name = addSound(f.name, String(reader.result), soundOwner, music);
     soundOwner = null;
     done?.(name);
     save(); record(before);
@@ -894,7 +908,7 @@ $('#soundfile')!.addEventListener('change', ev => {
   reader.readAsDataURL(f);
 });
 
-function addSound(fileName: string, data: string, owner: Character | null = null): string {
+function addSound(fileName: string, data: string, owner: Character | null = null, music = false): string {
   project.sounds ??= [];
   let base = cleanSoundName(fileName);
   // A character's sounds carry the character's name, so "laugh" for Lin is "lin laugh".
@@ -902,16 +916,21 @@ function addSound(fileName: string, data: string, owner: Character | null = null
   if (who && !base.startsWith(`${who} `) && base !== who) base = cleanSoundName(`${who} ${base}`);
   let name = base, i = 2;
   while (project.sounds.some(x => x.name === name)) name = `${base} ${i++}`;
-  project.sounds.push({ id: newId(), name, data, ...(owner ? { owner: owner.id } : {}) });
+  project.sounds.push({ id: newId(), name, data, ...(owner ? { owner: owner.id } : {}), ...(music ? { music: true } : {}) });
   return name;
 }
 
 let previewAudio: HTMLAudioElement | null = null;
-function previewSound(name: string): void {
+let previewing = '';
+/** Plays a sound at its volume; a second click on the same one (music, say) stops it. */
+function previewSound(name: string, toggle = false): void {
   const snd = project.sounds?.find(x => x.name === name.toLowerCase());
-  if (!snd) return;
   previewAudio?.pause();
+  if (!snd || (toggle && previewing === snd.id)) { previewing = ''; previewAudio = null; return; }
   previewAudio = new Audio(snd.data);
+  previewAudio.volume = (snd.volume ?? 100) / 100;
+  previewing = snd.id;
+  previewAudio.onended = () => { if (previewing === snd.id) previewing = ''; };
   void previewAudio.play().catch(() => undefined);
 }
 
@@ -1196,6 +1215,12 @@ function commitMapField(t: HTMLInputElement): void {
     return;
   }
   if (t.dataset.mapIn === 'say-sound' && t.value) previewSound(t.value);
+  if (t.dataset.mapIn === 'music-track' && t.value === '__upload') {
+    const at = mapSel;
+    pickSound(name => { const c = mapCtx(); if (c && at) { mapSel = at; mapInput({ ...c, sel: at }, 'music-track', '', name); } }, null, true);
+    refreshMap();
+    return;
+  }
   if ((t.dataset.mapIn === 'stage-show' || t.dataset.mapIn === 'stg-who') && t.value === '__new') {
     const at = mapSel, field = t.dataset.mapIn;
     pickCharacter(c => {
@@ -1247,6 +1272,18 @@ document.addEventListener('input', ev => {
     case 'look-scale': { const l = editedLook(); if (l && e) { l.scale = Number(t.value); if (node) node.innerHTML = elementArt(e, undefined, project.characters, l.id); } break; }
     case 'room-name': { room().name = t.value; const c = $('#crumbs [aria-current]'); if (c) c.textContent = t.value; break; }
     case 'room-auto': { const r = room(); r.auto = !!t.value; if (t.value) r.autoEl = t.value; else { delete r.autoEl; delete r.autoOnce; } save(); render(); return; }
+    case 'sound-volume': {
+      const x = project.sounds?.find(y => y.id === t.dataset.k);
+      if (x) { x.volume = Number(t.value); if (x.volume === 100) delete x.volume; if (previewAudio && previewing === x.id) previewAudio.volume = Number(t.value) / 100; }
+      break;
+    }
+    case 'room-music': {
+      const r = room();
+      if (t.value === '__upload') { pickSound(name => { r.music = name; }, null, true); t.value = r.music ?? ''; return; }
+      if (t.value) r.music = t.value; else delete r.music;
+      if (r.music === 'off' || !r.music) delete r.musicOnce;
+      save(); render(); return;
+    }
     case 'cast-fact-start': {
       const d = project.characters.find(x => x.id === castSel)?.facts?.find(f => f.fact === t.dataset.k);
       if (!d) break;
@@ -1336,6 +1373,11 @@ document.addEventListener('change', ev => {
     renameFrom = room().name;
     save();
   }
+  if (t.dataset.in === 'sound-volume') {
+    const x = project.sounds?.find(y => y.id === t.dataset.k);
+    if (x && !x.music) previewSound(x.name);
+    save();
+  }
   if (t.dataset.in === 'sound-name') {
     const x = project.sounds?.find(y => y.id === t.dataset.k);
     if (x) {
@@ -1348,6 +1390,7 @@ document.addEventListener('change', ev => {
         e.script = renameSoundInScript(e.script, old, name);
       }
       for (const c of project.characters) for (const l of c.looks) if (l.sound === old) l.sound = name;
+      for (const r of project.rooms) if (r.music === old) r.music = name;
       save(); render();
     }
   }

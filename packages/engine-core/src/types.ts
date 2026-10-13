@@ -48,11 +48,13 @@ export interface EndStep { t: 'end' }
 export interface PartStep { t: 'part'; name: string }
 /** Continue from a named part of the same conversation. */
 export interface JumpStep { t: 'jump'; part: string }
+/** Background music from here on: a track by name (looping unless once), or silence when track is empty. */
+export interface MusicStep { t: 'music'; track: string; once?: boolean }
 /** An author's note (a line starting with #). The player never sees it. */
 export interface NoteStep { t: 'note'; text: string }
 
 /** One step of a conversation. */
-export type Step = SayStep | ChoiceStep | IfStep | ChangeStep | DoorStep | EndStep | PartStep | JumpStep | NoteStep | ShowStep | MoveStep | HideStep;
+export type Step = SayStep | ChoiceStep | IfStep | ChangeStep | DoorStep | EndStep | PartStep | JumpStep | NoteStep | ShowStep | MoveStep | HideStep | MusicStep;
 export type StageStep = ShowStep | MoveStep | HideStep;
 
 export interface ScriptError {
@@ -174,6 +176,10 @@ export interface Room {
   autoEl?: string;
   /** Start it on the first visit only, instead of every visit. */
   autoOnce?: boolean;
+  /** Music when the player enters: a track by name, or "off" for silence. Left out, whatever plays goes on. */
+  music?: string;
+  /** Play the room's music once instead of looping it. */
+  musicOnce?: boolean;
   els: StoryElement[];
 }
 
@@ -228,6 +234,10 @@ export interface Sound {
   data: string;
   /** The character whose sound library it belongs to, if any. */
   owner?: string;
+  /** How loud it plays, 0 to 100 (100 when left out). */
+  volume?: number;
+  /** A music track rather than a sound effect. */
+  music?: boolean;
 }
 
 export interface Project {

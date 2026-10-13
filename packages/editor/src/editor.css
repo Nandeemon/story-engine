@@ -29,7 +29,7 @@ img { max-width: 100%; }
 [hidden] { display: none !important; }
 button, input, select, textarea { font: inherit; color: inherit; }
 :focus-visible { outline: 3px solid var(--violet); outline-offset: 2px; }
-.wrap { max-width: 1180px; margin-inline: auto; display: flex; flex-direction: column; gap: 16px; }
+.wrap { max-width: 1180px; margin-inline: auto; transition: max-width .2s; display: flex; flex-direction: column; gap: 16px; }
 
 /* Bar */
 .bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding-block: 14px; border-bottom: 2px solid var(--ink); }
@@ -413,3 +413,21 @@ h3.sub { margin: 30px 0 4px; font: 700 18px/1.2 var(--display); }
 .quick .chip { cursor: pointer; border: 1.5px solid var(--line); }
 .quick .chip.on { border-color: var(--ink); background: var(--tape); }
 button.chip { font: inherit; font-size: 13px; }
+
+
+/* Wide screens: the conversation view uses all the room there is. The scene sits
+   beside the map, the map fills the height of the window. */
+body.wide .wrap { max-width: min(100%, 2200px); }
+body.wide .work { grid-template-columns: minmax(0, 1fr) 340px; }
+.mapmode .mscroll { height: calc(100dvh - 190px); max-height: none; }
+.mpreview.big { width: 100%; max-width: calc(40dvh * 16 / 9); min-width: min(100%, 320px); }
+@media (min-width: 1300px) {
+  .mapwrap.mapmode { display: grid; grid-template-columns: minmax(360px, 42%) minmax(0, 1fr); grid-template-rows: auto 1fr; align-items: start; }
+  .mapwrap.mapmode > .convobar { grid-column: 1 / -1; }
+  .mapwrap.mapmode > #mscene { position: sticky; top: 12px; }
+  .mapwrap.mapmode .mpreview.big { max-width: none; }
+  .mapwrap.mapmode .mscroll { height: calc(100dvh - 150px); }
+  .mapwrap.mapmode.noscene { grid-template-columns: minmax(0, 1fr); }
+}
+.soundrow .vol { display: flex; align-items: center; gap: 4px; flex: 0 1 130px; min-width: 80px; font-size: 13px; }
+.soundrow .vol input { width: 100%; }

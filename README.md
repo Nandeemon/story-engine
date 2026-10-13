@@ -45,6 +45,10 @@ In **Look**, under On-screen display, add a **Meter** (a bar, such as affection 
 - **Once:** a conversation can happen every time, or once, after which the thing cannot be clicked or is gone.
 - **When the player enters:** a room can start a conversation straight away, on every visit or only the first.
 
+## Music and volume
+
+Add music on the Story map (up to 15 MB a track; MP3 or OGG keeps it small). A room can start its own music when the player enters, looping or once, or go silent; left alone, whatever plays goes on. A conversation can change it with a **Music** step (`Music: rain theme`, `Music once: sting`, `Music: off`). Every sound and track has its own volume slider.
+
 ## Effects and sounds
 
 A line can give the speaker an effect: shake, tremble, pulse, pop, bounce, jump or flash, each with Strength, Speed and Times (1 to 5). Upload your own sounds (a laugh, a gasp, a door) and play them with a line or when something is clicked. In the script: `Mara (happy, pulse strength 4 x2, sound laugh): Ha!`. The Story map lists the sounds, to listen, rename or remove.
@@ -98,7 +102,7 @@ Each backdrop can **Fill** the stage (drag the backdrop in the room to choose wh
 
 ## Writing a conversation
 
-Every conversation can be shown two ways, switched at the top of the conversation view. **Map** (the default) draws it as boxes: click a box to change it, click + to add a step there. **Script** shows it as text. Both edit the same conversation.
+Every conversation can be shown two ways, switched at the top of the conversation view. **Map** (the default) draws it as boxes: click a box to change it, click + to add a step there. The mouse wheel zooms the map around the pointer (Shift with the wheel scrolls sideways), and on a wide screen the scene sits beside the map, both using the whole window. **Script** shows it as text. Both edit the same conversation.
 
 ```
 Mara: You came back.

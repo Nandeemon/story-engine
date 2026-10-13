@@ -51,6 +51,8 @@ export function renameSoundInScript(script: string, oldName: string, newName: st
   const from = lower(oldName), to = newName.trim().replace(/[():,"]/g, ' ').trim();
   if (!from || from === lower(to)) return script;
   return script.split('\n').map(line => {
+    const mu = line.match(/^(\s*music(?:\s+once)?\s*:\s*)(.+?)\s*$/i);
+    if (mu) return lower(mu[2]) === from ? (to ? `${mu[1]}${to}` : `${mu[1].replace(/once\s*/i, '')}off`) : line;
     const m = line.match(/^(\s*[^:"()#]{1,40}?\s*\()([^)]*)(\)\s*:.*)$/);
     if (!m) return line;
     const parts = m[2].split(',');

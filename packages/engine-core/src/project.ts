@@ -116,6 +116,8 @@ export function normalizeProject(raw: unknown): Project | null {
       id: str(x.id, newId()), name: str(x.name, 'Room'), bg, auto: x.auto === true,
       ...(typeof x.autoEl === 'string' && els.some(e => e.id === x.autoEl) ? { autoEl: x.autoEl } : {}),
       ...(x.autoOnce === true ? { autoOnce: true } : {}),
+      ...(typeof x.music === 'string' && x.music ? { music: x.music } : {}),
+      ...(x.musicOnce === true ? { musicOnce: true } : {}),
       els
     };
   });
@@ -163,7 +165,9 @@ export function normalizeProject(raw: unknown): Project | null {
     ...(w.hideUnset === true ? { hideUnset: true } : {})
   }));
   const sounds: Sound[] = (Array.isArray(r.sounds) ? r.sounds : []).filter(x => x && typeof x === 'object' && typeof (x as Record<string, unknown>).data === 'string')
-    .map((x: Record<string, unknown>) => ({ id: str(x.id, newId()), name: cleanSoundName(str(x.name, 'sound')), data: x.data as string, ...(typeof x.owner === 'string' && characters.some(c => c.id === x.owner) ? { owner: x.owner } : {}) }));
+    .map((x: Record<string, unknown>) => ({ id: str(x.id, newId()), name: cleanSoundName(str(x.name, 'sound')), data: x.data as string, ...(typeof x.owner === 'string' && characters.some(c => c.id === x.owner) ? { owner: x.owner } : {}),
+      ...(typeof x.volume === 'number' && x.volume !== 100 ? { volume: clamp(Math.round(x.volume), 0, 100) } : {}),
+      ...(x.music === true ? { music: true } : {}) }));
   return {
     version: 1,
     ...(typeof r.title === 'string' && r.title.trim() ? { title: r.title.trim().slice(0, 80) } : {}),

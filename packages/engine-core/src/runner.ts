@@ -1,4 +1,4 @@
-import type { ChoiceOption, Condition, DoorStep, Effect, Facts, FactValue, SayStep, StageStep, Step } from './types';
+import type { ChoiceOption, Condition, DoorStep, Effect, Facts, FactValue, MusicStep, SayStep, StageStep, Step } from './types';
 
 export interface ChoiceEvent {
   t: 'choice';
@@ -58,7 +58,7 @@ const LOOP_LIMIT = 10_000;
  * Runs a conversation step by step. Facts are changed in place, so every
  * conversation in a playthrough shares the same story facts.
  */
-export function createRunner(steps: Step[], facts: Facts, onStage?: (step: StageStep) => void, startAt?: string): Runner {
+export function createRunner(steps: Step[], facts: Facts, onStage?: (step: StageStep | MusicStep) => void, startAt?: string): Runner {
   const stack: { steps: Step[]; i: number }[] = startAt ? framesFor(steps, startAt) : [{ steps, i: 0 }];
   return {
     next(): RunEvent {
@@ -96,7 +96,8 @@ export function createRunner(steps: Step[], facts: Facts, onStage?: (step: Stage
           }
           case 'show':
           case 'move':
-          case 'hide': onStage?.(s); continue;
+          case 'hide':
+          case 'music': onStage?.(s); continue;
           case 'part':
           case 'note': continue;
           case 'door': stack.length = 0; return s;

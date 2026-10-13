@@ -62,12 +62,14 @@ export function findProblems(p: Project): Problem[] {
   for (const r of p.rooms) for (const e of r.els) summarize(parseScript(e.script).steps).facts.forEach(f => scripted.add(f));
   for (const c of p.characters) for (const f of c.facts ?? []) scripted.add(f.fact);
   for (const r of p.rooms) for (const e of r.els) if (e.kind === 'char' && e.script.trim()) scripted.add(talkedFact(e.name));
+  for (const room of p.rooms) if (room.music && room.music !== 'off' && !sounds.has(room.music.toLowerCase())) out.push({ level: 'warning', roomId: room.id, where: room.name, text: `The room's music "${room.music}" is not among your music.` });
   for (const room of p.rooms) for (const el of room.els) {
     const base = { roomId: room.id, elId: el.id, where: `${room.name} › ${el.name}` };
     if (el.cond && !scripted.has(el.cond.fact)) out.push({ ...base, inRoom: true, level: 'warning', text: `${el.name} is only in the room while "${el.cond.fact}" says so, but no conversation changes or checks "${el.cond.fact}", so ${el.name} may never show.` });
     if (el.sound && !sounds.has(el.sound.toLowerCase())) out.push({ ...base, inRoom: true, level: 'warning', text: `The sound "${el.sound}" played on click is not among your sounds.` });
     walkWithPaths(parseScript(el.script).steps, (st, path) => {
       if (st.t === 'say' && st.sound && !sounds.has(st.sound.toLowerCase())) out.push({ ...base, level: 'warning', path, text: `The sound "${st.sound}" is not among your sounds. Add it on the Story map, or pick another.` });
+      if (st.t === 'music' && st.track && !sounds.has(st.track.toLowerCase())) out.push({ ...base, level: 'warning', path, text: `The music "${st.track}" is not among your music. Add it on the Story map, or pick another.` });
     });
   }
   for (const w of p.hud ?? []) {

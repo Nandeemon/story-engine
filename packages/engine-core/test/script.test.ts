@@ -200,3 +200,12 @@ describe('line effects and sounds', () => {
     expect((s as { fx?: string }).fx).toBeUndefined();
   });
 });
+
+describe('music', () => {
+  it('reads and writes music lines', () => {
+    const { steps } = parseScript('Music: rain theme\nMusic once: sting\nMusic: off');
+    expect(steps).toEqual([{ t: 'music', track: 'rain theme' }, { t: 'music', track: 'sting', once: true }, { t: 'music', track: '' }]);
+    (steps[0] as { once?: boolean }).once = true;
+    expect(writeScript(steps)).toBe('Music once: rain theme\nMusic once: sting\nMusic: off');
+  });
+});

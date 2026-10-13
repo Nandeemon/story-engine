@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import { createRunner, parsePlace, parseScript, placeText, snapToSpot, stepsBefore, writeScript } from '../src';
-import type { StageStep } from '../src';
 
 const SCENE = `Show Lin as happy at left with fade
 Lin (sad, shake): I thought you forgot.
@@ -40,7 +39,7 @@ describe('stage steps', () => {
 
   it('tells the player about stage steps as they pass', () => {
     const seen: string[] = [];
-    const runner = createRunner(parseScript(SCENE).steps, {}, (s: StageStep) => seen.push(`${s.t} ${s.who}`));
+    const runner = createRunner(parseScript(SCENE).steps, {}, s => seen.push(s.t === 'music' ? `music ${s.track}` : `${s.t} ${s.who}`));
     const ev = runner.next();
     expect(ev).toMatchObject({ t: 'say', fx: 'shake' });
     expect(seen).toEqual(['show Lin']);

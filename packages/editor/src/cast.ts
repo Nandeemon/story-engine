@@ -6,6 +6,7 @@
 import { parseScript, talkedFact, valueText, walkSteps } from '@story-engine/engine-core';
 import type { Character, FactDef, Project, Room, Step, StoryElement } from '@story-engine/engine-core';
 import { esc } from '@story-engine/runtime';
+import { soundRow } from './widgets';
 
 const lower = (s: string) => s.trim().toLowerCase();
 
@@ -133,14 +134,12 @@ function factsSection(p: Project, c: Character, info: CastInfo): string {
 
 /** The character's own small sound library: reactions such as a laugh or a gasp, optionally tied to a look. */
 function soundsSection(p: Project, c: Character): string {
-  const mine = (p.sounds ?? []).filter(x => x.owner === c.id);
+  const mine = (p.sounds ?? []).filter(x => x.owner === c.id && !x.music);
   const looks = c.looks.filter(l => !l.once);
   const rows = mine.map(x => {
     const linked = looks.find(l => l.sound === x.name);
-    return `<div class="soundrow"><button class="btn small quiet" data-act="sound-play" data-k="${esc(x.id)}" aria-label="Play ${esc(x.name)}">▶</button>
-      <input type="text" id="sound-${esc(x.id)}" data-in="sound-name" data-k="${esc(x.id)}" value="${esc(x.name)}" aria-label="Sound name">
-      ${looks.length ? `<select id="cs-look-${esc(x.id)}" data-in="cast-sound-look" data-k="${esc(x.id)}" aria-label="Plays with a look"><option value="">Any line</option>${looks.map(l => `<option value="${esc(l.id)}"${linked === l ? ' selected' : ''}>with the ${esc(l.name)} look</option>`).join('')}</select>` : ''}
-      <button class="btn small quiet danger" data-act="sound-delete" data-k="${esc(x.id)}" data-confirm="Delete?">Delete</button></div>`;
+    const look = looks.length ? `<select id="cs-look-${esc(x.id)}" data-in="cast-sound-look" data-k="${esc(x.id)}" aria-label="Plays with a look"><option value="">Any line</option>${looks.map(l => `<option value="${esc(l.id)}"${linked === l ? ' selected' : ''}>with the ${esc(l.name)} look</option>`).join('')}</select>` : '';
+    return soundRow(x, look);
   }).join('');
   return `<section><div class="label">Sounds</div>
     ${rows || `<p class="hint">No sounds of ${esc(c.name)}'s own yet: a laugh, a sigh, a gasp.</p>`}

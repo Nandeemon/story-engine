@@ -11,7 +11,7 @@ import { characterOf, findLook, hasLook, storyFactNames } from '@story-engine/en
 import type { Character, ChoiceStep, CompareOp, Effect, Placement, Project, Room, SayStep, Step, StoryElement } from '@story-engine/engine-core';
 import { EXPRESSIONS, applyToScene, esc, nextMoment, sayHTML, sceneHTML, startScene } from '@story-engine/runtime';
 import type { Scene } from '@story-engine/runtime';
-import { soundSelect } from './widgets';
+import { musicSelect, soundSelect } from './widgets';
 
 export interface MapCtx {
   project: Project;
@@ -84,7 +84,7 @@ let model: Model = { edges: [], jumps: [], parts: new Map() };
 let nextId = 0;
 
 const lower = (s: string) => s.trim().toLowerCase();
-const LINE_KINDS = new Set(['say', 'change', 'note', 'show', 'move', 'hide']);
+const LINE_KINDS = new Set(['say', 'change', 'note', 'show', 'move', 'hide', 'music']);
 const TERMINAL = new Set(['door', 'end', 'jump']);
 
 export function startLabel(room: Room, el: StoryElement): string {
@@ -128,6 +128,7 @@ export function mapHTML(ctx: MapCtx): string {
         ? `<button ${attrs}><span class="who${unknownSpeaker(ctx, s.who) ? ' voice" title="A voice without a picture: no character has this name' : ''}">${esc(s.who)}</span>${s.expr ? exprTag(s.who, s.expr) : ''}<span class="txt">${text}</span></button>`
         : `<button ${attrs}><span class="txt narr">${text}</span></button>`;
     }
+    if (s.t === 'music') return `<button ${attrs}><span class="tag">Music</span><span class="txt">${s.track ? `♫ ${esc(s.track)}${s.once ? ' (once)' : ''}` : 'Silence'}</span></button>`;
     if (s.t === 'change') return `<button ${attrs}><span class="tag">Change</span><span class="txt">${esc(s.effects.map(effectText).join(', '))}</span></button>`;
     if (s.t === 'note') return `<button ${attrs}><span class="tag">Note</span><span class="txt">${esc(s.text)}</span></button>`;
     if (s.t === 'show' || s.t === 'move' || s.t === 'hide') {
@@ -253,16 +254,21 @@ export function applyZoom(): void {
   if (label) label.textContent = `${Math.round(zoom * 100)}%`;
 }
 
-/** Changes the zoom and keeps the middle of the view where it was. */
-export function setZoom(next: number): void {
+/** Changes the zoom, keeping a point of the view where it was: the given one (the pointer), or the middle. */
+export function setZoom(next: number, at?: { x: number; y: number }): void {
   const sc = document.getElementById('mscroll');
-  const z = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.round(next * 100) / 100));
+  const z = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.round(next * 1000) / 1000));
   if (!sc) { zoom = z; return; }
-  const cx = (sc.scrollLeft + sc.clientWidth / 2) / zoom, cy = (sc.scrollTop + sc.clientHeight / 2) / zoom;
+  const ax = at?.x ?? sc.clientWidth / 2, ay = at?.y ?? sc.clientHeight / 2;
+  const sizer = document.getElementById('msizer');
+  // The canvas is centred when narrower than the view, so measure from where it starts.
+  const offX = () => sizer ? sizer.getBoundingClientRect().left - sc.getBoundingClientRect().left + sc.scrollLeft : 0;
+  const offY = () => sizer ? sizer.getBoundingClientRect().top - sc.getBoundingClientRect().top + sc.scrollTop : 0;
+  const cx = (sc.scrollLeft + ax - offX()) / zoom, cy = (sc.scrollTop + ay - offY()) / zoom;
   zoom = z;
   applyZoom();
-  sc.scrollLeft = cx * zoom - sc.clientWidth / 2;
-  sc.scrollTop = cy * zoom - sc.clientHeight / 2;
+  sc.scrollLeft = cx * zoom + offX() - ax;
+  sc.scrollTop = cy * zoom + offY() - ay;
 }
 
 export function mapView(kind: string): void {
@@ -359,6 +365,7 @@ function stepLabel(s: Step): string {
     case 'choice': return 'the player chooses';
     case 'if': return `only if ${conditionText(s.cond)}`;
     case 'change': return `change ${s.effects.map(effectText).join(', ')}`;
+    case 'music': return s.track ? `music ${s.track}` : 'the music stops';
     case 'door': return `go to ${s.room}`;
     case 'end': return 'the end';
     case 'part': return `part ${s.name}`;
@@ -439,7 +446,7 @@ function stageField(ctx: MapCtx, scene: Scene, who: string): string {
   const others = scene.chars.filter(c => c.visible && c !== me);
   const out = castNames(ctx).filter(n => !scene.chars.some(c => c.visible && lower(c.name) === lower(n)));
   const mine = me ? `
-    <p class="hint">Drag ${esc(me.name)} in the scene above the map to place ${esc(me.name)} for this line. The place holds until it changes.</p>
+    <p class="hint">Drag ${esc(me.name)} in the scene to place ${esc(me.name)} for this line. The place holds until it changes.</p>
     ${spotButtons('stage-spot', me.x)}
     <label class="field"><span>Size on stage</span><input type="range" id="m-ssize" data-map-in="stage-size" min="20" max="130" value="${me.size}"></label>
     <div class="row"><label class="check"><input type="checkbox" id="m-sflip" data-map-in="stage-flip"${me.flip ? ' checked' : ''}><span>Turn around</span></label></div>` : '';
@@ -477,6 +484,7 @@ const kinds = (top: boolean, hasParts: boolean) => [
   ['choice', 'Choice', 'The player picks one of several answers'],
   ['if', 'Only if', 'Take one path or another depending on story facts'],
   ['change', 'Change something', 'Change a story fact without saying anything'],
+  ['music', 'Music', 'Start, change or stop the background music'],
   ['door', 'Go to another room', 'The player moves to another room'],
   ...(hasParts ? [['jump', 'Go to a part', 'Continue from a named part of this conversation']] : []),
   ['show', 'Bring someone in', 'A character comes on stage, with an effect'],
@@ -561,7 +569,7 @@ export function mapSide(ctx: MapCtx): string {
         ${spotButtons('stg-spot', step.at.x)}
         <label class="field"><span>Size on stage</span><input type="range" id="m-stsize" data-map-in="stg-size" min="20" max="130" value="${step.at.size ?? scene.chars.find(c => lower(c.name) === lower(step.who))?.size ?? 76}"></label>
         <div class="row"><label class="check"><input type="checkbox" id="m-stflip" data-map-in="stg-flip"${step.at.flip ? ' checked' : ''}><span>Turn around</span></label></div>
-        <p class="hint">Or drag ${esc(step.who)} in the scene above the map.</p>`;
+        <p class="hint">Or drag ${esc(step.who)} in the scene.</p>`;
       return `${header(title)}${who}${look}${at}${fx}${del()}`;
     }
     case 'choice':
@@ -581,6 +589,12 @@ export function mapSide(ctx: MapCtx): string {
     }
     case 'change':
       return `${header('Change something')}${facts}${effectRows(step.effects)}${del()}`;
+    case 'music':
+      return `${header('Music')}
+        <p class="hint">The background music from this step on. It keeps playing after the conversation, until a room or another Music step changes it.</p>
+        <label class="field"><span>Track</span>${musicSelect(ctx.project, 'm-music', 'data-map-in="music-track"', step.track, [['', 'Silence']])}</label>
+        ${step.track ? `<div class="row"><label class="check"><input type="checkbox" id="m-music-once" data-map-in="music-once"${step.once ? ' checked' : ''}><span>Play once instead of looping</span></label></div>` : ''}
+        ${del()}`;
     case 'door':
       return `${header('Go to another room')}
         <label class="field"><span>Room</span><select id="m-room" data-map-in="door-room">${ctx.project.rooms.map(r => `<option${lower(r.name) === lower(step.room) ? ' selected' : ''}>${esc(r.name)}</option>`).join('')}${ctx.project.rooms.some(r => lower(r.name) === lower(step.room)) ? '' : `<option selected>${esc(step.room)}</option>`}</select></label>
@@ -619,6 +633,7 @@ function newStep(kind: string, ctx: MapCtx, parts: string[]): Step {
     case 'choice': return { t: 'choice', options: [{ text: 'First answer', effects: [], steps: [] }, { text: 'Second answer', effects: [], steps: [] }] };
     case 'if': return { t: 'if', cond: { fact: 'affection', op: '>=', value: 5 }, then: [], else: [] };
     case 'change': return { t: 'change', effects: [{ fact: 'affection', op: '+', value: 1 }] };
+    case 'music': return { t: 'music', track: (ctx.project.sounds ?? []).find(x => x.music)?.name ?? '' };
     case 'door': return { t: 'door', room: other.name };
     case 'jump': return { t: 'jump', part: parts[0] ?? 'Start' };
     case 'end': return { t: 'end' };
@@ -842,6 +857,9 @@ export function mapInput(ctx: MapCtx, field: string, k: string, value: string): 
     if (field === 'cond-fact') step.cond.fact = factName(value) || 'fact';
     if (field === 'cond-op') { panel = (step.cond.op === 'truthy') !== (value === 'truthy'); step.cond.op = value as CompareOp; if (value === 'truthy') step.cond.value = true; else if (panel) step.cond.value = 5; }
     if (field === 'cond-val') step.cond.value = amount(value);
+  } else if (step.t === 'music') {
+    if (field === 'music-track') { panel = !step.track !== !value; step.track = value; if (!value) delete step.once; }
+    if (field === 'music-once') { if (value === 'true') step.once = true; else delete step.once; }
   } else if (step.t === 'door' && field === 'door-room') {
     step.room = value;
   } else if (step.t === 'jump' && field === 'jump-part') {

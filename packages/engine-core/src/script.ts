@@ -153,6 +153,10 @@ function parse(src: string, noteSources: boolean): ParseResult {
       } else if ((m = l.text.match(/^go to\s+(.+)$/i))) {
         pos++;
         steps.push(mark({ t: 'door', room: m[1].trim() }, l));
+      } else if ((m = l.text.match(/^music(\s+once)?\s*:\s*(.+)$/i))) {
+        pos++;
+        const track = m[2].trim();
+        steps.push(mark(/^(off|none|stop|silence)$/i.test(track) ? { t: 'music', track: '' } : { t: 'music', track, ...(m[1] ? { once: true } : {}) }, l));
       } else if (/^end$/i.test(l.text)) {
         pos++;
         steps.push(mark({ t: 'end' }, l));
@@ -305,6 +309,7 @@ function headerOf(s: Step): string | null {
       return `Move ${cleanName(s.who)}${where ? ` to ${where}` : ''}${s.at.size !== undefined ? ` size ${s.at.size}` : ''}${flip}`;
     }
     case 'hide': return `Hide ${cleanName(s.who)}${s.fx ? ` with ${s.fx}` : ''}`;
+    case 'music': return s.track ? `Music${s.once ? ' once' : ''}: ${oneLine(s.track)}` : 'Music: off';
   }
 }
 

@@ -60,8 +60,41 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
     if (!snd) return;
     let a = sounds.get(snd.id);
     if (!a) { a = new Audio(snd.data); sounds.set(snd.id, a); }
+    a.volume = (snd.volume ?? 100) / 100;
     a.currentTime = 0;
     void a.play().catch(() => { /* the browser may block sound until the player interacts */ });
+  }
+
+  /* Background music: one track at a time, faded in and out. */
+  let music: { key: string; el: HTMLAudioElement; target: number } | null = null;
+  function fade(el: HTMLAudioElement, to: number, ms: number, then?: () => void): void {
+    const from = el.volume, start = performance.now();
+    const tick = () => {
+      const k = Math.min(1, (performance.now() - start) / ms);
+      el.volume = Math.max(0, Math.min(1, from + (to - from) * k));
+      if (k < 1) requestAnimationFrame(tick); else then?.();
+    };
+    requestAnimationFrame(tick);
+  }
+  function stopMusic(now = false): void {
+    if (!music) return;
+    const el = music.el;
+    music = null;
+    if (now) el.pause(); else fade(el, 0, 600, () => el.pause());
+  }
+  function playMusic(track: string, once = false): void {
+    const key = track.trim().toLowerCase();
+    if (!key) return stopMusic();
+    if (music?.key === key) { music.el.loop = !once; return; }
+    const snd = project.sounds?.find(x => x.name.toLowerCase() === key);
+    if (!snd) return;
+    stopMusic();
+    const el = new Audio(snd.data);
+    el.loop = !once;
+    el.volume = 0;
+    const target = (snd.volume ?? 100) / 100;
+    music = { key, el, target };
+    void el.play().then(() => fade(el, target, 800)).catch(() => { /* blocked until the player interacts */ });
   }
   let runner: Runner | null = null;
   let builtRoom = '';
@@ -188,6 +221,7 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
     s.event = null;
     s.scene = null;
     runner = null;
+    if (r.music === 'off') stopMusic(); else if (r.music) playMusic(r.music, r.musicOnce);
     const visit = `room:${r.id}`;
     const firstVisit = !s.seen.includes(visit);
     if (firstVisit) s.seen.push(visit);
@@ -215,9 +249,13 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
     const steps = parseScript(el.script).steps;
     const scene = startScene(room(), el, steps, s);
     // Starting partway: the scene is set as it would stand by then.
-    if (startAt) for (const st of stepsBefore(steps, startAt)) { applyToScene(scene, st, project); nextMoment(scene); }
+    if (startAt) {
+      let track: { track: string; once?: boolean } | null = null;
+      for (const st of stepsBefore(steps, startAt)) { if (st.t === 'music') track = st; applyToScene(scene, st, project); nextMoment(scene); }
+      if (track) playMusic(track.track, track.once);
+    }
     s.scene = scene;
-    runner = createRunner(steps, s.facts, step => applyToScene(scene, step, project), startAt);
+    runner = createRunner(steps, s.facts, step => { if (step.t === 'music') playMusic(step.track, step.once); else applyToScene(scene, step, project); }, startAt);
     advance();
   }
 
@@ -297,6 +335,8 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
     state: () => s,
     destroy() {
       stopTyping();
+      stopMusic(true);
+      sounds.forEach(a => a.pause());
       host.removeEventListener('click', onClick);
       document.removeEventListener('keydown', onKey);
     }

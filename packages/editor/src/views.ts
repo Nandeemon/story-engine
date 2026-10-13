@@ -1,10 +1,10 @@
 import { CONDITION_WORDS, characterOf, findRoomByName, parseScript, summarize, valueText, walkSteps } from '@story-engine/engine-core';
 import { missingLook, unknownSpeaker } from './map';
 import { factKind, storyFacts } from './problems';
-import { soundSelect } from './widgets';
+import { musicSelect, soundRow, soundSelect } from './widgets';
 import type { Problem } from './problems';
 import type { StoryInfo } from './store';
-import type { Character, CompareOp, FactValue, Project, Room, StoryElement } from '@story-engine/engine-core';
+import type { Character, CompareOp, FactValue, Project, Room, Sound, StoryElement } from '@story-engine/engine-core';
 import { BACKDROPS, CHARACTERS, EXPRESSIONS, FONTS, OBJECTS, THEMES, backdropHTML, characterSVG, choicesHTML, esc, hudHTML, sayHTML, stageHTML } from '@story-engine/runtime';
 import type { Preset } from '@story-engine/runtime';
 
@@ -63,24 +63,29 @@ function soundUses(p: Project, name: string): number {
   let n = 0;
   for (const r of p.rooms) for (const e of r.els) {
     if ((e.sound ?? '').toLowerCase() === key) n++;
-    walkSteps(parseScript(e.script).steps, st => { if (st.t === 'say' && (st.sound ?? '').toLowerCase() === key) n++; });
+    walkSteps(parseScript(e.script).steps, st => { if ((st.t === 'say' && (st.sound ?? '').toLowerCase() === key) || (st.t === 'music' && st.track.toLowerCase() === key)) n++; });
   }
+  for (const r of p.rooms) if ((r.music ?? '').toLowerCase() === key) n++;
   return n;
 }
 
-/** The story's sounds: listen, rename, remove, add. */
+/** The story's sounds and music: listen, rename, set the volume, remove, add. */
 function soundsSection(p: Project): string {
-  const rows = (p.sounds ?? []).map(x => {
+  const all = p.sounds ?? [];
+  const row = (x: Sound) => {
     const n = soundUses(p, x.name);
-    return `<div class="soundrow"><button class="btn small quiet" data-act="sound-play" data-k="${esc(x.id)}" aria-label="Play ${esc(x.name)}">▶</button>
-      <input type="text" id="sound-${esc(x.id)}" data-in="sound-name" data-k="${esc(x.id)}" value="${esc(x.name)}" aria-label="Sound name">
-      <span class="hint">${x.owner ? `${esc(p.characters.find(c => c.id === x.owner)?.name ?? '')}'s · ` : ''}${n ? `used ${n}×` : 'not used yet'}</span>
-      <button class="btn small quiet danger" data-act="sound-delete" data-k="${esc(x.id)}" data-confirm="${n ? 'Also taken off where it is used. Sure?' : 'Delete?'}">Delete</button></div>`;
-  }).join('');
+    const who = x.owner ? `${esc(p.characters.find(c => c.id === x.owner)?.name ?? '')}'s · ` : '';
+    return soundRow(x, '', `${who}${n ? `used ${n}×` : 'not used yet'}`);
+  };
+  const fx = all.filter(x => !x.music), music = all.filter(x => x.music);
   return `<section class="soundsec"><div class="label">Sounds</div>
-    ${rows || '<p class="hint">No sounds yet. Add your own, such as a laugh, a gasp or a door.</p>'}
+    ${fx.map(row).join('') || '<p class="hint">No sounds yet. Add your own, such as a laugh, a gasp or a door.</p>'}
     <div class="row"><button class="btn small" data-act="sound-add">+ Add a sound</button></div>
-    <p class="hint">A sound plays when something is clicked (under More on the thing) or with a line (in the line's Effect and sound).</p></section>`;
+    <p class="hint">A sound plays when something is clicked (under More on the thing) or with a line (in the line's Effect and sound).</p></section>
+  <section class="soundsec"><div class="label">Music</div>
+    ${music.map(row).join('') || '<p class="hint">No music yet. Add a track, then pick it for a room or start it in a conversation.</p>'}
+    <div class="row"><button class="btn small" data-act="music-add">+ Add music</button></div>
+    <p class="hint">A room can start its own music (in the room's panel), and a conversation can change it with a Music step. Music loops unless you set it to play once.</p></section>`;
 }
 
 export function viewMap(p: Project, ui: UI, errors = 0): string {
@@ -258,11 +263,20 @@ function enterField(r: Room): string {
     ${cur ? `<div class="row"><button class="btn small${r.autoOnce ? ' quiet' : ' ink'}" data-act="room-auto-once" data-k="" aria-pressed="${!r.autoOnce}">Every visit</button><button class="btn small${r.autoOnce ? ' ink' : ' quiet'}" data-act="room-auto-once" data-k="1" aria-pressed="${!!r.autoOnce}">First visit only</button></div>` : ''}</div>`;
 }
 
+/** The room's music: keep what plays, silence, or a track, looping or once. */
+function musicField(p: Project, r: Room): string {
+  const v = r.music ?? '';
+  const track = v && v !== 'off';
+  return `<div class="field"><span>Music</span>${musicSelect(p, 'room-music', 'data-in="room-music"', v, [['', 'Keep what is playing'], ['off', 'Silence']])}
+    ${track ? `<div class="row"><button class="btn small${r.musicOnce ? ' quiet' : ' ink'}" data-act="room-music-once" data-k="" aria-pressed="${!r.musicOnce}">Loop</button><button class="btn small${r.musicOnce ? ' ink' : ' quiet'}" data-act="room-music-once" data-k="1" aria-pressed="${!!r.musicOnce}">Play once</button></div>` : ''}</div>`;
+}
+
 function roomPanel(p: Project, r: Room): string {
   return `<h2>${esc(r.name)}</h2>
     <div class="row"><button class="btn ink" data-act="adding" data-k="char">Add a character</button><button class="btn" data-act="adding" data-k="object">Add an object</button></div>
     <label class="field"><span>Room name</span><input type="text" id="room-name" data-in="room-name" value="${esc(r.name)}"></label>
     ${enterField(r)}
+    ${musicField(p, r)}
     ${r.bg ? backdropField(r) : ''}
     <details class="more" id="room-more"><summary>More</summary><div>
       <button class="btn small quiet" data-act="adding" data-k="bg">Change the backdrop</button>
@@ -324,9 +338,9 @@ function convoBar(mode: ConvoMode): string {
     <div class="row"><button class="btn small" id="play-from" data-act="play-here" title="Play from the step marked in the map"${mode === 'map' ? '' : ' hidden'} disabled>Play from the marked step</button><button class="btn small play" data-act="play-convo">Play this conversation</button></div></div>`;
 }
 
-export function viewConvo(p: Project, r: Room, e: StoryElement, mode: ConvoMode, map: { canvas: string; side: string; scene: string }): string {
+export function viewConvo(p: Project, r: Room, e: StoryElement, mode: ConvoMode, map: { canvas: string; side: string; scene: string; sceneOpen?: boolean }): string {
   if (mode === 'map') {
-    return `<div class="work"><div class="mapwrap">${convoBar(mode)}<div id="mscene">${map.scene}</div><div id="mapholder">${map.canvas}</div></div><aside class="side" id="mside">${map.side}</aside></div>`;
+    return `<div class="work"><div class="mapwrap mapmode${map.sceneOpen === false ? ' noscene' : ''}" id="mapwrap">${convoBar(mode)}<div id="mscene">${map.scene}</div><div id="mapholder">${map.canvas}</div></div><aside class="side" id="mside">${map.side}</aside></div>`;
   }
   const who = e.kind === 'char' ? esc(e.name) : 'Narrator';
   return `<div class="work"><div class="mapwrap">${convoBar(mode)}<div class="paper">
