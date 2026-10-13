@@ -102,6 +102,21 @@ export interface CharacterLook {
   scale: number;
   /** A picture used for one moment only; kept out of the character's look list. */
   once?: boolean;
+  /** A sound, by name, that plays when a line switches to this look (unless the line has a sound of its own). */
+  sound?: string;
+}
+
+/**
+ * A story fact the author keeps track of for a character: a number (affection),
+ * a milestone (gave her the letter), an item the player can have, or a word (mood).
+ */
+export interface FactDef {
+  fact: string;
+  kind: 'number' | 'milestone' | 'item' | 'word';
+  /** The value at the start of a new game; unset when left out. */
+  start?: FactValue;
+  /** The author's note on what it means. */
+  about?: string;
 }
 
 /** A character made from the author's own pictures, shared by every room it appears in. */
@@ -110,6 +125,8 @@ export interface Character {
   name: string;
   /** The author's own notes about the character: who they are, what they want. */
   about?: string;
+  /** Story facts the author keeps track of for this character. */
+  facts?: FactDef[];
   /** The base picture, shown as the look called "default". */
   base: string;
   looks: CharacterLook[];
@@ -169,6 +186,20 @@ export interface Look {
   size: number;
   /** Where answers appear: in the dialogue box under the question (default), or in the middle of the screen. */
   choices?: 'box' | 'center';
+  /** The dialogue box: solid (default), frosted glass, outlined, or a soft band across the bottom. */
+  box?: 'solid' | 'glass' | 'outline' | 'band';
+  /** How the speaker's name shows: a tag on the box (default), inside the box, or as coloured text. */
+  names?: 'tag' | 'inside' | 'plain';
+  /** How see-through the box is, 20 to 100 (percent covered). */
+  opacity?: number;
+  /** The box fits its text (default) or always spans the stage. */
+  width?: 'fit' | 'full';
+  /** Colours of the author's own, overriding the theme. */
+  boxColor?: string;
+  textColor?: string;
+  accentColor?: string;
+  /** Letters per second when text appears letter by letter; 0 or unset shows it at once. */
+  typing?: number;
 }
 
 /** Something shown over the game all the time: a story fact as a label or a meter. */
@@ -195,6 +226,8 @@ export interface Sound {
   name: string;
   /** The sound as a data URL. */
   data: string;
+  /** The character whose sound library it belongs to, if any. */
+  owner?: string;
 }
 
 export interface Project {

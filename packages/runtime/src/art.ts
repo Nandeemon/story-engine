@@ -52,7 +52,11 @@ export interface GameTheme { name: string; box: string; fg: string; accent: stri
 export const THEMES: Record<string, GameTheme> = {
   velvet: { name: 'Velvet', box: 'rgba(44,22,54,.92)', fg: '#F6EBDD', accent: '#E9B949', on: '#2C1636' },
   paper: { name: 'Paper', box: 'rgba(250,246,236,.96)', fg: '#2A2420', accent: '#C2412D', on: '#FFFFFF' },
-  neon: { name: 'Neon', box: 'rgba(10,14,24,.9)', fg: '#E6F7FF', accent: '#4DE2E8', on: '#06222A' }
+  neon: { name: 'Neon', box: 'rgba(10,14,24,.9)', fg: '#E6F7FF', accent: '#4DE2E8', on: '#06222A' },
+  night: { name: 'Night', box: 'rgba(16,22,44,.9)', fg: '#E8ECFF', accent: '#8EA2FF', on: '#0E1430' },
+  rose: { name: 'Rose', box: 'rgba(255,240,244,.95)', fg: '#4A2030', accent: '#D9567B', on: '#FFFFFF' },
+  forest: { name: 'Forest', box: 'rgba(22,38,30,.92)', fg: '#ECF3E6', accent: '#9BCB6B', on: '#14251B' },
+  mono: { name: 'Mono', box: 'rgba(12,12,12,.88)', fg: '#FFFFFF', accent: '#FFFFFF', on: '#111111' }
 };
 
 /** Font stacks use single quotes so they can sit inside a style attribute. */

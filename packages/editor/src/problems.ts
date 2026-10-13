@@ -2,7 +2,7 @@
  * Checking the whole story: every problem the author would otherwise only find by
  * playing, with a way to jump straight to it.
  */
-import { findRoomByName, getStep, parseScript, summarize, unreachableSteps, walkSteps, walkWithPaths, writeScript } from '@story-engine/engine-core';
+import { storyFactNames, talkedFact, findRoomByName, getStep, parseScript, summarize, unreachableSteps, walkSteps, walkWithPaths, writeScript } from '@story-engine/engine-core';
 import type { FactValue, Project } from '@story-engine/engine-core';
 import { missingLook, stageText, unknownSpeaker } from './map';
 
@@ -57,9 +57,14 @@ export function findProblems(p: Project): Problem[] {
   });
   const used = new Set(storyFacts(p));
   const sounds = new Set((p.sounds ?? []).map(x => x.name.toLowerCase()));
+  // Facts a conversation changes or checks, or the author keeps track of (not counting room conditions themselves).
+  const scripted = new Set<string>();
+  for (const r of p.rooms) for (const e of r.els) summarize(parseScript(e.script).steps).facts.forEach(f => scripted.add(f));
+  for (const c of p.characters) for (const f of c.facts ?? []) scripted.add(f.fact);
+  for (const r of p.rooms) for (const e of r.els) if (e.kind === 'char' && e.script.trim()) scripted.add(talkedFact(e.name));
   for (const room of p.rooms) for (const el of room.els) {
     const base = { roomId: room.id, elId: el.id, where: `${room.name} › ${el.name}` };
-    if (el.cond && !used.has(el.cond.fact)) out.push({ ...base, inRoom: true, level: 'warning', text: `${el.name} is only in the room while "${el.cond.fact}" says so, but no conversation changes or checks "${el.cond.fact}", so ${el.name} may never show.` });
+    if (el.cond && !scripted.has(el.cond.fact)) out.push({ ...base, inRoom: true, level: 'warning', text: `${el.name} is only in the room while "${el.cond.fact}" says so, but no conversation changes or checks "${el.cond.fact}", so ${el.name} may never show.` });
     if (el.sound && !sounds.has(el.sound.toLowerCase())) out.push({ ...base, inRoom: true, level: 'warning', text: `The sound "${el.sound}" played on click is not among your sounds.` });
     walkWithPaths(parseScript(el.script).steps, (st, path) => {
       if (st.t === 'say' && st.sound && !sounds.has(st.sound.toLowerCase())) out.push({ ...base, level: 'warning', path, text: `The sound "${st.sound}" is not among your sounds. Add it on the Story map, or pick another.` });
@@ -74,13 +79,13 @@ export function findProblems(p: Project): Problem[] {
 
 /** Every story fact used anywhere, for the test values. */
 export function storyFacts(p: Project): string[] {
-  const set = new Set<string>();
-  for (const r of p.rooms) for (const e of r.els) summarize(parseScript(e.script).steps).facts.forEach(f => set.add(f));
-  return [...set].sort();
+  return storyFactNames(p);
 }
 
 /** What kind of value a fact holds, guessed from how the story uses it. */
 export function factKind(p: Project, fact: string): 'number' | 'yesno' | 'word' {
+  const def = p.characters.flatMap(c => c.facts ?? []).find(d => d.fact === fact);
+  if (def) return def.kind === 'number' ? 'number' : def.kind === 'word' ? 'word' : 'yesno';
   let kind: 'number' | 'yesno' | 'word' = 'number';
   const see = (v: FactValue) => { if (typeof v === 'boolean') kind = 'yesno'; else if (typeof v === 'string' && kind === 'number') kind = 'word'; };
   for (const r of p.rooms) for (const e of r.els) walkSteps(parseScript(e.script).steps, s => {

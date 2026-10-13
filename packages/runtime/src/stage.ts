@@ -70,7 +70,39 @@ export function elementArt(el: StoryElement, expr?: string, characters: Characte
 /** CSS custom properties that carry the game's look into the stage. */
 export function lookStyle(look: Look): string {
   const t = THEMES[look.theme] ?? THEMES.velvet;
-  return `--g-font:${FONTS[look.font] ?? FONTS.Lora};--g-box:${t.box};--g-fg:${t.fg};--g-accent:${t.accent};--g-on:${t.on};--g-radius:${look.radius}px;--g-size:${look.size}`;
+  const [r, g, b, a] = look.boxColor ? [...hexRgb(look.boxColor), 0.92] : rgbaOf(t.box);
+  const alpha = look.opacity !== undefined ? look.opacity / 100 : a;
+  const box = `rgba(${r},${g},${b},${alpha})`;
+  const accent = look.accentColor ?? t.accent;
+  const out = [
+    `--g-font:${FONTS[look.font] ?? FONTS.Lora}`, `--g-box:${box}`, `--g-fg:${look.textColor ?? t.fg}`, `--g-accent:${accent}`,
+    `--g-on:${look.accentColor ? readableOn(look.accentColor) : t.on}`, `--g-radius:${look.radius}px`, `--g-size:${look.size}`
+  ];
+  if (look.width === 'full') out.push('--g-box-w:94%');
+  switch (look.box) {
+    case 'glass': out.push(`--g-box-bg:rgba(${r},${g},${b},${Math.min(alpha, 0.55)})`, '--g-box-blur:blur(12px) saturate(1.2)', '--g-box-border:1px solid rgba(255,255,255,.22)', '--g-box-shadow:0 8px 30px rgba(0,0,0,.25)'); break;
+    case 'outline': out.push(`--g-box-border:2px solid ${accent}`, '--g-box-shadow:0 6px 24px rgba(0,0,0,.3)'); break;
+    case 'band': out.push(`--g-box-bg:linear-gradient(to bottom, rgba(${r},${g},${b},0), rgba(${r},${g},${b},${alpha}) 28%)`, '--g-box-w:100%', '--g-box-max:100%', '--g-box-bottom:0', '--g-box-radius:0'); break;
+  }
+  if (look.names === 'inside') out.push('--g-who-pos:static', '--g-who-top:auto', '--g-who-mb:.4em');
+  if (look.names === 'plain') out.push('--g-who-pos:static', '--g-who-top:auto', '--g-who-mb:.2em', '--g-who-pad:0', '--g-who-bg:transparent', `--g-who-fg:${accent}`, '--g-who-size:.95em');
+  return out.join(';');
+}
+
+function hexRgb(h: string): [number, number, number] {
+  const n = parseInt(h.slice(1), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+function rgbaOf(c: string): [number, number, number, number] {
+  const m = c.match(/rgba?\(([^)]+)\)/);
+  if (!m) return [44, 22, 54, 0.92];
+  const [r, g, b, a] = m[1].split(',').map(Number);
+  return [r, g, b, a ?? 1];
+}
+/** Text colour that reads on a given background: dark on light, light on dark. */
+function readableOn(h: string): string {
+  const [r, g, b] = hexRgb(h);
+  return 0.299 * r + 0.587 * g + 0.114 * b > 150 ? '#1a1420' : '#ffffff';
 }
 
 /** Where an element sits: bottom centre, height, and for areas the width, in percent of the stage. */
@@ -100,7 +132,7 @@ export function stageHTML(room: Room, o: StageOptions): string {
 
 export function sayHTML(who: string, text: string, interactive = true): string {
   const attr = interactive ? 'data-next' : 'tabindex="-1"';
-  return `<button class="say" ${attr}>${who ? `<span class="who">${esc(who)}</span>` : ''}${esc(text)}<span class="go">tap to continue</span></button>`;
+  return `<button class="say" ${attr}>${who ? `<span class="who">${esc(who)}</span>` : ''}<span class="txt">${esc(text)}</span><span class="go">tap to continue</span></button>`;
 }
 
 /**

@@ -1,4 +1,4 @@
-import type { Backdrop, Character, CharacterLook, CompareOp, Condition, HudWidget, Look, Project, Room, Sound, StoryElement } from './types';
+import type { Backdrop, Character, CharacterLook, CompareOp, Condition, FactDef, FactValue, Facts, HudWidget, Look, Project, Room, Sound, StoryElement } from './types';
 import { isLineEffect } from './staging';
 import { renameLookInScript } from './refs';
 
@@ -25,6 +25,36 @@ const num = (v: unknown, fallback: number): number => (typeof v === 'number' && 
 const str = (v: unknown, fallback: string): string => (typeof v === 'string' ? v : fallback);
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
+const hex = (v: unknown): boolean => typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v);
+
+const isValue = (v: unknown): v is FactValue => typeof v === 'number' || typeof v === 'boolean' || typeof v === 'string';
+function normalizeFacts(raw: unknown): FactDef[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  return raw.filter(f => f && typeof f === 'object').map((f: Record<string, unknown>): FactDef => ({
+    fact: factName(str(f.fact, '')),
+    kind: f.kind === 'milestone' || f.kind === 'item' || f.kind === 'word' ? f.kind : 'number',
+    ...(isValue(f.start) ? { start: f.start } : {}),
+    ...(typeof f.about === 'string' && f.about ? { about: f.about } : {})
+  })).filter(f => f.fact && !seen.has(f.fact) && !!seen.add(f.fact));
+}
+
+/** A story fact name: letters, digits, underscores and dots. */
+export function factName(s: string): string {
+  return s.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, '_').replace(/[^\w.]/g, '').replace(/^\.+|\.+$/g, '');
+}
+
+/** The fact a character's conversations count up: "talked.lin". */
+export function talkedFact(name: string): string {
+  return `talked.${factName(name).replace(/\./g, '_') || 'someone'}`;
+}
+
+/** Story facts as a new game starts: the start values the author set. */
+export function startFacts(p: Project): Facts {
+  const out: Facts = {};
+  for (const c of p.characters) for (const f of c.facts ?? []) if (f.start !== undefined) out[f.fact] = f.start;
+  return out;
+}
 
 const OPS: CompareOp[] = ['>=', '<=', '>', '<', '!=', '=', 'truthy'];
 function normalizeCondition(raw: unknown): Condition | undefined {
@@ -100,8 +130,10 @@ export function normalizeProject(raw: unknown): Project | null {
       looks: (Array.isArray(c.looks) ? c.looks : []).filter(l => l && typeof l === 'object' && typeof (l as Record<string, unknown>).img === 'string')
         .map((l: Record<string, unknown>): CharacterLook => ({
           id: str(l.id, newId()), name: cleanLookName(str(l.name, 'look')), img: l.img as string,
-          dx: num(l.dx, 0), dy: num(l.dy, 0), scale: num(l.scale, 1), ...(l.once === true ? { once: true } : {})
-        }))
+          dx: num(l.dx, 0), dy: num(l.dy, 0), scale: num(l.scale, 1), ...(l.once === true ? { once: true } : {}),
+          ...(typeof l.sound === 'string' && l.sound ? { sound: l.sound } : {})
+        })),
+      ...(normalizeFacts(c.facts).length ? { facts: normalizeFacts(c.facts) } : {})
     }));
   // A look whose name is now an effect word was renamed above: its lines follow.
   for (const c of characters) for (const l of c.looks) {
@@ -131,7 +163,7 @@ export function normalizeProject(raw: unknown): Project | null {
     ...(w.hideUnset === true ? { hideUnset: true } : {})
   }));
   const sounds: Sound[] = (Array.isArray(r.sounds) ? r.sounds : []).filter(x => x && typeof x === 'object' && typeof (x as Record<string, unknown>).data === 'string')
-    .map((x: Record<string, unknown>) => ({ id: str(x.id, newId()), name: cleanSoundName(str(x.name, 'sound')), data: x.data as string }));
+    .map((x: Record<string, unknown>) => ({ id: str(x.id, newId()), name: cleanSoundName(str(x.name, 'sound')), data: x.data as string, ...(typeof x.owner === 'string' && characters.some(c => c.id === x.owner) ? { owner: x.owner } : {}) }));
   return {
     version: 1,
     ...(typeof r.title === 'string' && r.title.trim() ? { title: r.title.trim().slice(0, 80) } : {}),
@@ -144,7 +176,15 @@ export function normalizeProject(raw: unknown): Project | null {
       font: str(look.font, DEFAULT_LOOK.font),
       radius: num(look.radius, DEFAULT_LOOK.radius),
       size: num(look.size, DEFAULT_LOOK.size),
-      ...(look.choices === 'center' ? { choices: 'center' as const } : {})
+      ...(look.choices === 'center' ? { choices: 'center' as const } : {}),
+      ...(look.box === 'glass' || look.box === 'outline' || look.box === 'band' ? { box: look.box } : {}),
+      ...(look.names === 'inside' || look.names === 'plain' ? { names: look.names } : {}),
+      ...(typeof look.opacity === 'number' ? { opacity: clamp(Math.round(look.opacity), 20, 100) } : {}),
+      ...(look.width === 'full' ? { width: 'full' as const } : {}),
+      ...(hex(look.boxColor) ? { boxColor: look.boxColor as string } : {}),
+      ...(hex(look.textColor) ? { textColor: look.textColor as string } : {}),
+      ...(hex(look.accentColor) ? { accentColor: look.accentColor as string } : {}),
+      ...(typeof look.typing === 'number' && look.typing > 0 ? { typing: clamp(Math.round(look.typing), 5, 200) } : {})
     }
   };
 }

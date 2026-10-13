@@ -1,4 +1,4 @@
-import { createRunner, findRoomByName, parseScript, stepsBefore } from '@story-engine/engine-core';
+import { createRunner, findLook, findRoomByName, parseScript, startFacts, stepsBefore, talkedFact } from '@story-engine/engine-core';
 import type { ChoiceEvent, Facts, Project, Room, Runner, SayStep, StoryElement } from '@story-engine/engine-core';
 import { applyToScene, fxVars, nextMoment, present, roomScene, staged, stagedAttrs, startScene } from './scene';
 import type { Scene } from './scene';
@@ -50,7 +50,7 @@ const FX_CLASSES = ['in-fade', 'in-left', 'in-right', 'in-pop', 'out-fade', 'out
  */
 export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOptions = {}): Player {
   const first = project.rooms.find(r => r.id === opts.roomId) ?? project.rooms[0];
-  const s: PlayState = { roomId: first.id, facts: { ...(opts.facts ?? {}) }, event: null, problem: '', scene: null, seen: [...(opts.seen ?? [])] };
+  const s: PlayState = { roomId: first.id, facts: { ...startFacts(project), ...(opts.facts ?? {}) }, event: null, problem: '', scene: null, seen: [...(opts.seen ?? [])] };
   /** The element whose conversation is running. */
   let talking: StoryElement | null = null;
   const sounds = new Map<string, HTMLAudioElement>();
@@ -143,7 +143,44 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
     game.innerHTML = !ev ? (showHint ? `<div class="gamehint">${esc(opts.hint!)}</div>` : '') : ev.t === 'say' ? sayHTML(ev.who, ev.text)
       : choicesHTML(ev.options, true, project.look.choices ?? 'box', lastLine ?? undefined);
     if (ev?.t === 'choice') choiceShownAt = performance.now();
+    if (ev?.t === 'say') startTyping(game); else stopTyping();
     opts.onChange?.(s);
+  }
+
+  /* Letter by letter: the whole line is laid out at once (the rest hidden), so the box keeps its size while it fills. */
+  let typing: { timer: number; done: () => void } | null = null;
+  function stopTyping(): void {
+    if (typing) { clearInterval(typing.timer); typing = null; }
+  }
+  function startTyping(game: HTMLElement): void {
+    stopTyping();
+    const cps = project.look.typing ?? 0;
+    const span = game.querySelector<HTMLElement>('.say .txt');
+    if (!cps || !span || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const text = span.textContent ?? '';
+    span.innerHTML = '<span class="now"></span><span class="later"></span>';
+    const now = span.firstElementChild as HTMLElement, later = span.lastElementChild as HTMLElement;
+    let i = 0;
+    const show = () => { now.textContent = text.slice(0, i); later.textContent = text.slice(i); };
+    show();
+    const step = Math.max(1, Math.round(cps / 40));
+    const done = () => { i = text.length; show(); stopTyping(); };
+    const timer = window.setInterval(() => { i = Math.min(text.length, i + step); show(); if (i >= text.length) stopTyping(); }, 1000 * step / cps);
+    typing = { timer, done };
+  }
+  /** A click or key while a line is still appearing shows the rest of it; the next one goes on. */
+  function skipTyping(): boolean {
+    if (!typing) return false;
+    typing.done();
+    return true;
+  }
+
+  /** A look's own sound, when a line switches the speaker to it. */
+  function lookSound(ev: SayStep): string | undefined {
+    if (!ev.expr || !ev.who) return undefined;
+    const key = ev.who.trim().toLowerCase();
+    const c = project.characters.find(x => x.name.trim().toLowerCase() === key);
+    return c ? findLook(c, ev.expr)?.sound : undefined;
   }
 
   function enter(r: Room): void {
@@ -162,6 +199,8 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
   /** A conversation has run to its end (or out through a door): one-time conversations are now used up. */
   function done(): void {
     if (talking && !s.seen.includes(talking.id)) s.seen.push(talking.id);
+    // "talked.lin" counts the conversations had with Lin, for Only if.
+    if (talking?.kind === 'char') { const f = talkedFact(talking.name); s.facts[f] = (Number(s.facts[f]) || 0) + 1; }
     talking = null;
   }
 
@@ -200,7 +239,7 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
       if (s.scene) applyToScene(s.scene, ev, project);
       s.event = ev;
       lastLine = ev;
-      playSound(ev.sound);
+      playSound(ev.sound || lookSound(ev));
     } else if (ev.t === 'choice') {
       s.event = ev;
     } else if (ev.t === 'door') {
@@ -216,7 +255,7 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
 
   function onClick(e: MouseEvent): void {
     const t = e.target as HTMLElement;
-    if (t.closest('[data-next]')) return advance();
+    if (t.closest('[data-next]')) { if (skipTyping()) return; return advance(); }
     const pick = t.closest<HTMLElement>('[data-pick]');
     if (pick && s.event?.t === 'choice') {
       if (tooSoon()) return;
@@ -244,6 +283,7 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
     const t = e.target as HTMLElement;
     if (t.closest('input, textarea, select') || (t.closest('button') && !t.closest('[data-el]'))) return;
     e.preventDefault();
+    if (skipTyping()) return;
     advance();
   }
 
@@ -256,6 +296,7 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
   return {
     state: () => s,
     destroy() {
+      stopTyping();
       host.removeEventListener('click', onClick);
       document.removeEventListener('keydown', onKey);
     }

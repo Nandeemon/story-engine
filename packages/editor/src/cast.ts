@@ -3,8 +3,8 @@
  * own pictures), with everything each one is part of, so a story with many
  * scenes stays easy to find your way around.
  */
-import { parseScript, walkSteps } from '@story-engine/engine-core';
-import type { Character, Project, Room, Step, StoryElement } from '@story-engine/engine-core';
+import { parseScript, talkedFact, valueText, walkSteps } from '@story-engine/engine-core';
+import type { Character, FactDef, Project, Room, Step, StoryElement } from '@story-engine/engine-core';
 import { esc } from '@story-engine/runtime';
 
 const lower = (s: string) => s.trim().toLowerCase();
@@ -75,6 +75,79 @@ export function otherSpeakers(p: Project): { name: string; starter: boolean; lin
   return [...out.values()].sort((a, b) => b.lines - a.lines || a.name.localeCompare(b.name));
 }
 
+/** How often a fact is changed and checked anywhere in the story. */
+function factUse(p: Project, fact: string): { changed: number; checked: number } {
+  const out = { changed: 0, checked: 0 };
+  for (const r of p.rooms) for (const e of r.els) {
+    const m = new Map<string, { changed: number; checked: number }>();
+    factsOf(parseScript(e.script).steps, m);
+    const v = m.get(fact);
+    if (v) { out.changed += v.changed; out.checked += v.checked; }
+    if (e.cond?.fact === fact) out.checked++;
+  }
+  return out;
+}
+
+const KIND_WORDS: Record<FactDef['kind'], string> = { number: 'Number', milestone: 'Milestone', item: 'Item', word: 'Word' };
+const KIND_HELP: Record<FactDef['kind'], string> = {
+  number: 'goes up and down, such as affection or trust',
+  milestone: 'yes once it has happened, such as "told her the truth"',
+  item: 'yes while the player has it, such as a letter or a key',
+  word: 'a word, such as her mood: happy, angry'
+};
+
+function useText(u: { changed: number; checked: number }): string {
+  const parts = [u.changed ? `changed ${u.changed}×` : '', u.checked ? `checked ${u.checked}×` : ''].filter(Boolean);
+  return parts.length ? parts.join(' · ') : 'not used yet';
+}
+
+/** A character's story facts and milestones: the ones the author keeps track of, the automatic one, and others met in their conversations. */
+function factsSection(p: Project, c: Character, info: CastInfo): string {
+  const defs = c.facts ?? [];
+  const talked = talkedFact(c.name);
+  const startField = (d: FactDef) => d.kind === 'number'
+    ? `<input type="number" id="cf-start-${esc(d.fact)}" data-in="cast-fact-start" data-k="${esc(d.fact)}" value="${typeof d.start === 'number' ? d.start : ''}" placeholder="unset" aria-label="Start value">`
+    : d.kind === 'word'
+      ? `<input type="text" id="cf-start-${esc(d.fact)}" data-in="cast-fact-start" data-k="${esc(d.fact)}" value="${d.start !== undefined ? esc(valueText(d.start)) : ''}" placeholder="unset" aria-label="Start value">`
+      : `<select id="cf-start-${esc(d.fact)}" data-in="cast-fact-start" data-k="${esc(d.fact)}" aria-label="Start value"><option value="no"${d.start === true ? '' : ' selected'}>no</option><option value="yes"${d.start === true ? ' selected' : ''}>yes</option></select>`;
+  const example = (d: FactDef) => d.kind === 'number' ? `Change ${d.fact} + 1 · Only if ${d.fact} is at least 5`
+    : d.kind === 'word' ? `Change ${d.fact} = happy · Only if ${d.fact} is happy` : `Change ${d.fact} = yes · Only if ${d.fact}`;
+  const rows = defs.map(d => `<div class="factrow">
+      <div class="facthead"><span class="kind k-${d.kind}">${KIND_WORDS[d.kind]}</span><code>${esc(d.fact)}</code><span class="hint">${useText(factUse(p, d.fact))}</span>
+        <button class="linkbtn danger" data-act="cast-fact-delete" data-k="${esc(d.fact)}" data-confirm="Stop tracking?">Remove</button></div>
+      <div class="factbody"><label><span>At the start</span>${startField(d)}</label>
+        <input type="text" id="cf-about-${esc(d.fact)}" data-in="cast-fact-about" data-k="${esc(d.fact)}" value="${esc(d.about ?? '')}" placeholder="What it means (only you see this)" aria-label="What it means"></div>
+      <p class="hint ex">${esc(example(d))}</p></div>`).join('');
+  const auto = `<div class="factrow auto"><div class="facthead"><span class="kind k-auto">Automatic</span><code>${esc(talked)}</code><span class="hint">${useText(factUse(p, talked))}</span></div>
+      <p class="hint">Counts the conversations had with ${esc(c.name)}. Use it like <code>Only if ${esc(talked)}</code> or <code>Only if ${esc(talked)} is at least 2</code>.</p></div>`;
+  const tracked = new Set([...defs.map(d => d.fact), talked]);
+  const others = [...info.facts.keys()].filter(f => !tracked.has(f)).sort();
+  return `<section><div class="label">Story facts and milestones</div>
+    <p class="hint">Keep track of what matters for ${esc(c.name)}. In a conversation, change these with Change and test them with Only if; ${esc(c.name)}'s lines get one-click buttons for them.</p>
+    <div class="factlist">${rows}${auto}</div>
+    <div class="factadd"><select id="cast-fact-kind" aria-label="Kind">${(Object.keys(KIND_WORDS) as FactDef['kind'][]).map(k => `<option value="${k}" title="${esc(KIND_HELP[k])}">${KIND_WORDS[k]}: ${esc(KIND_HELP[k])}</option>`).join('')}</select>
+      <input type="text" id="cast-fact-name" placeholder="Name, such as affection" aria-label="Name"><button class="btn small" data-act="cast-fact-add">+ Add</button></div>
+    ${others.length ? `<div class="label">Also used in ${esc(c.name)}'s conversations</div><div class="row">${others.map(f => `<button class="chip" data-act="cast-fact-track" data-k="${esc(f)}" title="Keep track of ${esc(f)} here">${esc(f)} +</button>`).join('')}</div>` : ''}
+  </section>`;
+}
+
+/** The character's own small sound library: reactions such as a laugh or a gasp, optionally tied to a look. */
+function soundsSection(p: Project, c: Character): string {
+  const mine = (p.sounds ?? []).filter(x => x.owner === c.id);
+  const looks = c.looks.filter(l => !l.once);
+  const rows = mine.map(x => {
+    const linked = looks.find(l => l.sound === x.name);
+    return `<div class="soundrow"><button class="btn small quiet" data-act="sound-play" data-k="${esc(x.id)}" aria-label="Play ${esc(x.name)}">▶</button>
+      <input type="text" id="sound-${esc(x.id)}" data-in="sound-name" data-k="${esc(x.id)}" value="${esc(x.name)}" aria-label="Sound name">
+      ${looks.length ? `<select id="cs-look-${esc(x.id)}" data-in="cast-sound-look" data-k="${esc(x.id)}" aria-label="Plays with a look"><option value="">Any line</option>${looks.map(l => `<option value="${esc(l.id)}"${linked === l ? ' selected' : ''}>with the ${esc(l.name)} look</option>`).join('')}</select>` : ''}
+      <button class="btn small quiet danger" data-act="sound-delete" data-k="${esc(x.id)}" data-confirm="Delete?">Delete</button></div>`;
+  }).join('');
+  return `<section><div class="label">Sounds</div>
+    ${rows || `<p class="hint">No sounds of ${esc(c.name)}'s own yet: a laugh, a sigh, a gasp.</p>`}
+    <div class="row"><button class="btn small" data-act="cast-sound-add">+ Add a sound for ${esc(c.name)}</button></div>
+    <p class="hint">${esc(c.name)}'s sounds come first when you pick a sound for one of ${esc(c.name)}'s lines, as one-click buttons. Tie a sound to a look and it plays whenever a line switches ${esc(c.name)} to that look.</p></section>`;
+}
+
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 export function viewCast(p: Project, sel: string | null): string {
@@ -118,9 +191,6 @@ function castDetail(p: Project, c: Character): string {
   const convos = info.convos.length
     ? info.convos.map(x => `<li><span>${esc(x.room.name)} › ${esc(x.el.name)}${x.lines ? ` <i>${plural(x.lines, 'line')}</i>` : ' <i>brought in</i>'}</span><button class="btn small quiet" data-act="cast-goto-convo" data-k="${esc(x.room.id)}|${esc(x.el.id)}">Open</button></li>`).join('')
     : '<li class="hint">No lines yet.</li>';
-  const facts = info.facts.size
-    ? `<div class="row">${[...info.facts].sort((a, b) => a[0].localeCompare(b[0])).map(([f, v]) => `<span class="chip" title="${v.changed ? `changed ${v.changed}×` : ''}${v.changed && v.checked ? ', ' : ''}${v.checked ? `checked ${v.checked}×` : ''}">${esc(f)}</span>`).join('')}</div>`
-    : '<p class="hint">None of their conversations use story facts yet.</p>';
   return `<div class="castpage">
     <div class="casthead"><button class="btn small quiet" data-act="cast-back">← All characters</button><h2>${esc(c.name)}</h2></div>
     <div class="castgrid">
@@ -136,7 +206,8 @@ function castDetail(p: Project, c: Character): string {
           <p class="hint">Renaming a look updates the lines that use it. To line a look up with the base picture, open ${esc(c.name)} in a room.</p></section>
         <section><div class="label">In rooms</div><ul class="castlist">${placed}</ul>${placeIn}</section>
         <section><div class="label">Conversations</div><ul class="castlist">${convos}</ul></section>
-        <section><div class="label">Story facts in their conversations</div>${facts}</section>
+        ${factsSection(p, c, info)}
+        ${soundsSection(p, c)}
       </div>
     </div></div>`;
 }

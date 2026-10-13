@@ -40,6 +40,11 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .crumbs button:hover { background: var(--surface); color: var(--ink); }
 .crumbs button[aria-current] { background: none; color: var(--ink); font-weight: 600; cursor: default; }
 .crumbs i { color: var(--muted); font-style: normal; }
+@media (min-width: 821px) {
+  .crumbs { flex-wrap: nowrap; overflow: hidden; }
+  .crumbs button { min-width: 2.5em; flex: 0 1 auto; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .crumbs button[aria-current] { flex-shrink: 0; max-width: 60%; }
+}
 .tools { display: flex; gap: 8px; }
 
 /* Buttons */
@@ -376,3 +381,35 @@ h3.sub { margin: 30px 0 4px; font: 700 18px/1.2 var(--display); }
 .castlist li.hint { justify-content: flex-start; }
 .castlist i { color: var(--muted); font-style: normal; font-size: 13px; }
 .castright select { align-self: flex-start; padding: 6px 9px; border: 1.5px solid var(--line); border-radius: 8px; background: var(--surface); }
+
+/* Look: colour pickers */
+.colours { display: flex; flex-wrap: wrap; gap: 8px 14px; }
+.colourpick { display: flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; }
+.colourpick input { width: 34px; height: 28px; padding: 0; border: 1.5px solid var(--line); border-radius: 6px; background: none; cursor: pointer; }
+.colourpick i { color: var(--muted); font-style: normal; }
+
+/* Character facts and milestones */
+.factlist { display: flex; flex-direction: column; gap: 8px; }
+.factrow { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border: 1.5px solid var(--line); border-radius: 10px; background: var(--surface); }
+.factrow.auto { border-style: dashed; }
+.facthead { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.facthead code, .factrow code { font: 600 13px/1.3 var(--script); }
+.facthead .hint { margin: 0; flex: 1; }
+.factrow .hint { margin: 0; }
+.factrow .ex { font: 12px/1.4 var(--script); }
+.kind { padding: 1px 7px; border-radius: 999px; background: var(--line); font-size: 11px; font-weight: 700; letter-spacing: .03em; text-transform: uppercase; }
+.kind.k-number { background: #dfe3ff; color: #2c3a9e; }
+.kind.k-milestone { background: #e1f3dc; color: #2c6b1f; }
+.kind.k-item { background: #fdebd2; color: #8a4b0c; }
+.kind.k-word { background: #f3dcef; color: #7c2470; }
+.kind.k-auto { background: transparent; border: 1px dashed var(--muted); color: var(--muted); }
+.factbody { display: grid; grid-template-columns: auto 1fr; gap: 8px; align-items: end; }
+.factbody label { display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--muted); }
+.factbody input, .factbody select, .factadd input, .factadd select { padding: 6px 8px; border: 1.5px solid var(--line); border-radius: 8px; background: var(--paper, #fff); min-width: 0; }
+.factbody input[type=number] { width: 90px; }
+.factadd { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) auto; gap: 6px; }
+@media (max-width: 600px) { .factadd { grid-template-columns: 1fr; } }
+.quick { display: flex; flex-wrap: wrap; gap: 6px; }
+.quick .chip { cursor: pointer; border: 1.5px solid var(--line); }
+.quick .chip.on { border-color: var(--ink); background: var(--tape); }
+button.chip { font: inherit; font-size: 13px; }

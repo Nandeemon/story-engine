@@ -42,3 +42,17 @@ describe('normalizeProject with characters', () => {
     expect(p.rooms[0].els[1].characterId).toBeUndefined();
   });
 });
+
+describe('character facts', async () => {
+  const { normalizeProject, startFacts, talkedFact, storyFactNames } = await import('../src');
+  it('keeps tracked facts with start values and lists them', () => {
+    const p = normalizeProject({
+      rooms: [{ id: 'r', name: 'Hall', els: [{ id: 'e', kind: 'char', name: 'Mara Lee', script: 'Mara Lee: Hi.' }] }],
+      characters: [{ id: 'c', name: 'Mara', base: 'data:,', looks: [], facts: [{ fact: 'mara.trust', kind: 'number', start: 3 }, { fact: 'Has Key!', kind: 'item', start: false }, { fact: 'mara.trust', kind: 'word' }] }]
+    })!;
+    expect(p.characters[0].facts).toEqual([{ fact: 'mara.trust', kind: 'number', start: 3 }, { fact: 'has_key', kind: 'item', start: false }]);
+    expect(startFacts(p)).toEqual({ 'mara.trust': 3, has_key: false });
+    expect(talkedFact('Mara Lee')).toBe('talked.mara_lee');
+    expect(storyFactNames(p)).toEqual(['has_key', 'mara.trust', 'talked.mara_lee']);
+  });
+});

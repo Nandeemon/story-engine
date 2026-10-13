@@ -1,7 +1,7 @@
 import '@story-engine/runtime/game.css';
 import './editor.css';
-import { walkSteps, characterOf, cleanLookName, cleanSoundName, renameSoundInScript, toValue, createProject, createRoom, findLook, findRoomByName, newId, normalizeProject, parseScript, renameLookInScript, renameRoomInScript, renameSpeakerInScript, uniqueLookName, writeScript, getStep } from '@story-engine/engine-core';
-import type { Character, CharacterLook, Facts, Project, Room, StoryElement } from '@story-engine/engine-core';
+import { walkSteps, characterOf, cleanLookName, cleanSoundName, factName, renameSoundInScript, toValue, createProject, createRoom, findLook, findRoomByName, newId, normalizeProject, parseScript, renameLookInScript, renameRoomInScript, renameSpeakerInScript, uniqueLookName, writeScript, getStep } from '@story-engine/engine-core';
+import type { Character, CharacterLook, FactDef, Facts, Project, Room, StoryElement } from '@story-engine/engine-core';
 import { BACKDROPS, CHARACTERS, OBJECTS, backdropHTML, createPlayer, elementArt, esc, fxVars, lookStyle, sayHTML } from '@story-engine/runtime';
 import type { Player, PlayState } from '@story-engine/runtime';
 import { addStory, deleteStory, duplicateStory, listStories, loadStory, sampleProject, saveStory, whenSaved } from './store';
@@ -225,6 +225,7 @@ function render(): void {
       if (convoMode === 'map') {
         if (freshConvo) openView(); else applyZoom();
         afterMap();
+        syncPlayFrom();
       } else updateStatus();
       freshConvo = false;
       break;
@@ -279,12 +280,19 @@ function refreshMap(): void {
   side.innerHTML = mapSide(ctx);
   const sceneHost = $('#mscene');
   if (sceneHost) sceneHost.innerHTML = mapScene(ctx, sceneOpen);
+  syncPlayFrom();
   applyZoom();
   const next = $('#mscroll');
   if (next) { next.scrollLeft = scroll[0]; next.scrollTop = scroll[1]; }
   if (focusSel) side.querySelector<HTMLElement>(focusSel)?.focus();
   else holder.querySelector<HTMLElement>('.on')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   afterMap();
+}
+
+/** "Play from the marked step" works while a step is marked in the map. */
+function syncPlayFrom(): void {
+  const b = $<HTMLButtonElement>('#play-from');
+  if (b) b.disabled = !mapSel || mapSel.startsWith('add:');
 }
 
 function applyMap(res: MapResult | undefined): void {
@@ -353,7 +361,7 @@ function updateStrip(s: Readonly<PlayState>): void {
     + (s.problem ? `<span class="status err">${esc(s.problem)}</span>` : '')
     + (idle ? '<span>Nothing in this room is clickable yet. Stop, click a character, and make them say something.</span>'
       : !s.event ? '<span>Click a character or object in the picture.</span>' : '')
-    + (facts.length ? facts.map(([k, v]) => `<span class="chip">${esc(k)} = ${esc(v)}</span>`).join('') : '<span>No story facts changed yet.</span>');
+    + (facts.length ? facts.map(([k, v]) => `<span class="chip">${esc(k)} = ${esc(v === true ? 'yes' : v === false ? 'no' : String(v))}</span>`).join('') : '<span>No story facts changed yet.</span>');
   renderBar();
 }
 
@@ -507,7 +515,7 @@ let lookReturn: { elId: string | null; mapSel: string | null } | null = null;
 let lookCompare: 'see-through' | 'difference' = 'see-through';
 
 /** Actions that never change the project, so they are not recorded for Undo. */
-const NOT_RECORDED = new Set(['sound-add', 'sound-play', 'cast', 'cast-open', 'cast-back', 'cast-new', 'cast-promote', 'cast-add-looks', 'cast-goto-room', 'cast-goto-convo', 'fx-try', 'scene-toggle', 'home', 'open-story', 'new-story', 'new-sample', 'import-story', 'duplicate-story', 'delete-story', 'test-off', 'look-tab', 'make-game', 'hud-sel', 'play-here', 'check', 'goto-problem', 'test-clear', 'once-lineup', 'look-compare', 'undo', 'redo', 'save-file', 'open-file', 'upload', 'play', 'play-convo', 'stop', 'convo-mode', 'look', 'crumb', 'add-looks', 'look-replace', 'once-picture', 'look-open', 'look-done']);
+const NOT_RECORDED = new Set(['cast-sound-add', 'sound-add', 'sound-play', 'cast', 'cast-open', 'cast-back', 'cast-new', 'cast-promote', 'cast-add-looks', 'cast-goto-room', 'cast-goto-convo', 'fx-try', 'scene-toggle', 'home', 'open-story', 'new-story', 'new-sample', 'import-story', 'duplicate-story', 'delete-story', 'test-off', 'look-tab', 'make-game', 'hud-sel', 'play-here', 'check', 'goto-problem', 'test-clear', 'once-lineup', 'look-compare', 'undo', 'redo', 'save-file', 'open-file', 'upload', 'play', 'play-convo', 'stop', 'convo-mode', 'look', 'crumb', 'add-looks', 'look-replace', 'once-picture', 'look-open', 'look-done']);
 
 const actions: Record<string, (k: string) => void> = {
   crumb(k) {
@@ -617,6 +625,7 @@ const actions: Record<string, (k: string) => void> = {
       if ((e.sound ?? '').toLowerCase() === x.name) delete e.sound;
       e.script = renameSoundInScript(e.script, x.name, '');
     }
+    for (const c of project.characters) for (const l of c.looks) if (l.sound === x.name) delete l.sound;
     save(); render();
   },
   cast() { castSel = null; go(ui.view === 'cast' ? 'room' : 'cast'); },
@@ -642,6 +651,36 @@ const actions: Record<string, (k: string) => void> = {
   },
   'cast-goto-room'(k) { const [roomId, elId] = k.split('|'); ui.roomId = roomId; ui.sel = elId; go('room'); },
   'cast-goto-convo'(k) { const [roomId, elId] = k.split('|'); ui.roomId = roomId; ui.sel = elId; mapSel = null; freshConvo = true; go('convo'); },
+  'cast-sound-add'() { const c = project.characters.find(x => x.id === castSel); if (c) pickSound(() => undefined, c); },
+  'cast-fact-add'() {
+    const c = project.characters.find(x => x.id === castSel);
+    const kind = ($<HTMLSelectElement>('#cast-fact-kind')?.value ?? 'number') as FactDef['kind'];
+    const raw = factName($<HTMLInputElement>('#cast-fact-name')?.value ?? '');
+    if (!c) return;
+    if (!raw) { toast('Give it a name first, such as affection.'); $<HTMLInputElement>('#cast-fact-name')?.focus(); return; }
+    const own = factName(c.name).replace(/\./g, '_');
+    const fact = raw.includes('.') ? raw : kind === 'item' ? `has.${raw}` : `${own}.${raw}`;
+    c.facts ??= [];
+    if (c.facts.some(f => f.fact === fact)) { toast(`${fact} is already tracked.`); return; }
+    c.facts.push({ fact, kind, ...(kind === 'number' ? { start: 0 } : kind === 'word' ? {} : { start: false }) });
+    save(); render();
+    toast(`Tracking ${fact}. Use it in conversations with Change and Only if.`);
+  },
+  'cast-fact-delete'(k) {
+    const c = project.characters.find(x => x.id === castSel);
+    if (!c?.facts) return;
+    c.facts = c.facts.filter(f => f.fact !== k);
+    if (!c.facts.length) delete c.facts;
+    save(); render();
+  },
+  'cast-fact-track'(k) {
+    const c = project.characters.find(x => x.id === castSel);
+    if (!c) return;
+    const kind = factKind(project, k);
+    c.facts ??= [];
+    c.facts.push({ fact: k, kind: kind === 'yesno' ? 'milestone' : kind === 'word' ? 'word' : 'number' });
+    save(); render();
+  },
   'cast-delete'() {
     const c = project.characters.find(x => x.id === castSel);
     if (!c) return;
@@ -720,13 +759,18 @@ const actions: Record<string, (k: string) => void> = {
   },
   'open-file'() { const input = $<HTMLInputElement>('#projectfile')!; input.value = ''; input.click(); },
   theme(k) { project.look.theme = k; save(); render(); },
+  'look-box'(k) { const L = project.look; if (k === 'glass' || k === 'outline' || k === 'band') L.box = k; else delete L.box; save(); render(); },
+  'look-names'(k) { const L = project.look; if (k === 'inside' || k === 'plain') L.names = k; else delete L.names; save(); render(); },
+  'look-width'(k) { const L = project.look; if (k === 'full') L.width = 'full'; else delete L.width; save(); render(); },
+  'look-typing'(k) { const L = project.look; if (k === 'on') L.typing = 40; else delete L.typing; save(); render(); },
+  'look-colours-reset'() { const L = project.look; delete L.boxColor; delete L.textColor; delete L.accentColor; save(); render(); },
   'look-choices'(k) { if (k === 'center') project.look.choices = 'center'; else delete project.look.choices; save(); render(); },
   'bg-fit'(k) { const bg = room().bg; if (!bg) return; if (k === 'fit' || k === 'stretch') bg.fit = k; else delete bg.fit; save(); render(); },
   'bg-edge'(k) { const bg = room().bg; if (!bg) return; if (k === 'color') { bg.edge = 'color'; bg.color ??= '#000000'; } else delete bg.edge; save(); render(); },
   'bg-reset'() { const bg = room().bg; if (!bg) return; delete bg.fx; delete bg.fy; delete bg.zoom; save(); render(); },
   play() { startPlay(); },
   'play-convo'() { startPlay(selected()); },
-  'play-here'() { const e = selected(); if (e && mapSel) startPlay(e, mapSel.split('#')[0]); },
+  'play-here'() { const e = selected(); if (e && mapSel && !mapSel.startsWith('add:')) startPlay(e, mapSel.split('#')[0]); },
   check() { go(ui.view === 'check' ? 'room' : 'check'); },
   'goto-problem'(k) {
     const pr = problems[Number(k)];
@@ -784,6 +828,10 @@ function tryEffect(): void {
   node.classList.add(`fx-${step.fx}`);
 }
 
+document.addEventListener('keydown', ev => {
+  if ((ev.target as HTMLElement).id === 'cast-fact-name' && ev.key === 'Enter') { ev.preventDefault(); const before = snapshot(); actions['cast-fact-add'](''); record(before); }
+});
+
 /* ---------- New characters from a picture ---------- */
 
 let charDone: ((c: Character) => void) | null = null;
@@ -815,9 +863,11 @@ $('#charfile')!.addEventListener('change', async ev => {
 /* ---------- Sounds ---------- */
 
 let soundDone: ((name: string) => void) | null = null;
-/** Asks for a sound file; when it is added, done gets its name. */
-function pickSound(done: (name: string) => void): void {
+let soundOwner: Character | null = null;
+/** Asks for a sound file; when it is added, done gets its name. With an owner, it joins that character's sounds. */
+function pickSound(done: (name: string) => void, owner: Character | null = null): void {
   soundDone = done;
+  soundOwner = owner;
   const input = $<HTMLInputElement>('#soundfile')!;
   input.value = '';
   input.click();
@@ -833,7 +883,8 @@ $('#soundfile')!.addEventListener('change', ev => {
   const reader = new FileReader();
   reader.onload = () => {
     const before = snapshot();
-    const name = addSound(f.name, String(reader.result));
+    const name = addSound(f.name, String(reader.result), soundOwner);
+    soundOwner = null;
     done?.(name);
     save(); record(before);
     if (ui.view === 'convo') refreshMap(); else render();
@@ -843,12 +894,15 @@ $('#soundfile')!.addEventListener('change', ev => {
   reader.readAsDataURL(f);
 });
 
-function addSound(fileName: string, data: string): string {
+function addSound(fileName: string, data: string, owner: Character | null = null): string {
   project.sounds ??= [];
-  const base = cleanSoundName(fileName);
+  let base = cleanSoundName(fileName);
+  // A character's sounds carry the character's name, so "laugh" for Lin is "lin laugh".
+  const who = owner ? cleanSoundName(owner.name) : '';
+  if (who && !base.startsWith(`${who} `) && base !== who) base = cleanSoundName(`${who} ${base}`);
   let name = base, i = 2;
   while (project.sounds.some(x => x.name === name)) name = `${base} ${i++}`;
-  project.sounds.push({ id: newId(), name, data });
+  project.sounds.push({ id: newId(), name, data, ...(owner ? { owner: owner.id } : {}) });
   return name;
 }
 
@@ -1079,6 +1133,7 @@ document.addEventListener('click', ev => {
     const before = snapshot();
     applyMap(mapAction(ctx, m.dataset.mapAct!, m.dataset.k ?? ''));
     record(before);
+    if (m.dataset.mapAct === 'quick-sound') previewSound(m.dataset.k ?? '');
     return;
   }
   if (ctx && mapSel && !justPanned && target.closest('.mscroll') && !target.closest('.mnode, .madd')) { mapSel = null; refreshMap(); }
@@ -1192,6 +1247,27 @@ document.addEventListener('input', ev => {
     case 'look-scale': { const l = editedLook(); if (l && e) { l.scale = Number(t.value); if (node) node.innerHTML = elementArt(e, undefined, project.characters, l.id); } break; }
     case 'room-name': { room().name = t.value; const c = $('#crumbs [aria-current]'); if (c) c.textContent = t.value; break; }
     case 'room-auto': { const r = room(); r.auto = !!t.value; if (t.value) r.autoEl = t.value; else { delete r.autoEl; delete r.autoOnce; } save(); render(); return; }
+    case 'cast-fact-start': {
+      const d = project.characters.find(x => x.id === castSel)?.facts?.find(f => f.fact === t.dataset.k);
+      if (!d) break;
+      const v = t.value.trim();
+      if (!v) delete d.start;
+      else d.start = d.kind === 'number' ? Number(v) || 0 : d.kind === 'word' ? v : v === 'yes';
+      break;
+    }
+    case 'cast-fact-about': {
+      const d = project.characters.find(x => x.id === castSel)?.facts?.find(f => f.fact === t.dataset.k);
+      if (d) { if (t.value.trim()) d.about = t.value; else delete d.about; }
+      break;
+    }
+    case 'cast-sound-look': {
+      const c = project.characters.find(x => x.id === castSel), snd = project.sounds?.find(x => x.id === t.dataset.k);
+      if (!c || !snd) break;
+      for (const l of c.looks) if (l.sound === snd.name) delete l.sound;
+      const l = c.looks.find(x => x.id === t.value);
+      if (l) l.sound = snd.name;
+      break;
+    }
     case 'cast-about': { const c = project.characters.find(x => x.id === castSel); if (c) { if (t.value.trim()) c.about = t.value; else delete c.about; } break; }
     case 'cast-place': {
       const c = project.characters.find(x => x.id === castSel), r = project.rooms.find(x => x.id === t.value);
@@ -1236,6 +1312,11 @@ document.addEventListener('input', ev => {
     case 'bg-color': { const bg = room().bg; if (bg) { bg.color = t.value; refreshBackdrop(); } break; }
     case 'conv-staging': if (e) { e.staging = t.value === 'room' ? 'room' : undefined; refreshMap(); } break;
     case 'look-font': project.look.font = t.value; break;
+    case 'look-opacity': project.look.opacity = Number(t.value); break;
+    case 'look-typing-speed': project.look.typing = Number(t.value); break;
+    case 'look-boxcolor': project.look.boxColor = t.value; break;
+    case 'look-textcolor': project.look.textColor = t.value; break;
+    case 'look-accentcolor': project.look.accentColor = t.value; break;
     case 'look-radius': project.look.radius = Number(t.value); break;
     case 'look-size': project.look.size = Number(t.value); break;
   }
@@ -1266,6 +1347,7 @@ document.addEventListener('change', ev => {
         if ((e.sound ?? '').toLowerCase() === old) e.sound = name;
         e.script = renameSoundInScript(e.script, old, name);
       }
+      for (const c of project.characters) for (const l of c.looks) if (l.sound === old) l.sound = name;
       save(); render();
     }
   }

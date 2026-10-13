@@ -7,7 +7,7 @@
  * script and the map always show the same conversation.
  */
 import { CONDITION_WORDS, FX_NORMAL, ENTER_EFFECTS, EXIT_EFFECTS, LINE_EFFECTS, SPOTS, placeText, snapToSpot, stepsBefore, conditionText, effectText, findRoomByName, getList, getStep, parseScript, splitPath, stepPathOf, summarize, toValue, valueText, walkSteps, writeScript } from '@story-engine/engine-core';
-import { characterOf, findLook, hasLook } from '@story-engine/engine-core';
+import { characterOf, findLook, hasLook, storyFactNames } from '@story-engine/engine-core';
 import type { Character, ChoiceStep, CompareOp, Effect, Placement, Project, Room, SayStep, Step, StoryElement } from '@story-engine/engine-core';
 import { EXPRESSIONS, applyToScene, esc, nextMoment, sayHTML, sceneHTML, startScene } from '@story-engine/runtime';
 import type { Scene } from '@story-engine/runtime';
@@ -371,9 +371,7 @@ function stepLabel(s: Step): string {
 /* ---------- Side panel ---------- */
 
 function allFacts(p: Project): string[] {
-  const set = new Set<string>();
-  p.rooms.forEach(r => r.els.forEach(e => summarize(parseScript(e.script).steps).facts.forEach(f => set.add(f))));
-  return [...set].sort();
+  return storyFactNames(p);
 }
 
 const opLabel: Record<Effect['op'], string> = { '+': 'add', '-': 'take away', '=': 'set to' };
@@ -411,8 +409,29 @@ function fxField(ctx: MapCtx, step: SayStep): string {
   const effect = step.who ? `<label class="field"><span>Effect on ${esc(step.who)}</span><select id="m-sfx" data-map-in="say-fx"><option value="">None</option>${LINE_EFFECTS.map(f => `<option value="${f}"${f === fx ? ' selected' : ''}>${f} · ${FX_HELP[f] ?? ''}</option>`).join('')}</select></label>
     ${fx ? `<div class="fxgrid">${slider('strength', 'Strength', 'gentle', 'strong', 5)}${slider('speed', 'Speed', 'slow', 'fast', 5)}${slider('times', 'Times', '1', '5', 5)}</div>
       <button class="btn small quiet" data-act="fx-try">Play it again</button>` : ''}` : '';
+  const who = speakerOf(ctx.project, ctx.room, step.who).character;
+  const mine = who ? (ctx.project.sounds ?? []).filter(x => x.owner === who.id) : [];
+  const quick = mine.length ? `<div class="quick">${mine.map(x => `<button class="chip${lower(x.name) === lower(step.sound ?? '') ? ' on' : ''}" data-map-act="quick-sound" data-k="${esc(x.name)}" title="Play ${esc(x.name)} with this line">♪ ${esc(soundLabel(x.name, who!.name))}</button>`).join('')}</div>` : '';
   return `<div class="stagebox"><div class="label">Effect and sound</div>${effect}
-    <label class="field"><span>Sound with this line</span>${soundSelect(ctx.project, 'm-sound', 'data-map-in="say-sound"', step.sound)}</label></div>`;
+    <label class="field"><span>Sound with this line</span>${soundSelect(ctx.project, 'm-sound', 'data-map-in="say-sound"', step.sound, 'No sound', who)}</label>${quick}</div>`;
+}
+
+/** A character's sound without their name in front: "lin laugh" shows as "laugh". */
+function soundLabel(sound: string, name: string): string {
+  const pre = `${lower(name)} `;
+  return sound.startsWith(pre) && sound.length > pre.length ? sound.slice(pre.length) : sound;
+}
+
+/** One-click changes to the speaker's story facts, added as a step right after the line. */
+function quickFacts(ctx: MapCtx, step: SayStep): string {
+  const who = speakerOf(ctx.project, ctx.room, step.who).character;
+  const defs = who?.facts ?? [];
+  if (!who || !defs.length) return '';
+  const short = (f: string) => f.replace(/^[^.]+\./, '');
+  const buttons = defs.map(d => d.kind === 'number'
+    ? `<button class="chip" data-map-act="quick-change" data-k="${esc(d.fact)}|+|1">+1 ${esc(short(d.fact))}</button><button class="chip" data-map-act="quick-change" data-k="${esc(d.fact)}|-|1">−1 ${esc(short(d.fact))}</button>`
+    : d.kind === 'word' ? '' : `<button class="chip" data-map-act="quick-change" data-k="${esc(d.fact)}|=|yes">✓ ${esc(short(d.fact))}</button>`).join('');
+  return buttons ? `<div class="stagebox"><div class="label">After this line</div><div class="quick">${buttons}</div><p class="hint">Adds a Change for ${esc(who.name)}'s story facts right after this line.</p></div>` : '';
 }
 
 function stageField(ctx: MapCtx, scene: Scene, who: string): string {
@@ -522,6 +541,7 @@ export function mapSide(ctx: MapCtx): string {
         <label class="field"><span>${step.who ? 'What they say' : 'Narration'}</span><textarea id="m-text" data-map-in="say-text" rows="3" placeholder="Type the line here">${step.text === '...' ? '' : esc(step.text)}</textarea></label>
         ${lookField(ctx, step.who, step.expr)}
         ${fxField(ctx, step)}
+        ${quickFacts(ctx, step)}
         ${stageField(ctx, scene, step.who)}
         <div class="row"><button class="btn small" data-map-act="add-after">+ Line after this</button><button class="btn small play" data-act="play-here" title="Play the conversation from this line, with the scene as it stands here">Play from here</button>${del()}</div>`;
     }
@@ -689,6 +709,27 @@ export function mapAction(ctx: MapCtx, act: string, k: string): MapResult | unde
       if (!target) return undefined;
       target.splice(index, 0, { t: 'hide', who: k, fx: 'fade' });
       return commit(stepPathOf(list, index + 1));
+    }
+    case 'quick-sound': {
+      const step = getStep(steps, path);
+      if (step?.t !== 'say') return undefined;
+      step.sound = lower(step.sound ?? '') === lower(k) ? undefined : k;
+      return commit(ctx.sel);
+    }
+    case 'quick-change': {
+      const [fact, op, value] = k.split('|');
+      const { list, index } = splitPath(path);
+      const target = getList(steps, list);
+      if (!target) return undefined;
+      const next = target[index + 1];
+      const effect: Effect = { fact, op: op as Effect['op'], value: toValue(value) };
+      // A Change right after the line takes the new effect too.
+      if (next?.t === 'change') {
+        const same = next.effects.find(e => e.fact === fact && e.op === effect.op && typeof e.value === 'number' && typeof effect.value === 'number');
+        if (same) same.value = (same.value as number) + (effect.value as number);
+        else next.effects.push(effect);
+      } else target.splice(index + 1, 0, { t: 'change', effects: [effect] });
+      return commit(ctx.sel);
     }
     case 'scene-place': {
       // Dragging someone in the scene: a stage step for that person takes the place; anything else gets a Move just before it.

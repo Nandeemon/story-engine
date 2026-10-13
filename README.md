@@ -53,6 +53,16 @@ A line can give the speaker an effect: shake, tremble, pulse, pop, bounce, jump 
 
 **Characters** in the top bar lists your main characters (made from your own pictures). Open one to see and rename their looks, which lines use each look, the rooms they are in, every conversation they take part in, and the story facts used there, with notes of your own. Make a new character there, give a starter figure or a voice your own picture, or pick **+ New character from a picture** when bringing someone in during a conversation.
 
+## The dialogue box
+
+The box fits its text, and the speaker's name always shows in full. In **Look**: seven themes, the box as **Solid**, **Glass**, **Outline** or **Band**, the name as a tag, inside the box or as coloured text, and under More the width (fits the text or full), how see-through it is, text that appears letter by letter (players can click to show the rest), corners, text size and your own colours.
+
+## Story facts and milestones on characters
+
+On a character's page, keep track of what matters for them: a **Number** (trust, affection), a **Milestone** (heard the secret), an **Item** the player can have (`has.letter`) or a **Word** (mood), each with a value at the start of a new game. `talked.<name>` counts the conversations had with a character by itself. The character's lines in the conversation map get one-click buttons (+1 trust, ✓ heard the secret) that add the Change right after the line. A character can also have a small sound library (a laugh, a sigh): their sounds come first and as one-click buttons on their lines, and a sound can be tied to a look so it plays whenever a line switches to that look.
+
+**Play from the marked step** above the conversation map plays from whatever step is marked.
+
 ## Characters and looks
 
 Add a character with **Use your own picture**: that picture is the character's base. **Add looks** takes one or more pictures (expressions or poses), named after their files (`lin_happy.png` becomes `happy`). Click a look to line it up over the base picture, so the character stays still when the look changes. In a conversation, pick a look per line, or write `Lin (happy): Hi.` in the script; **Use a different picture here** gives one line a picture of its own. A character made from your pictures can be placed in any room and keeps its looks.

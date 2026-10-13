@@ -74,7 +74,7 @@ function soundsSection(p: Project): string {
     const n = soundUses(p, x.name);
     return `<div class="soundrow"><button class="btn small quiet" data-act="sound-play" data-k="${esc(x.id)}" aria-label="Play ${esc(x.name)}">▶</button>
       <input type="text" id="sound-${esc(x.id)}" data-in="sound-name" data-k="${esc(x.id)}" value="${esc(x.name)}" aria-label="Sound name">
-      <span class="hint">${n ? `used ${n}×` : 'not used yet'}</span>
+      <span class="hint">${x.owner ? `${esc(p.characters.find(c => c.id === x.owner)?.name ?? '')}'s · ` : ''}${n ? `used ${n}×` : 'not used yet'}</span>
       <button class="btn small quiet danger" data-act="sound-delete" data-k="${esc(x.id)}" data-confirm="${n ? 'Also taken off where it is used. Sure?' : 'Delete?'}">Delete</button></div>`;
   }).join('');
   return `<section class="soundsec"><div class="label">Sounds</div>
@@ -321,7 +321,7 @@ Go to part Later
 function convoBar(mode: ConvoMode): string {
   const tab = (m: ConvoMode, label: string) => `<button role="tab" class="seg${mode === m ? ' on' : ''}" aria-selected="${mode === m}" data-act="convo-mode" data-k="${m}">${label}</button>`;
   return `<div class="convobar"><div class="segs" role="tablist" aria-label="How to show the conversation">${tab('map', 'Map')}${tab('script', 'Script')}</div>
-    <button class="btn small play" data-act="play-convo">Play this conversation</button></div>`;
+    <div class="row"><button class="btn small" id="play-from" data-act="play-here" title="Play from the step marked in the map"${mode === 'map' ? '' : ' hidden'} disabled>Play from the marked step</button><button class="btn small play" data-act="play-convo">Play this conversation</button></div></div>`;
 }
 
 export function viewConvo(p: Project, r: Room, e: StoryElement, mode: ConvoMode, map: { canvas: string; side: string; scene: string }): string {
@@ -408,18 +408,38 @@ function hudSection(p: Project, hudSel: string | null): string {
 
 export type LookTab = 'style' | 'hud';
 
+/** A theme colour (hex or rgba) as #rrggbb for a colour picker. */
+function toHex(c: string): string {
+  if (c.startsWith('#')) return c.slice(0, 7);
+  const m = c.match(/rgba?\(([^)]+)\)/);
+  if (!m) return '#000000';
+  return '#' + m[1].split(',').slice(0, 3).map(x => Math.round(Number(x)).toString(16).padStart(2, '0')).join('');
+}
+
 export function viewLook(p: Project, r: Room, hudSel: string | null = null, facts: Record<string, unknown> = {}, tab: LookTab = 'style'): string {
   const L = p.look;
   const box = (L.choices ?? 'box') === 'box';
   const seg = (t: LookTab, label: string) => `<button role="tab" class="seg${tab === t ? ' on' : ''}" aria-selected="${tab === t}" data-act="look-tab" data-k="${t}">${label}</button>`;
+  const pick = (act: string, cur: string, opts: [string, string][]) => `<div class="row">${opts.map(([k, n]) => `<button class="btn small${cur === k ? ' ink' : ' quiet'}" data-act="${act}" data-k="${k}" aria-pressed="${cur === k}">${n}</button>`).join('')}</div>`;
+  const t = THEMES[L.theme] ?? THEMES.velvet;
+  const colour = (id: string, label: string, value: string | undefined, fallback: string) => `<label class="colourpick"><input type="color" id="${id}" data-in="${id}" value="${esc(value ?? toHex(fallback))}"><span>${label}${value ? '' : ' <i>theme</i>'}</span></label>`;
+  const own = L.boxColor || L.textColor || L.accentColor;
   const style = `
-      <div class="field"><span>Theme</span><div class="row">${Object.entries(THEMES).map(([k, t]) => `<button class="btn small${L.theme === k ? ' ink' : ''}" data-act="theme" data-k="${k}" aria-pressed="${L.theme === k}">${t.name}</button>`).join('')}</div></div>
+      <div class="field"><span>Theme</span><div class="row">${Object.entries(THEMES).map(([k, th]) => `<button class="btn small${L.theme === k ? ' ink' : ''}" data-act="theme" data-k="${k}" aria-pressed="${L.theme === k}">${th.name}</button>`).join('')}</div></div>
+      <div class="field"><span>Dialogue box</span>${pick('look-box', L.box ?? 'solid', [['solid', 'Solid'], ['glass', 'Glass'], ['outline', 'Outline'], ['band', 'Band']])}</div>
+      <div class="field"><span>Speaker's name</span>${pick('look-names', L.names ?? 'tag', [['tag', 'Tag on the box'], ['inside', 'Inside the box'], ['plain', 'Coloured text']])}</div>
       <label class="field"><span>Typeface</span><select id="look-font" data-in="look-font">${Object.keys(FONTS).map(f => `<option${f === L.font ? ' selected' : ''}>${f}</option>`).join('')}</select></label>
-      <label class="field"><span>Corners</span><input type="range" id="look-radius" data-in="look-radius" min="0" max="28" value="${L.radius}"></label>
-      <label class="field"><span>Text size</span><input type="range" id="look-size" data-in="look-size" min="1.4" max="3" step="0.1" value="${L.size}"></label>
-      <div class="field"><span>Choices</span><div class="row">
-        <button class="btn small${box ? ' ink' : ''}" data-act="look-choices" data-k="box" aria-pressed="${box}">In the dialogue box</button>
-        <button class="btn small${box ? '' : ' ink'}" data-act="look-choices" data-k="center" aria-pressed="${!box}">In the middle</button></div></div>
+      <details class="more" id="look-more"><summary>More</summary><div>
+        <div class="field"><span>Box width</span>${pick('look-width', L.width ?? 'fit', [['fit', 'Fits the text'], ['full', 'Full width']])}</div>
+        <label class="field"><span>See-through</span><input type="range" id="look-opacity" data-in="look-opacity" min="20" max="100" value="${L.opacity ?? Math.round((Number((t.box.match(/,\s*([\d.]+)\)$/) ?? [])[1]) || 0.92) * 100)}"><span class="fxends"><i>clear</i><i>solid</i></span></label>
+        <div class="field"><span>Text appears</span>${pick('look-typing', L.typing ? 'on' : 'off', [['off', 'All at once'], ['on', 'Letter by letter']])}
+          ${L.typing ? `<input type="range" id="look-typing-speed" data-in="look-typing-speed" min="10" max="120" value="${L.typing}" aria-label="Letters per second"><span class="fxends"><i>slow</i><i>fast</i></span><p class="hint">Players can click to show the rest of a line at once.</p>` : ''}</div>
+        <label class="field"><span>Corners</span><input type="range" id="look-radius" data-in="look-radius" min="0" max="28" value="${L.radius}"></label>
+        <label class="field"><span>Text size</span><input type="range" id="look-size" data-in="look-size" min="1.4" max="3" step="0.1" value="${L.size}"></label>
+        <div class="field"><span>Colours</span><div class="colours">${colour('look-boxcolor', 'Box', L.boxColor, t.box)}${colour('look-textcolor', 'Text', L.textColor, t.fg)}${colour('look-accentcolor', 'Names and buttons', L.accentColor, t.accent)}</div>
+          ${own ? '<button class="btn small quiet" data-act="look-colours-reset">Use the theme colours</button>' : ''}</div>
+        <div class="field"><span>Choices</span>${pick('look-choices', box ? 'box' : 'center', [['box', 'In the dialogue box'], ['center', 'In the middle']])}</div>
+      </div></details>
       <p class="hint">Changes show in the picture as you make them, and apply to the whole game.</p>`;
   const count = p.hud?.length ? ` (${p.hud.length})` : '';
   return `<div class="work"><div id="lookstage">${lookStage(p, r, hudSel, facts)}</div><aside class="side"><h2>The look of your game</h2>
