@@ -32,7 +32,8 @@ interface Saved { roomId: string; facts: Facts }
 
 /** Progress is kept in this browser, so a player can close the game and continue later. */
 function saveStore(p: Project) {
-  const key = `story-engine-save:${p.title ?? ''}:${p.rooms[0]?.id ?? ''}`;
+  // Keyed by the first room's id, which stays the same when the story is renamed.
+  const key = `story-engine-save:${p.rooms[0]?.id ?? ''}`;
   return {
     load(): Saved | null {
       try {

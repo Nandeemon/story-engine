@@ -37,7 +37,7 @@ export function viewMap(p: Project, ui: UI, errors = 0): string {
   const cards = p.rooms.map(r => `<button class="card" data-act="open-room" data-k="${esc(r.id)}"><span class="pic">${backdropHTML(r.bg)}</span><span class="meta"><b>${esc(r.name)}</b><span>${r.els.length} ${r.els.length === 1 ? 'thing' : 'things'} placed${r.auto ? ' · starts talking right away' : ''}</span></span></button>`).join('');
   const publish = `<div class="publish">
       <label class="field"><span>Name of your story</span><input type="text" id="story-title" data-in="story-title" value="${esc(p.title ?? '')}" placeholder="${esc(p.rooms[0]?.name ?? 'Untitled story')}"></label>
-      <div class="publishgo"><button class="btn play" data-act="make-game"${errors ? ` data-confirm="${errors} ${errors === 1 ? 'problem' : 'problems'} found by Check. Make it anyway?"` : ''}>Make a game file</button><p class="hint">One file with your whole game. Open it in any browser, or upload it to itch.io (as an HTML game) or any website so others can play. Its typeface loads from the internet; offline a similar one shows.</p></div></div>`;
+      <div class="publishgo"><button class="btn play" data-act="make-game"${errors ? ` data-confirm="Check found ${errors} ${errors === 1 ? 'error' : 'errors'}. Make it anyway?"` : ''}>Make a game file</button><p class="hint">One file with your whole game. Open it in any browser, or upload it to itch.io (as an HTML game) or any website so others can play. Its typeface loads from the internet; offline a similar one shows.</p></div></div>`;
   return `<div class="side"><div class="maphead"><div><h2>Story map</h2><p class="hint">Every room in your story. Click one to work in it. Your story is kept in this browser; Save to file keeps a copy you can move or back up.</p></div><div class="row">${actions}</div></div>
     ${publish}
     <div class="map">${cards}<button class="card new" data-act="new-room">+ New room</button></div></div>`;
@@ -283,7 +283,7 @@ function hudSection(p: Project, hudSel: string | null): string {
       ${w.kind === 'meter' ? `<label class="field"><span>Full at</span><input type="number" id="hud-max" data-in="hud-max" data-k="${esc(w.id)}" value="${w.max}" min="1"></label>
       <label class="field"><span>Width</span><input type="range" id="hud-w" data-in="hud-w" data-k="${esc(w.id)}" min="8" max="60" value="${w.w}"></label>` : ''}
       <label class="check"><input type="checkbox" id="hud-hide" data-in="hud-hide" data-k="${esc(w.id)}"${w.hideUnset ? ' checked' : ''}><span>Hide until the story sets it</span></label>
-      <p class="hint">Drag it in the picture to place it.</p>
+      <p class="hint">Drag it in the picture to place it. The picture shows an example value, or your test value when test values are on.</p>
       <button class="btn small danger" data-act="hud-remove" data-k="${esc(w.id)}">Remove</button></div>`;
   }).join('');
   return `<div class="field">
