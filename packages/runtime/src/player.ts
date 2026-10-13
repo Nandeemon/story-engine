@@ -26,6 +26,8 @@ export interface PlayerOptions {
   startPath?: string;
   /** Story facts to start with (for testing); otherwise every fact starts unset. */
   facts?: Facts;
+  /** A short line shown over the first room until the player starts a conversation, for published games. */
+  hint?: string;
   /** Called after every change, so the editor can show story facts beside the game. */
   onChange?: (state: Readonly<PlayState>) => void;
 }
@@ -51,6 +53,8 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
   let lastLine: SayStep | null = null;
   /** When the current choice appeared: picks in the first moment are ignored, so a quick double tap on "continue" cannot choose. */
   let choiceShownAt = 0;
+  /** Whether the player has started a conversation yet; the hint shows until then. */
+  let talked = false;
   const tooSoon = () => performance.now() - choiceShownAt < 400;
 
   const room = (): Room => project.rooms.find(r => r.id === s.roomId) ?? project.rooms[0];
@@ -116,7 +120,8 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
     const hud = stage.querySelector<HTMLElement>('.hudlayer');
     if (hud) hud.innerHTML = hudHTML(project.hud, s.facts);
     const ev = s.event;
-    game.innerHTML = !ev ? '' : ev.t === 'say' ? sayHTML(ev.who, ev.text)
+    const showHint = !ev && !s.scene && !talked && !!opts.hint && r.els.some(canTalk);
+    game.innerHTML = !ev ? (showHint ? `<div class="gamehint">${esc(opts.hint!)}</div>` : '') : ev.t === 'say' ? sayHTML(ev.who, ev.text)
       : choicesHTML(ev.options, true, project.look.choices ?? 'box', lastLine ?? undefined);
     if (ev?.t === 'choice') choiceShownAt = performance.now();
     opts.onChange?.(s);
@@ -133,6 +138,10 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
 
   function talk(el: StoryElement, startAt?: string): void {
     lastLine = null;
+    talked = true;
+    // The clicked character keeps focus otherwise, and keys on a button would not reach the dialogue.
+    const focused = document.activeElement as HTMLElement | null;
+    if (focused && host.contains(focused)) focused.blur();
     const steps = parseScript(el.script).steps;
     const scene = startScene(room(), el, steps);
     // Starting partway: the scene is set as it would stand by then.
@@ -198,7 +207,8 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
     // Space or Enter left over from reading must not choose an answer.
     if (s.event?.t === 'choice' && (e.key === ' ' || e.key === 'Enter') && tooSoon()) { e.preventDefault(); return; }
     if (s.event?.t !== 'say' || (e.key !== ' ' && e.key !== 'Enter')) return;
-    if ((e.target as HTMLElement).closest('button, input, textarea, select')) return;
+    const t = e.target as HTMLElement;
+    if (t.closest('input, textarea, select') || (t.closest('button') && !t.closest('[data-el]'))) return;
     e.preventDefault();
     advance();
   }

@@ -30,14 +30,14 @@ const svgOf = (v: Preset) => v.svg;
 /** True once the author has made anything worth keeping. */
 export const hasContent = (p: Project) => p.rooms.length > 1 || p.rooms.some(r => r.bg || r.els.length);
 
-export function viewMap(p: Project, ui: UI): string {
+export function viewMap(p: Project, ui: UI, errors = 0): string {
   const actions = ui.confirmReset
     ? `<span class="hint">Erase everything?</span><button class="btn small danger" data-act="reset">Yes, start over</button><button class="btn small quiet" data-act="cancel">Keep it</button>`
     : `<button class="btn small" data-act="save-file">Save to file</button><button class="btn small" data-act="open-file">Open a file</button><button class="btn small quiet" data-act="sample"${hasContent(p) ? ' data-confirm="This replaces your story. Click again"' : ''}>Load the sample scene</button><button class="btn small quiet" data-act="ask-reset">Start over</button>`;
   const cards = p.rooms.map(r => `<button class="card" data-act="open-room" data-k="${esc(r.id)}"><span class="pic">${backdropHTML(r.bg)}</span><span class="meta"><b>${esc(r.name)}</b><span>${r.els.length} ${r.els.length === 1 ? 'thing' : 'things'} placed${r.auto ? ' · starts talking right away' : ''}</span></span></button>`).join('');
   const publish = `<div class="publish">
       <label class="field"><span>Name of your story</span><input type="text" id="story-title" data-in="story-title" value="${esc(p.title ?? '')}" placeholder="${esc(p.rooms[0]?.name ?? 'Untitled story')}"></label>
-      <div class="publishgo"><button class="btn play" data-act="make-game">Make a game file</button><p class="hint">One file with your whole game. Open it in any browser, or upload it to itch.io or a website so others can play.</p></div></div>`;
+      <div class="publishgo"><button class="btn play" data-act="make-game"${errors ? ` data-confirm="${errors} ${errors === 1 ? 'problem' : 'problems'} found by Check. Make it anyway?"` : ''}>Make a game file</button><p class="hint">One file with your whole game. Open it in any browser, or upload it to itch.io (as an HTML game) or any website so others can play. Its typeface loads from the internet; offline a similar one shows.</p></div></div>`;
   return `<div class="side"><div class="maphead"><div><h2>Story map</h2><p class="hint">Every room in your story. Click one to work in it. Your story is kept in this browser; Save to file keeps a copy you can move or back up.</p></div><div class="row">${actions}</div></div>
     ${publish}
     <div class="map">${cards}<button class="card new" data-act="new-room">+ New room</button></div></div>`;
@@ -186,7 +186,12 @@ export type ConvoMode = 'map' | 'script';
 
 const CHEAT = `Mara: Hello.
 Mara (smiling): Hi again.
+Mara (sad, shake): With an effect.
 A line with no name is narration.
+Narration: Move on, it said.
+Show Lin as happy at left with fade
+Move Lin to center size 70 flipped
+Hide Lin with slide to right
 Choice
   "An answer"  affection + 5
     Mara: A reply to it.
@@ -214,8 +219,8 @@ export function viewConvo(p: Project, r: Room, e: StoryElement, mode: ConvoMode,
   const who = e.kind === 'char' ? esc(e.name) : 'Narrator';
   return `<div class="work"><div class="mapwrap">${convoBar(mode)}<div class="paper">
       <div class="row">${inserts(p, r, e).map((x, i) => `<button class="btn small quiet" data-act="insert" data-k="${i}">+ ${x.label}</button>`).join('')}</div>
-      <div class="scriptbox"><pre class="gutter" id="gutter" aria-hidden="true"></pre><textarea id="script" data-in="script" spellcheck="false" aria-label="What ${esc(e.name)} says" placeholder="${who}: Type the first line here.">${esc(e.script)}</textarea></div>
       <p class="status" id="status" role="status"></p>
+      <div class="scriptbox"><div class="gutter" id="gutter" aria-hidden="true"></div><textarea id="script" data-in="script" spellcheck="false" aria-label="What ${esc(e.name)} says" placeholder="${who}: Type the first line here.">${esc(e.script)}</textarea></div>
     </div></div>
     <aside class="side"><h2>What ${e.kind === 'char' ? `${esc(e.name)} says` : 'happens'}</h2>
       <p class="hint">Write it like a script. A name and a colon starts a line. Indent with two spaces to put lines under an answer. Lines that are not indented run after every answer.</p>
@@ -281,22 +286,21 @@ function hudSection(p: Project, hudSel: string | null): string {
       <p class="hint">Drag it in the picture to place it.</p>
       <button class="btn small danger" data-act="hud-remove" data-k="${esc(w.id)}">Remove</button></div>`;
   }).join('');
-  return `<div class="field"><span>On-screen display</span>
+  return `<div class="field">
     <p class="hint">Show a story fact over the game all the time, such as affection as a meter or money as a number.</p>
+    ${storyFacts(p).length ? '' : '<p class="hint">Your story has no story facts yet. A conversation makes one with an answer like <code>"Thank you" affection + 1</code> or a line like <code>Change gold + 5</code>.</p>'}
     <div class="row"><button class="btn small" data-act="hud-add" data-k="meter">+ Meter</button><button class="btn small" data-act="hud-add" data-k="label">+ Number or word</button></div>
     <datalist id="hud-facts">${storyFacts(p).map(f => `<option value="${esc(f)}">`).join('')}</datalist>
     <div class="hudlist">${list}</div></div>`;
 }
 
-export function viewLook(p: Project, r: Room, hudSel: string | null = null, facts: Record<string, unknown> = {}): string {
+export type LookTab = 'style' | 'hud';
+
+export function viewLook(p: Project, r: Room, hudSel: string | null = null, facts: Record<string, unknown> = {}, tab: LookTab = 'style'): string {
   const L = p.look;
   const box = (L.choices ?? 'box') === 'box';
-  const demo = box
-    ? choicesHTML([{ text: 'Answers look like this' }, { text: 'And another one' }], false, 'box', { who: 'Mara', text: 'This is how a question and its answers look in your game.' })
-    : choicesHTML([{ text: 'A choice looks like this' }, { text: 'And another one' }], false).replace('class="choices"', 'class="choices demo"')
-      + sayHTML('Mara', 'This is how a line of dialogue looks in your game.', false);
-  void demo;
-  return `<div class="work"><div id="lookstage">${lookStage(p, r, hudSel, facts)}</div><aside class="side"><h2>The look of your game</h2>
+  const seg = (t: LookTab, label: string) => `<button role="tab" class="seg${tab === t ? ' on' : ''}" aria-selected="${tab === t}" data-act="look-tab" data-k="${t}">${label}</button>`;
+  const style = `
       <div class="field"><span>Theme</span><div class="row">${Object.entries(THEMES).map(([k, t]) => `<button class="btn small${L.theme === k ? ' ink' : ''}" data-act="theme" data-k="${k}" aria-pressed="${L.theme === k}">${t.name}</button>`).join('')}</div></div>
       <label class="field"><span>Typeface</span><select id="look-font" data-in="look-font">${Object.keys(FONTS).map(f => `<option${f === L.font ? ' selected' : ''}>${f}</option>`).join('')}</select></label>
       <label class="field"><span>Corners</span><input type="range" id="look-radius" data-in="look-radius" min="0" max="28" value="${L.radius}"></label>
@@ -304,8 +308,11 @@ export function viewLook(p: Project, r: Room, hudSel: string | null = null, fact
       <div class="field"><span>Choices</span><div class="row">
         <button class="btn small${box ? ' ink' : ''}" data-act="look-choices" data-k="box" aria-pressed="${box}">In the dialogue box</button>
         <button class="btn small${box ? '' : ' ink'}" data-act="look-choices" data-k="center" aria-pressed="${!box}">In the middle</button></div></div>
-      <p class="hint">Changes show in the picture as you make them, and apply to the whole game.</p>
-      ${hudSection(p, hudSel)}
+      <p class="hint">Changes show in the picture as you make them, and apply to the whole game.</p>`;
+  const count = p.hud?.length ? ` (${p.hud.length})` : '';
+  return `<div class="work"><div id="lookstage">${lookStage(p, r, hudSel, facts)}</div><aside class="side"><h2>The look of your game</h2>
+      <div class="segs" role="tablist" aria-label="What to change">${seg('style', 'Style')}${seg('hud', `On-screen display${count}`)}</div>
+      ${tab === 'style' ? style : hudSection(p, hudSel)}
       <button class="btn block" data-act="crumb" data-k="room">Done</button></aside></div>`;
 }
 

@@ -105,10 +105,11 @@ details.more > div { display: flex; flex-direction: column; gap: 12px; padding-t
 
 /* Conversation */
 .paper { display: flex; flex-direction: column; gap: 12px; min-width: 0; padding: 16px; border: 1.5px solid var(--line); border-radius: 12px; background: var(--surface); }
-.paper textarea { width: 100%; min-height: 340px; padding: 14px 2px 2px; border: 0; border-top: 1.5px dashed var(--line); background: transparent; font: 400 16px/1.55 var(--script); white-space: pre; overflow: auto; resize: vertical; tab-size: 2; }
+.paper textarea { width: 100%; min-height: 340px; padding: 14px 2px 2px; border: 0; border-top: 1.5px dashed var(--line); background: transparent; font: 400 16px/1.55 var(--script); white-space: pre-wrap; overflow-wrap: break-word; overflow: auto; resize: vertical; tab-size: 2; }
 .paper textarea:focus { outline: none; }
 .status { margin: 0; color: var(--muted); font-size: 13.5px; }
 .status.err { color: var(--bad); }
+.paper .status { margin: 10px 0 8px; }
 .cheat { margin: 0; padding: 12px; overflow-x: auto; border: 1.5px solid var(--line); border-radius: 10px; background: var(--surface); font: 400 13.5px/1.6 var(--script); white-space: pre; }
 #facts { display: flex; flex-direction: column; gap: 6px; }
 
@@ -265,9 +266,11 @@ button.mnode:hover, .mrow:hover { box-shadow: 0 0 0 3px color-mix(in srgb, var(-
 input[type=color] { width: 44px; height: 32px; padding: 2px; border: 1.5px solid var(--line); border-radius: 8px; background: var(--surface); }
 
 /* Script with line numbers */
-.scriptbox { display: grid; grid-template-columns: auto minmax(0, 1fr); border-top: 1.5px dashed var(--line); }
+.scriptbox { position: relative; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; border-top: 1.5px dashed var(--line); }
+.scriptbox textarea { height: min(64vh, 640px); }
 .scriptbox textarea { border-top: 0 !important; }
-.gutter { margin: 0; padding: 14px 10px 2px 0; overflow: hidden; color: var(--muted); font: 400 16px/1.55 var(--script); text-align: right; user-select: none; max-height: 100%; }
+.gutter { align-self: stretch; height: 0; min-height: 100%; padding: 14px 10px 2px 0; overflow: hidden; color: var(--muted); font: 400 16px/1.55 var(--script); text-align: right; user-select: none; }
+.gutter span { display: block; }
 .gutter .err { color: var(--bad); font-weight: 700; }
 
 /* Check */
@@ -296,3 +299,4 @@ input[type=color] { width: 44px; height: 32px; padding: 2px; border: 1.5px solid
 .hudrow span { color: var(--muted); font-size: 13px; }
 .hudedit { display: flex; flex-direction: column; gap: 10px; padding: 4px 4px 8px 12px; border-left: 3px solid var(--tape); }
 .hudedit input[type=number] { width: 100%; padding: 8px 10px; border: 1.5px solid var(--line); border-radius: 8px; background: var(--surface); }
+.btn.testpill { border-color: var(--tape); background: var(--tape); color: var(--tape-ink); }

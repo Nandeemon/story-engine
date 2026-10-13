@@ -2,7 +2,7 @@
  * Checking the whole story: every problem the author would otherwise only find by
  * playing, with a way to jump straight to it.
  */
-import { findRoomByName, parseScript, summarize, unreachableSteps, walkSteps, walkWithPaths } from '@story-engine/engine-core';
+import { findRoomByName, getStep, parseScript, summarize, unreachableSteps, walkSteps, walkWithPaths, writeScript } from '@story-engine/engine-core';
 import type { FactValue, Project } from '@story-engine/engine-core';
 import { missingLook, stageText, unknownSpeaker } from './map';
 
@@ -15,6 +15,8 @@ export interface Problem {
   path?: string;
   /** Script line, for problems the map cannot show. */
   line?: number;
+  /** An on-screen display item, shown in Look. */
+  hud?: string;
   where: string;
   text: string;
 }
@@ -40,12 +42,21 @@ export function findProblems(p: Project): Problem[] {
         if ((s.t === 'show' || s.t === 'move' || s.t === 'hide') && unknownSpeaker(ctx, s.who)) out.push({ ...base, level: 'error', path, text: `"${stageText(s)}": there is no character called ${s.who}.` });
         if (s.t === 'say' && unknownSpeaker(ctx, s.who)) out.push({ ...base, level: 'note', path, text: `"${s.who}" has no character, so this line is a voice without a picture.` });
       });
-      for (const path of unreachableSteps(steps)) out.push({ ...base, level: 'warning', path, text: 'Never reached: every way to this step has ended before it.' });
+      for (const path of unreachableSteps(steps)) {
+        const st = getStep(steps, path);
+        const line = st ? (writeScript([st]).split('\n')[0] ?? '').trim() : '';
+        const quote = line.length > 60 ? `${line.slice(0, 57)}…` : line;
+        out.push({ ...base, level: 'warning', path, text: `${quote ? `"${quote}" is never reached` : 'Never reached'}: every way to this step has ended before it.` });
+      }
     }
   }
   p.rooms.forEach((room, i) => {
     if (i > 0 && !doorsTo.has(room.name.trim().toLowerCase())) out.push({ level: 'warning', roomId: room.id, where: room.name, text: 'No conversation leads here, so the player cannot reach this room.' });
   });
+  const used = new Set(storyFacts(p));
+  for (const w of p.hud ?? []) {
+    if (!used.has(w.fact)) out.push({ level: 'warning', roomId: p.rooms[0]?.id ?? '', hud: w.id, where: 'Look › On-screen display', text: `"${w.text || w.fact}" shows the story fact "${w.fact}", but no conversation changes or checks it.` });
+  }
   const order = { error: 0, warning: 1, note: 2 };
   return out.sort((a, b) => order[a.level] - order[b.level]);
 }

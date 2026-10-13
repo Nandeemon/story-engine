@@ -8,7 +8,7 @@ import { loadProject, sampleProject, saveProject } from './store';
 import { inserts, lookStage, scriptStatus, viewCheck, viewConvo, viewLook, viewMap, viewPlay, viewRoom } from './views';
 import { factKind, findProblems, storyFacts } from './problems';
 import type { Problem } from './problems';
-import type { Adding, ConvoMode, UI, View } from './views';
+import type { Adding, ConvoMode, LookTab, UI, View } from './views';
 import { applyZoom, drawEdges, mapAction, mapHTML, mapInput, mapSide, mapView, openView, setZoom } from './map';
 import type { MapCtx, MapResult } from './map';
 import { readProjectFile, saveToFile } from './files';
@@ -41,6 +41,7 @@ function testFacts(): Facts | undefined {
 let problems: Problem[] = [];
 /** The on-screen display widget being edited in Look. */
 let hudSel: string | null = null;
+let lookTab: LookTab = 'style';
 const hudWidget = (id: string | undefined) => project.hud?.find(w => w.id === id);
 function refreshLookStage(): void {
   const host = $('#lookstage');
@@ -169,7 +170,9 @@ function crumbs(): [string, string][] {
 function checkButton(): string {
   problems = findProblems(project);
   const n = problems.filter(x => x.level !== 'note').length;
-  return `<button class="btn${ui.view === 'check' ? ' ink' : ''}" data-act="check" title="Check your story for problems">Check${n ? ` <span class="badge">${n}</span>` : ''}</button>`;
+  const t = testFacts();
+  const testing = t && Object.keys(t).length ? `<button class="btn testpill" data-act="test-off" title="Play uses your test values. Click to play with every fact unset again.">Test values on <span aria-hidden="true">×</span></button>` : '';
+  return `${testing}<button class="btn${ui.view === 'check' ? ' ink' : ''}" data-act="check" title="Check your story for problems">Check${n ? ` <span class="badge">${n}</span>` : ''}</button>`;
 }
 
 function renderBar(): void {
@@ -191,7 +194,7 @@ function render(): void {
   renderBar();
   const main = $('#main')!;
   switch (ui.view) {
-    case 'map': main.innerHTML = viewMap(project, ui); break;
+    case 'map': main.innerHTML = viewMap(project, ui, problems.filter(x => x.level === 'error').length); break;
     case 'room': main.innerHTML = viewRoom(project, ui, r, e); break;
     case 'convo': {
       const ctx = mapCtx()!;
@@ -203,7 +206,7 @@ function render(): void {
       freshConvo = false;
       break;
     }
-    case 'look': main.innerHTML = viewLook(project, r, hudSel, testFacts() ?? {}); break;
+    case 'look': main.innerHTML = viewLook(project, r, hudSel, testFacts() ?? {}, lookTab); break;
     case 'play': main.innerHTML = viewPlay(); break;
     case 'check': main.innerHTML = viewCheck(project, problems, test); break;
   }
@@ -281,13 +284,32 @@ function updateStatus(): void {
 }
 
 /** Line numbers beside the script, with the line that needs fixing marked. */
+/** Line numbers beside the script. Long lines wrap, so each number is as tall as its line. */
+let gutterWatch: ResizeObserver | null = null;
 function updateGutter(): void {
   const t = $<HTMLTextAreaElement>('#script'), g = $('#gutter');
   if (!t || !g) return;
   const bad = new Set(parseScript(t.value).errors.map(x => x.n));
-  const n = t.value.split('\n').length;
-  g.innerHTML = Array.from({ length: n }, (_, i) => `<span${bad.has(i + 1) ? ' class="err"' : ''}>${i + 1}</span>`).join('\n');
+  const lines = t.value.split('\n');
+  const cs = getComputedStyle(t);
+  let m = document.getElementById('gutter-mirror');
+  if (!m) {
+    m = document.createElement('div');
+    m.id = 'gutter-mirror';
+    m.setAttribute('aria-hidden', 'true');
+    m.style.cssText = 'position:absolute;left:-9999px;top:0;visibility:hidden;white-space:pre-wrap;overflow-wrap:break-word;';
+    document.body.append(m);
+  }
+  m.style.width = `${t.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight)}px`;
+  m.style.font = cs.font;
+  m.style.tabSize = cs.tabSize;
+  m.innerHTML = lines.map(l => `<div>${esc(l) || ' '}</div>`).join('');
+  const heights = [...m.children].map(c => c.getBoundingClientRect().height);
+  g.innerHTML = lines.map((_, i) => `<span${bad.has(i + 1) ? ' class="err"' : ''} style="height:${heights[i]}px">${i + 1}</span>`).join('');
   g.scrollTop = t.scrollTop;
+  if (!gutterWatch) gutterWatch = new ResizeObserver(() => updateGutter());
+  gutterWatch.disconnect();
+  gutterWatch.observe(t);
 }
 document.addEventListener('scroll', ev => {
   if ((ev.target as HTMLElement).id === 'script') { const g = $('#gutter'); if (g) g.scrollTop = (ev.target as HTMLElement).scrollTop; }
@@ -416,7 +438,7 @@ let lookReturn: { elId: string | null; mapSel: string | null } | null = null;
 let lookCompare: 'see-through' | 'difference' = 'see-through';
 
 /** Actions that never change the project, so they are not recorded for Undo. */
-const NOT_RECORDED = new Set(['make-game', 'hud-sel', 'play-here', 'check', 'goto-problem', 'test-clear', 'once-lineup', 'look-compare', 'undo', 'redo', 'save-file', 'open-file', 'upload', 'play', 'play-convo', 'stop', 'convo-mode', 'look', 'crumb', 'add-looks', 'look-replace', 'once-picture', 'look-open', 'look-done']);
+const NOT_RECORDED = new Set(['test-off', 'look-tab', 'make-game', 'hud-sel', 'play-here', 'check', 'goto-problem', 'test-clear', 'once-lineup', 'look-compare', 'undo', 'redo', 'save-file', 'open-file', 'upload', 'play', 'play-convo', 'stop', 'convo-mode', 'look', 'crumb', 'add-looks', 'look-replace', 'once-picture', 'look-open', 'look-done']);
 
 const actions: Record<string, (k: string) => void> = {
   crumb(k) {
@@ -574,6 +596,7 @@ const actions: Record<string, (k: string) => void> = {
   'goto-problem'(k) {
     const pr = problems[Number(k)];
     if (!pr) return;
+    if (pr.hud) { hudSel = pr.hud; lookTab = 'hud'; go('look'); return; }
     ui.roomId = pr.roomId;
     if (!pr.elId) { ui.sel = null; go('room'); return; }
     ui.sel = pr.elId;
@@ -584,6 +607,7 @@ const actions: Record<string, (k: string) => void> = {
     if (pr.path) requestAnimationFrame(() => $('.mnode.on, .mrow.on')?.scrollIntoView({ block: 'center', inline: 'center' }));
     if (pr.line !== undefined) { const t = $<HTMLTextAreaElement>('#script'); if (t) { const at = t.value.split('\n').slice(0, pr.line - 1).join('\n').length + (pr.line > 1 ? 1 : 0); t.focus(); t.setSelectionRange(at, at); } }
   },
+  'test-off'() { test.use = false; saveTest(); render(); toast('Test values are off. Play starts with every fact unset.'); },
   'test-clear'() { test.values = {}; saveTest(); render(); },
   'hud-add'(k) {
     project.hud ??= [];
@@ -598,6 +622,7 @@ const actions: Record<string, (k: string) => void> = {
     hudSel = w.id;
     save(); render();
   },
+  'look-tab'(k) { lookTab = k === 'hud' ? 'hud' : 'style'; render(); },
   'hud-sel'(k) { hudSel = hudSel === k ? null : k; render(); },
   'hud-remove'(k) { project.hud = (project.hud ?? []).filter(w => w.id !== k); if (!project.hud.length) delete project.hud; hudSel = null; save(); render(); },
   stop() {
@@ -745,7 +770,8 @@ document.addEventListener('pointerdown', ev => {
   const stage = node.closest<HTMLElement>('[data-stage]')!;
   const box = stage.getBoundingClientRect(), r = node.getBoundingClientRect();
   hudDrag = { id: node.dataset.hud!, node, box, dx: ev.clientX - r.left, dy: ev.clientY - r.top, before: snapshot(), moved: false };
-  if (hudSel !== hudDrag.id) { hudSel = hudDrag.id; }
+  hudSel = hudDrag.id;
+  lookTab = 'hud';
   try { node.setPointerCapture(ev.pointerId); } catch { /* not supported */ }
   ev.preventDefault();
 });
@@ -913,13 +939,13 @@ document.addEventListener('input', ev => {
     case 'room-name': { room().name = t.value; const c = $('#crumbs [aria-current]'); if (c) c.textContent = t.value; break; }
     case 'room-auto': room().auto = t.checked; break;
     case 'story-title': { const v = t.value.replace(/\s+/g, ' '); if (v.trim()) project.title = v; else delete project.title; break; }
-    case 'test-use': test.use = t.checked; saveTest(); return;
+    case 'test-use': test.use = t.checked; saveTest(); renderBar(); return;
     case 'hud-fact': { const w = hudWidget(t.dataset.k); if (w) { w.fact = t.value.trim().replace(/[^\w.]/g, '_') || 'fact'; refreshLookStage(); } break; }
     case 'hud-text': { const w = hudWidget(t.dataset.k); if (w) { w.text = t.value; refreshLookStage(); } break; }
     case 'hud-max': { const w = hudWidget(t.dataset.k); if (w) { w.max = Math.max(1, Number(t.value) || 1); refreshLookStage(); } break; }
     case 'hud-w': { const w = hudWidget(t.dataset.k); if (w) { w.w = Number(t.value); refreshLookStage(); } break; }
     case 'hud-hide': { const w = hudWidget(t.dataset.k); if (w) { w.hideUnset = t.checked || undefined; refreshLookStage(); } break; }
-    case 'test-fact': test.values[t.dataset.k ?? ''] = t.value.trim(); saveTest(); return;
+    case 'test-fact': test.values[t.dataset.k ?? ''] = t.value.trim(); saveTest(); renderBar(); return;
     case 'bg-zoom': { const bg = room().bg; if (bg) { bg.zoom = Number(t.value); refreshBackdrop(); } break; }
     case 'bg-color': { const bg = room().bg; if (bg) { bg.color = t.value; refreshBackdrop(); } break; }
     case 'conv-staging': if (e) { e.staging = t.value === 'room' ? 'room' : undefined; refreshMap(); } break;

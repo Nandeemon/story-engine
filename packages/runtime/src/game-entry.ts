@@ -4,7 +4,7 @@
  * the editor's Play button uses.
  */
 import { normalizeProject } from '@story-engine/engine-core';
-import type { Project } from '@story-engine/engine-core';
+import type { Facts, Project } from '@story-engine/engine-core';
 import gameCSS from './game.css?inline';
 import { createPlayer } from './player';
 import { backdropHTML, lookStyle } from './stage';
@@ -19,8 +19,31 @@ body { display: grid; place-items: center; overflow: hidden; }
 .titlescreen h1 { position: relative; margin: 0 6%; font-size: 2.6em; font-weight: 600; line-height: 1.15; text-shadow: 0 2px 18px rgba(0, 0, 0, .5); }
 .titlescreen button { position: relative; padding: .55em 2.2em; border: 0; border-radius: var(--g-radius); background: var(--g-accent); color: var(--g-on); font: inherit; font-weight: 600; cursor: pointer; }
 .titlescreen button:hover { filter: brightness(1.1); }
+.titlescreen .row { position: relative; display: flex; flex-wrap: wrap; justify-content: center; gap: .7em; }
+.titlescreen button.quiet { background: transparent; color: var(--g-fg); box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--g-fg) 60%, transparent); }
 .titlescreen button:focus-visible { outline: 3px solid var(--g-fg); outline-offset: 3px; }
+.turn { display: none; }
+@media (orientation: portrait) and (max-width: 760px) {
+  .turn { display: block; position: fixed; left: 0; right: 0; bottom: 8vh; color: #cfc8dc; font: 15px/1.4 system-ui, sans-serif; text-align: center; opacity: .8; }
+}
 `;
+
+interface Saved { roomId: string; facts: Facts }
+
+/** Progress is kept in this browser, so a player can close the game and continue later. */
+function saveStore(p: Project) {
+  const key = `story-engine-save:${p.title ?? ''}:${p.rooms[0]?.id ?? ''}`;
+  return {
+    load(): Saved | null {
+      try {
+        const v = JSON.parse(localStorage.getItem(key) ?? 'null') as Saved | null;
+        return v && p.rooms.some(r => r.id === v.roomId) ? v : null;
+      } catch { return null; }
+    },
+    save(v: Saved): void { try { localStorage.setItem(key, JSON.stringify(v)); } catch { /* storage unavailable */ } },
+    clear(): void { try { localStorage.removeItem(key); } catch { /* storage unavailable */ } }
+  };
+}
 
 function start(): void {
   const data = document.getElementById('story');
@@ -31,22 +54,42 @@ function start(): void {
     return;
   }
   const story = project;
+  const title = story.title?.trim() || story.rooms[0]?.name || 'Untitled story';
   const style = document.createElement('style');
   style.textContent = gameCSS + PAGE_CSS;
   document.head.append(style);
-  const title = project.title?.trim() || project.rooms[0]?.name || 'Untitled story';
   document.title = title;
 
   const frame = document.createElement('div');
   frame.className = 'frame';
   document.body.replaceChildren(frame);
-  frame.innerHTML = `<div class="stage" style="${lookStyle(project.look)}"><div class="titlescreen"><div class="bg">${backdropHTML(project.rooms[0]?.bg ?? null)}</div><h1>${esc(title)}</h1><button type="button" data-start>Start</button></div></div>`;
-  const button = frame.querySelector<HTMLButtonElement>('[data-start]')!;
-  button.focus();
-  button.addEventListener('click', () => {
+  const store = saveStore(story);
+  const saved = store.load();
+  const buttons = saved
+    ? '<button type="button" data-go="continue">Continue</button><button type="button" class="quiet" data-go="new">New game</button>'
+    : '<button type="button" data-go="new">Start</button>';
+  frame.innerHTML = `<div class="stage" style="${lookStyle(story.look)}"><div class="titlescreen"><div class="bg">${backdropHTML(story.rooms[0]?.bg ?? null)}</div><h1>${esc(title)}</h1><div class="row">${buttons}</div></div></div>`;
+  document.body.insertAdjacentHTML('beforeend', '<p class="turn">Turn your phone sideways for a bigger picture.</p>');
+  frame.querySelector<HTMLButtonElement>('[data-go]')!.focus();
+
+  frame.addEventListener('click', function begin(e) {
+    const go = (e.target as HTMLElement).closest<HTMLElement>('[data-go]')?.dataset.go;
+    if (!go) return;
+    frame.removeEventListener('click', begin);
     frame.replaceChildren();
-    createPlayer(frame, story);
-  }, { once: true });
+    const from = go === 'continue' ? saved : null;
+    if (!from) store.clear();
+    let lastRoom = '';
+    createPlayer(frame, story, {
+      roomId: from?.roomId,
+      facts: from?.facts,
+      hint: from ? undefined : 'Click someone or something to begin',
+      // Saved on entering a room and whenever no conversation is running.
+      onChange(st) {
+        if (st.roomId !== lastRoom || !st.scene) { lastRoom = st.roomId; store.save({ roomId: st.roomId, facts: st.facts }); }
+      }
+    });
+  });
 }
 
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);

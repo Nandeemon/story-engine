@@ -14,9 +14,9 @@ export function hudHTML(widgets: HudWidget[] | undefined, facts: Facts, opts: { 
     const attrs = opts.editable ? ` data-hud="${esc(w.id)}"${opts.selected === w.id ? ' data-on' : ''}` : '';
     if (w.kind === 'meter') {
       const pct = Math.max(0, Math.min(100, (Number(value) || 0) / w.max * 100));
-      return `<div class="hw meter"${attrs} style="${pos};width:${w.w}%" role="meter" aria-valuemin="0" aria-valuemax="${w.max}" aria-valuenow="${Number(value) || 0}" aria-label="${esc(w.text || w.fact)}">${w.text ? `<span class="t">${esc(w.text)}</span>` : ''}<span class="hwbar"><i style="width:${pct}%"></i></span></div>`;
+      return `<div class="hw hw-meter"${attrs} style="${pos};width:${w.w}%" role="meter" aria-valuemin="0" aria-valuemax="${w.max}" aria-valuenow="${Number(value) || 0}" aria-label="${esc(w.text || w.fact)}">${w.text ? `<span class="t">${esc(w.text)}</span>` : ''}<span class="hwbar"><i style="width:${pct}%"></i></span></div>`;
     }
-    return `<div class="hw label"${attrs} style="${pos}">${w.text ? `<span class="t">${esc(w.text)}</span> ` : ''}<b>${esc(shown(value))}</b></div>`;
+    return `<div class="hw hw-label"${attrs} style="${pos}">${w.text ? `<span class="t">${esc(w.text)}</span> ` : ''}<b>${esc(shown(value))}</b></div>`;
   }).join('');
   return `<div class="hud">${items}</div>`;
 }

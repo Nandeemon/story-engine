@@ -25,7 +25,7 @@ function gameBundle(): Plugin {
           name: 'inline-css',
           setup(b) {
             b.onResolve({ filter: /\.css\?inline$/ }, a => ({ path: resolve(a.resolveDir, a.path.replace(/\?inline$/, '')), namespace: 'css-text' }));
-            b.onLoad({ filter: /.*/, namespace: 'css-text' }, async a => ({ contents: await readFile(a.path, 'utf8'), loader: 'text', watchFiles: [a.path] }));
+            b.onLoad({ filter: /.*/, namespace: 'css-text' }, async a => ({ contents: (await readFile(a.path, 'utf8')).replace(/\/\*[\s\S]*?\*\//g, ''), loader: 'text', watchFiles: [a.path] }));
           }
         }]
       });
