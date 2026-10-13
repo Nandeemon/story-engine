@@ -3,7 +3,10 @@
 
 .stage { position: relative; aspect-ratio: 16 / 9; width: 100%; max-width: 100%; overflow: hidden; background: #2a2636; container-type: inline-size; user-select: none; touch-action: manipulation; }
 .stage .bg { position: absolute; inset: 0; }
-.stage .bg svg, .stage .bg img { width: 100%; height: 100%; display: block; object-fit: cover; }
+.stage .bg { overflow: hidden; }
+.stage .bg svg, .stage .bg img { position: absolute; inset: 0; width: 100%; height: 100%; display: block; object-fit: cover; }
+.stage .bg .bgedge { position: absolute; inset: 0; width: 100%; height: 100%; }
+.stage .bg .bgedge.blur { object-fit: cover; filter: blur(18px) brightness(.7); transform: scale(1.1); }
 
 .el { position: absolute; transform: translate(-50%, -100%); padding: 0; border: 0; background: none; display: block; touch-action: none; }
 .el svg, .el img { height: 100%; width: auto; max-width: none; display: block; pointer-events: none; }
@@ -26,6 +29,15 @@
 .choices { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: .6em; padding: 4%; background: rgba(10, 8, 20, .35); }
 .choices button { min-width: min(60%, 22em); max-width: 100%; padding: .6em 1.2em; border: 2px solid var(--g-accent); border-radius: var(--g-radius); background: var(--g-box); color: var(--g-fg); font: inherit; cursor: pointer; }
 .choices button:hover { background: var(--g-accent); color: var(--g-on); }
+.choices button .n { display: none; }
+
+/* Answers in the dialogue box, under the question. */
+.say.choicebox { cursor: default; }
+.choicebox .q { margin: 0 0 .5em; }
+.choicebox .answers { display: flex; flex-direction: column; gap: .3em; }
+.choicebox .answers button { display: flex; align-items: baseline; gap: .6em; width: 100%; padding: .35em .7em; border: 1.5px solid color-mix(in srgb, var(--g-accent) 55%, transparent); border-radius: calc(var(--g-radius) * .6); background: transparent; color: var(--g-fg); font: inherit; text-align: left; cursor: pointer; }
+.choicebox .answers button:hover, .choicebox .answers button:focus-visible { background: var(--g-accent); color: var(--g-on); border-color: var(--g-accent); outline: none; }
+.choicebox .answers .n { min-width: 1.4em; padding: 0 .3em; border-radius: .3em; background: color-mix(in srgb, var(--g-fg) 14%, transparent); font-size: .8em; text-align: center; }
 
 /* The scene during a conversation. Characters are updated in place, so these transitions run. */
 .el .art { position: relative; display: block; height: 100%; }

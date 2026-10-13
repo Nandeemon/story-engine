@@ -42,6 +42,8 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
   const s: PlayState = { roomId: first.id, facts: {}, event: null, problem: '', scene: null };
   let runner: Runner | null = null;
   let builtRoom = '';
+  /** The last line shown, so a choice can keep the question in the dialogue box. */
+  let lastLine: SayStep | null = null;
 
   const room = (): Room => project.rooms.find(r => r.id === s.roomId) ?? project.rooms[0];
   const canTalk = (el: StoryElement) => !s.event && !s.scene && el.script.trim() !== '';
@@ -104,7 +106,9 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
     });
 
     const ev = s.event;
-    game.innerHTML = !ev ? '' : ev.t === 'say' ? sayHTML(ev.who, ev.text) : choicesHTML(ev.options);
+    game.innerHTML = !ev ? '' : ev.t === 'say' ? sayHTML(ev.who, ev.text)
+      : choicesHTML(ev.options, true, project.look.choices ?? 'box', lastLine ?? undefined);
+    if (ev?.t === 'choice') game.querySelector<HTMLElement>('[data-pick]')?.focus({ preventScroll: true });
     opts.onChange?.(s);
   }
 
@@ -118,6 +122,7 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
   }
 
   function talk(el: StoryElement): void {
+    lastLine = null;
     const steps = parseScript(el.script).steps;
     const scene = startScene(room(), el, steps);
     s.scene = scene;
@@ -141,6 +146,7 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
     if (ev.t === 'say') {
       if (s.scene) applyToScene(s.scene, ev, project);
       s.event = ev;
+      lastLine = ev;
     } else if (ev.t === 'choice') {
       s.event = ev;
     } else if (ev.t === 'door') {
@@ -170,6 +176,12 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
   }
 
   function onKey(e: KeyboardEvent): void {
+    // Number keys pick an answer.
+    if (s.event?.t === 'choice' && /^[1-9]$/.test(e.key) && !(e.target as HTMLElement).closest('input, textarea, select')) {
+      const k = Number(e.key) - 1;
+      if (k < s.event.options.length) { e.preventDefault(); s.event.pick(k); s.event = null; advance(); }
+      return;
+    }
     if (s.event?.t !== 'say' || (e.key !== ' ' && e.key !== 'Enter')) return;
     if ((e.target as HTMLElement).closest('button, input, textarea, select')) return;
     e.preventDefault();

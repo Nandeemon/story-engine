@@ -2,7 +2,7 @@ import '@story-engine/runtime/game.css';
 import './editor.css';
 import { walkSteps, characterOf, cleanLookName, createProject, createRoom, findLook, findRoomByName, newId, normalizeProject, parseScript, renameLookInScript, renameRoomInScript, renameSpeakerInScript, uniqueLookName, writeScript, getStep } from '@story-engine/engine-core';
 import type { Character, CharacterLook, Project, Room, StoryElement } from '@story-engine/engine-core';
-import { BACKDROPS, CHARACTERS, OBJECTS, createPlayer, elementArt, esc, lookStyle, sayHTML } from '@story-engine/runtime';
+import { BACKDROPS, CHARACTERS, OBJECTS, backdropHTML, createPlayer, elementArt, esc, lookStyle, sayHTML } from '@story-engine/runtime';
 import type { Player, PlayState } from '@story-engine/runtime';
 import { loadProject, sampleProject, saveProject } from './store';
 import { inserts, scriptStatus, viewConvo, viewLook, viewMap, viewPlay, viewRoom } from './views';
@@ -502,6 +502,10 @@ const actions: Record<string, (k: string) => void> = {
   'save-file'() { pruneOncePictures(); saveToFile(project); toast('Saved to a file in your downloads'); },
   'open-file'() { const input = $<HTMLInputElement>('#projectfile')!; input.value = ''; input.click(); },
   theme(k) { project.look.theme = k; save(); render(); },
+  'look-choices'(k) { if (k === 'center') project.look.choices = 'center'; else delete project.look.choices; save(); render(); },
+  'bg-fit'(k) { const bg = room().bg; if (!bg) return; if (k === 'fit' || k === 'stretch') bg.fit = k; else delete bg.fit; save(); render(); },
+  'bg-edge'(k) { const bg = room().bg; if (!bg) return; if (k === 'color') { bg.edge = 'color'; bg.color ??= '#000000'; } else delete bg.edge; save(); render(); },
+  'bg-reset'() { const bg = room().bg; if (!bg) return; delete bg.fx; delete bg.fy; delete bg.zoom; save(); render(); },
   play() { startPlay(); },
   'play-convo'() { startPlay(selected()); },
   stop() {
@@ -782,6 +786,8 @@ document.addEventListener('input', ev => {
     case 'look-scale': { const l = editedLook(); if (l && e) { l.scale = Number(t.value); if (node) node.innerHTML = elementArt(e, undefined, project.characters, l.id); } break; }
     case 'room-name': { room().name = t.value; const c = $('#crumbs [aria-current]'); if (c) c.textContent = t.value; break; }
     case 'room-auto': room().auto = t.checked; break;
+    case 'bg-zoom': { const bg = room().bg; if (bg) { bg.zoom = Number(t.value); refreshBackdrop(); } break; }
+    case 'bg-color': { const bg = room().bg; if (bg) { bg.color = t.value; refreshBackdrop(); } break; }
     case 'conv-staging': if (e) { e.staging = t.value === 'room' ? 'room' : undefined; refreshMap(); } break;
     case 'look-font': project.look.font = t.value; break;
     case 'look-radius': project.look.radius = Number(t.value); break;
@@ -875,6 +881,44 @@ document.addEventListener('keydown', ev => {
     t.setRangeText('  ', t.selectionStart, t.selectionEnd, 'end');
     t.dispatchEvent(new Event('input', { bubbles: true }));
   }
+});
+
+/** Redraws only the backdrop of the room stage, so sliders and dragging stay smooth. */
+function refreshBackdrop(): void {
+  const host = document.querySelector<HTMLElement>('.stage.edit .bg');
+  const bg = room().bg;
+  if (host && bg) host.innerHTML = backdropHTML(bg);
+}
+
+/* Dragging the backdrop (in Fill, with nothing selected) chooses which part of it shows. */
+let bgPan: { x: number; y: number; fx: number; fy: number; w: number; h: number; before: string; moved: boolean } | null = null;
+document.addEventListener('pointerdown', ev => {
+  if (ui.view !== 'room' || ui.sel || ui.adding || ui.lookEdit) return;
+  const target = ev.target as HTMLElement;
+  const stage = target.closest<HTMLElement>('.stage.edit');
+  const bg = room().bg;
+  if (!stage || target.closest('.el') || !bg || (bg.fit ?? 'fill') !== 'fill') return;
+  const box = stage.getBoundingClientRect();
+  bgPan = { x: ev.clientX, y: ev.clientY, fx: bg.fx ?? 50, fy: bg.fy ?? 50, w: box.width, h: box.height, before: snapshot(), moved: false };
+  stage.classList.add('panning-bg');
+  ev.preventDefault();
+});
+document.addEventListener('pointermove', ev => {
+  const bg = room().bg;
+  if (!bgPan || !bg) return;
+  bgPan.moved = true;
+  // Moving the picture right shows more of its left side; zoomed in, each pixel moves less of it.
+  const k = 160 / (bg.zoom ?? 1);
+  bg.fx = Math.round(Math.min(100, Math.max(0, bgPan.fx - (ev.clientX - bgPan.x) / bgPan.w * k)) * 10) / 10;
+  bg.fy = Math.round(Math.min(100, Math.max(0, bgPan.fy - (ev.clientY - bgPan.y) / bgPan.h * k)) * 10) / 10;
+  refreshBackdrop();
+});
+document.addEventListener('pointerup', () => {
+  if (!bgPan) return;
+  const { before, moved } = bgPan;
+  bgPan = null;
+  document.querySelector('.stage.edit')?.classList.remove('panning-bg');
+  if (moved) { save(); record(before); render(); }
 });
 
 /* ---------- Drag to place ----------

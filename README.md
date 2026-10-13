@@ -39,6 +39,12 @@ Hide Lin with slide to right
 
 Places are far left, left, center, right, far right, or a number such as `40%` (and `40% 90%` to set the height too).
 
+## Choices and backdrops
+
+Answers to a choice appear in the dialogue box, under the question that was just asked, and number keys pick them. Look can move them to the middle of the screen instead.
+
+Each backdrop can **Fill** the stage (drag the backdrop in the room to choose which part shows, and zoom in), **Fit** the whole picture in (with soft or coloured edges), or **Stretch**.
+
 ## Layout
 
 | Package | What it is |
@@ -77,6 +83,6 @@ Otherwise
 
 ## Status
 
-Step 1 of the v1 build order is in place: rooms, characters and objects, the conversation map and writing mode, Play, the look of the game, and the story map. Next up: publishing, the character builder, stats and on-screen display, story testing tools and simulation.
+Step 1 of the v1 build order is in place: rooms, characters and objects, the conversation map and writing mode, Play, the look of the game, and the story map. Characters with looks, staged conversations, choices in the dialogue box and backdrop framing are in place too. Next up: publishing, built looks from parts, stats and on-screen display, story testing tools and simulation.
 
 The design lives in two documents: the project brief and the design document.

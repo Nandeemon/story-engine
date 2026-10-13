@@ -126,10 +126,27 @@ function elementPanel(p: Project, e: StoryElement): string {
     <p class="hint">Drag ${name} in the picture to move. Click empty space to go back to the room.</p>`;
 }
 
+/** How the backdrop fills the stage, with the controls for that way. */
+function backdropField(r: Room): string {
+  const bg = r.bg!;
+  const fit = bg.fit ?? 'fill';
+  const modes: [string, string, string][] = [['fill', 'Fill', 'Covers the stage; you choose what shows'], ['fit', 'Fit', 'Shows the whole picture'], ['stretch', 'Stretch', 'Stretches the picture to the stage']];
+  const extra = fit === 'fill'
+    ? `<p class="hint">Drag the backdrop in the picture to choose which part shows.</p>
+       <label class="field"><span>Zoom</span><input type="range" id="bg-zoom" data-in="bg-zoom" min="1" max="3" step="0.05" value="${bg.zoom ?? 1}"></label>
+       ${bg.fx !== undefined || bg.fy !== undefined || (bg.zoom ?? 1) !== 1 ? '<button class="btn small quiet" data-act="bg-reset">Show the middle again</button>' : ''}`
+    : fit === 'fit'
+      ? `<div class="row"><button class="btn small${bg.edge !== 'color' ? ' ink' : ' quiet'}" data-act="bg-edge" data-k="blur" aria-pressed="${bg.edge !== 'color'}">Soft edges</button><button class="btn small${bg.edge === 'color' ? ' ink' : ' quiet'}" data-act="bg-edge" data-k="color" aria-pressed="${bg.edge === 'color'}">Colour edges</button>
+         ${bg.edge === 'color' ? `<input type="color" id="bg-color" data-in="bg-color" value="${esc(bg.color ?? '#000000')}" aria-label="Edge colour">` : ''}</div>`
+      : '';
+  return `<div class="field"><span>Backdrop</span><div class="row">${modes.map(([k, n, d]) => `<button class="btn small${fit === k ? ' ink' : ' quiet'}" data-act="bg-fit" data-k="${k}" title="${d}" aria-pressed="${fit === k}">${n}</button>`).join('')}</div>${extra}</div>`;
+}
+
 function roomPanel(p: Project, r: Room): string {
   return `<h2>${esc(r.name)}</h2>
     <div class="row"><button class="btn ink" data-act="adding" data-k="char">Add a character</button><button class="btn" data-act="adding" data-k="object">Add an object</button></div>
     <label class="field"><span>Room name</span><input type="text" id="room-name" data-in="room-name" value="${esc(r.name)}"></label>
+    ${r.bg ? backdropField(r) : ''}
     <details class="more" id="room-more"><summary>More</summary><div>
       <button class="btn small quiet" data-act="adding" data-k="bg">Change the backdrop</button>
       <label class="check"><input type="checkbox" id="room-auto" data-in="room-auto"${r.auto ? ' checked' : ''}><span>Start talking right away when the player enters, like a classic visual novel</span></label>
@@ -233,13 +250,19 @@ export function scriptStatus(p: Project, r: Room, script: string): { text: strin
 
 export function viewLook(p: Project, r: Room): string {
   const L = p.look;
-  const demo = choicesHTML([{ text: 'A choice looks like this' }, { text: 'And another one' }], false).replace('class="choices"', 'class="choices demo"')
-    + sayHTML('Mara', 'This is how a line of dialogue looks in your game.', false);
+  const box = (L.choices ?? 'box') === 'box';
+  const demo = box
+    ? choicesHTML([{ text: 'Answers look like this' }, { text: 'And another one' }], false, 'box', { who: 'Mara', text: 'This is how a question and its answers look in your game.' })
+    : choicesHTML([{ text: 'A choice looks like this' }, { text: 'And another one' }], false).replace('class="choices"', 'class="choices demo"')
+      + sayHTML('Mara', 'This is how a line of dialogue looks in your game.', false);
   return `<div class="work"><div>${stageHTML(r, { mode: 'look', look: L, game: demo, characters: p.characters })}</div><aside class="side"><h2>The look of your game</h2>
       <div class="field"><span>Theme</span><div class="row">${Object.entries(THEMES).map(([k, t]) => `<button class="btn small${L.theme === k ? ' ink' : ''}" data-act="theme" data-k="${k}" aria-pressed="${L.theme === k}">${t.name}</button>`).join('')}</div></div>
       <label class="field"><span>Typeface</span><select id="look-font" data-in="look-font">${Object.keys(FONTS).map(f => `<option${f === L.font ? ' selected' : ''}>${f}</option>`).join('')}</select></label>
       <label class="field"><span>Corners</span><input type="range" id="look-radius" data-in="look-radius" min="0" max="28" value="${L.radius}"></label>
       <label class="field"><span>Text size</span><input type="range" id="look-size" data-in="look-size" min="1.4" max="3" step="0.1" value="${L.size}"></label>
+      <div class="field"><span>Choices</span><div class="row">
+        <button class="btn small${box ? ' ink' : ''}" data-act="look-choices" data-k="box" aria-pressed="${box}">In the dialogue box</button>
+        <button class="btn small${box ? '' : ' ink'}" data-act="look-choices" data-k="center" aria-pressed="${!box}">In the middle</button></div></div>
       <p class="hint">Changes show in the picture as you make them, and apply to the whole game.</p>
       <button class="btn block" data-act="crumb" data-k="room">Done</button></aside></div>`;
 }

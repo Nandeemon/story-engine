@@ -69,6 +69,16 @@ export interface Backdrop {
   preset?: string;
   /** An imported image as a data URL. */
   img?: string;
+  /** How the picture fills the stage: cover and crop (default), show whole, or stretch. */
+  fit?: 'fill' | 'fit' | 'stretch';
+  /** With fill: which point of the picture stays in view, in percent (50, 50 is the middle). */
+  fx?: number;
+  fy?: number;
+  /** With fill: zoom into the picture, 1 to 3. */
+  zoom?: number;
+  /** With fit: what fills the edges, a blurred copy of the picture or a colour. */
+  edge?: 'blur' | 'color';
+  color?: string;
 }
 
 export type ElementKind = 'char' | 'object';
@@ -138,6 +148,8 @@ export interface Look {
   radius: number;
   /** Text size as a share of the stage width (1 = 1%). */
   size: number;
+  /** Where answers appear: in the dialogue box under the question (default), or in the middle of the screen. */
+  choices?: 'box' | 'center';
 }
 
 export interface Project {

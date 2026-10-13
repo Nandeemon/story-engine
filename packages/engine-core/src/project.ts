@@ -1,4 +1,4 @@
-import type { Character, CharacterLook, Look, Project, Room, StoryElement } from './types';
+import type { Backdrop, Character, CharacterLook, Look, Project, Room, StoryElement } from './types';
 import { isLineEffect } from './staging';
 import { renameLookInScript } from './refs';
 
@@ -24,6 +24,24 @@ export function findRoomByName(project: Project, name: string): Room | undefined
 const num = (v: unknown, fallback: number): number => (typeof v === 'number' && Number.isFinite(v) ? v : fallback);
 const str = (v: unknown, fallback: string): string => (typeof v === 'string' ? v : fallback);
 
+const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
+
+function normalizeBackdrop(raw: unknown): Backdrop | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const b = raw as Record<string, unknown>;
+  const out: Backdrop = {};
+  if (typeof b.preset === 'string') out.preset = b.preset;
+  if (typeof b.img === 'string') out.img = b.img;
+  if (!out.preset && !out.img) return null;
+  if (b.fit === 'fit' || b.fit === 'stretch') out.fit = b.fit;
+  if (typeof b.fx === 'number') out.fx = clamp(b.fx, 0, 100);
+  if (typeof b.fy === 'number') out.fy = clamp(b.fy, 0, 100);
+  if (typeof b.zoom === 'number') out.zoom = clamp(b.zoom, 1, 3);
+  if (b.edge === 'color') out.edge = 'color';
+  if (typeof b.color === 'string' && /^#[0-9a-f]{6}$/i.test(b.color)) out.color = b.color;
+  return out;
+}
+
 /**
  * Reads a project from untrusted JSON (a save, an import) and fills in anything
  * missing, so the editor and runtime can rely on the shape. Returns null when
@@ -34,7 +52,7 @@ export function normalizeProject(raw: unknown): Project | null {
   const r = raw as Record<string, unknown>;
   if (!Array.isArray(r.rooms) || !r.rooms.length) return null;
   const rooms: Room[] = r.rooms.filter(x => x && typeof x === 'object').map((x: Record<string, unknown>) => {
-    const bg = x.bg && typeof x.bg === 'object' ? (x.bg as Room['bg']) : null;
+    const bg = normalizeBackdrop(x.bg);
     const els: StoryElement[] = (Array.isArray(x.els) ? x.els : []).filter(e => e && typeof e === 'object').map((e: Record<string, unknown>) => ({
       id: str(e.id, newId()),
       kind: e.kind === 'char' ? 'char' : 'object',
@@ -88,7 +106,8 @@ export function normalizeProject(raw: unknown): Project | null {
       theme: str(look.theme, DEFAULT_LOOK.theme),
       font: str(look.font, DEFAULT_LOOK.font),
       radius: num(look.radius, DEFAULT_LOOK.radius),
-      size: num(look.size, DEFAULT_LOOK.size)
+      size: num(look.size, DEFAULT_LOOK.size),
+      ...(look.choices === 'center' ? { choices: 'center' as const } : {})
     }
   };
 }
