@@ -1,4 +1,4 @@
-import type { Backdrop, Character, CharacterLook, Look, Project, Room, StoryElement } from './types';
+import type { Backdrop, Character, CharacterLook, HudWidget, Look, Project, Room, StoryElement } from './types';
 import { isLineEffect } from './staging';
 import { renameLookInScript } from './refs';
 
@@ -98,10 +98,23 @@ export function normalizeProject(raw: unknown): Project | null {
     }
   }
   const look = (r.look && typeof r.look === 'object' ? r.look : {}) as Record<string, unknown>;
+  const hud: HudWidget[] = (Array.isArray(r.hud) ? r.hud : []).filter(w => w && typeof w === 'object').map((w: Record<string, unknown>) => ({
+    id: str(w.id, newId()),
+    kind: w.kind === 'meter' ? 'meter' : 'label',
+    fact: str(w.fact, 'fact').replace(/[^\w.]/g, '_') || 'fact',
+    text: str(w.text, ''),
+    max: Math.max(1, num(w.max, 100)),
+    x: clamp(num(w.x, 2), 0, 95),
+    y: clamp(num(w.y, 3), 0, 95),
+    w: clamp(num(w.w, 24), 5, 90),
+    ...(w.hideUnset === true ? { hideUnset: true } : {})
+  }));
   return {
     version: 1,
+    ...(typeof r.title === 'string' && r.title.trim() ? { title: r.title.trim().slice(0, 80) } : {}),
     rooms,
     characters,
+    ...(hud.length ? { hud } : {}),
     look: {
       theme: str(look.theme, DEFAULT_LOOK.theme),
       font: str(look.font, DEFAULT_LOOK.font),

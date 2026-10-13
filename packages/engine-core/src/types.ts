@@ -152,9 +152,31 @@ export interface Look {
   choices?: 'box' | 'center';
 }
 
+/** Something shown over the game all the time: a story fact as a label or a meter. */
+export interface HudWidget {
+  id: string;
+  kind: 'label' | 'meter';
+  fact: string;
+  /** Words shown with the value, such as "Affection". */
+  text: string;
+  /** For meters: the value that fills the bar. */
+  max: number;
+  /** Top-left corner in percent of the stage. */
+  x: number;
+  y: number;
+  /** For meters: width in percent of the stage. */
+  w: number;
+  /** Hidden until the fact has been set in the story. */
+  hideUnset?: boolean;
+}
+
 export interface Project {
   version: 1;
+  /** The story's name, shown on the start screen of the game. */
+  title?: string;
   rooms: Room[];
   look: Look;
   characters: Character[];
+  /** The on-screen display. */
+  hud?: HudWidget[];
 }

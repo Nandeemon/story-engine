@@ -459,7 +459,7 @@ export function mapSide(ctx: MapCtx): string {
         <label class="field"><span>${step.who ? 'What they say' : 'Narration'}</span><textarea id="m-text" data-map-in="say-text" rows="3" placeholder="Type the line here">${step.text === '...' ? '' : esc(step.text)}</textarea></label>
         ${lookField(ctx, step.who, step.expr)}
         ${stageField(ctx, scene, step.who, step.fx ?? '')}
-        <div class="row"><button class="btn small" data-map-act="add-after">+ Line after this</button>${del()}</div>`;
+        <div class="row"><button class="btn small" data-map-act="add-after">+ Line after this</button><button class="btn small play" data-act="play-here" title="Play the conversation from this line, with the scene as it stands here">Play from here</button>${del()}</div>`;
     }
     case 'show':
     case 'move':

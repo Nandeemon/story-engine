@@ -115,6 +115,10 @@ details.more > div { display: flex; flex-direction: column; gap: 12px; padding-t
 /* Story map */
 .maphead { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 12px; }
 .maphead h2 { margin: 0; font: 700 30px/1.05 var(--display); letter-spacing: -.03em; }
+.publish { display: flex; flex-wrap: wrap; align-items: end; gap: 12px 20px; margin: 18px 0 4px; padding: 14px 16px; border: 1.5px solid var(--line); border-radius: 14px; background: var(--surface); }
+.publish .field { flex: 1 1 240px; }
+.publishgo { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; flex: 2 1 320px; }
+.publishgo .hint { margin: 0; flex: 1 1 220px; }
 .map { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; }
 .card { display: flex; flex-direction: column; padding: 0; overflow: hidden; border: 2px solid var(--ink); border-radius: 12px; background: var(--surface); text-align: left; cursor: pointer; }
 .card .pic { position: relative; aspect-ratio: 16 / 9; overflow: hidden; background: #2a2636; }
@@ -259,3 +263,36 @@ button.mnode:hover, .mrow:hover { box-shadow: 0 0 0 3px color-mix(in srgb, var(-
 .stage.edit:not(:has(.el.sel)) .bg { cursor: grab; }
 .stage.edit.panning-bg, .stage.edit.panning-bg .bg { cursor: grabbing; }
 input[type=color] { width: 44px; height: 32px; padding: 2px; border: 1.5px solid var(--line); border-radius: 8px; background: var(--surface); }
+
+/* Script with line numbers */
+.scriptbox { display: grid; grid-template-columns: auto minmax(0, 1fr); border-top: 1.5px dashed var(--line); }
+.scriptbox textarea { border-top: 0 !important; }
+.gutter { margin: 0; padding: 14px 10px 2px 0; overflow: hidden; color: var(--muted); font: 400 16px/1.55 var(--script); text-align: right; user-select: none; max-height: 100%; }
+.gutter .err { color: var(--bad); font-weight: 700; }
+
+/* Check */
+.badge { display: inline-grid; place-items: center; min-width: 1.5em; height: 1.5em; margin-left: 4px; padding: 0 .35em; border-radius: 999px; background: var(--bad); color: #fff; font-size: 11.5px; font-weight: 700; }
+.probs { display: flex; flex-direction: column; gap: 10px; }
+.prob { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; align-items: center; padding: 10px 14px; border: 1.5px solid var(--line); border-left: 5px solid var(--muted); border-radius: 10px; background: var(--surface); }
+.prob.error { border-left-color: var(--bad); }
+.prob.warning { border-left-color: var(--tape); }
+.prob .probhead { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; grid-column: 1; }
+.prob .lvl { color: var(--muted); font: 600 11px/1.2 var(--body); letter-spacing: .07em; text-transform: uppercase; }
+.prob.error .lvl { color: var(--bad); }
+.prob p { grid-column: 1; margin: 0; font-size: 14px; }
+.prob .btn { grid-column: 2; grid-row: 1 / span 2; }
+.allgood { margin: 0; padding: 16px; border: 1.5px solid var(--line); border-radius: 10px; color: var(--muted); }
+.tfacts { display: flex; flex-direction: column; gap: 8px; }
+.tfact { display: grid; grid-template-columns: minmax(0, 1fr) 120px; gap: 8px; align-items: center; font: 400 13.5px/1.3 var(--script); }
+.tfact input, .tfact select { width: 100%; padding: 6px 8px; border: 1.5px solid var(--line); border-radius: 8px; background: var(--surface); font: 400 14px var(--body); }
+.strip .testing { padding: 3px 8px; border-radius: 6px; background: var(--tape); color: var(--tape-ink); font-weight: 600; }
+
+/* On-screen display in Look */
+.stage.look .hw[data-hud] { pointer-events: auto; cursor: grab; }
+.stage.look .hw[data-on] { outline: 2px dashed var(--tape); outline-offset: 3px; }
+.hudlist { display: flex; flex-direction: column; gap: 6px; }
+.hudrow { display: flex; flex-direction: column; gap: 2px; padding: 8px 12px; border: 1.5px solid var(--line); border-radius: 10px; background: var(--surface); text-align: left; cursor: pointer; }
+.hudrow.on { border-color: var(--ink); }
+.hudrow span { color: var(--muted); font-size: 13px; }
+.hudedit { display: flex; flex-direction: column; gap: 10px; padding: 4px 4px 8px 12px; border-left: 3px solid var(--tape); }
+.hudedit input[type=number] { width: 100%; padding: 8px 10px; border: 1.5px solid var(--line); border-radius: 8px; background: var(--surface); }

@@ -1,11 +1,13 @@
 import '@story-engine/runtime/game.css';
 import './editor.css';
 import { walkSteps, characterOf, cleanLookName, createProject, createRoom, findLook, findRoomByName, newId, normalizeProject, parseScript, renameLookInScript, renameRoomInScript, renameSpeakerInScript, uniqueLookName, writeScript, getStep } from '@story-engine/engine-core';
-import type { Character, CharacterLook, Project, Room, StoryElement } from '@story-engine/engine-core';
+import type { Character, CharacterLook, Facts, Project, Room, StoryElement } from '@story-engine/engine-core';
 import { BACKDROPS, CHARACTERS, OBJECTS, backdropHTML, createPlayer, elementArt, esc, lookStyle, sayHTML } from '@story-engine/runtime';
 import type { Player, PlayState } from '@story-engine/runtime';
 import { loadProject, sampleProject, saveProject } from './store';
-import { inserts, scriptStatus, viewConvo, viewLook, viewMap, viewPlay, viewRoom } from './views';
+import { inserts, lookStage, scriptStatus, viewCheck, viewConvo, viewLook, viewMap, viewPlay, viewRoom } from './views';
+import { factKind, findProblems, storyFacts } from './problems';
+import type { Problem } from './problems';
 import type { Adding, ConvoMode, UI, View } from './views';
 import { applyZoom, drawEdges, mapAction, mapHTML, mapInput, mapSide, mapView, openView, setZoom } from './map';
 import type { MapCtx, MapResult } from './map';
@@ -21,6 +23,29 @@ const MODE_KEY = 'story-engine:convo-mode';
 let convoMode: ConvoMode = 'map';
 try { if (localStorage.getItem(MODE_KEY) === 'script') convoMode = 'script'; } catch { /* default to the map */ }
 let mapSel: string | null = null;
+
+/* Test values for story facts: kept in this browser for testing only, never part of the story. */
+const TEST_KEY = 'story-engine:test-facts';
+let test: { use: boolean; values: Record<string, string> } = { use: false, values: {} };
+try { const t = JSON.parse(localStorage.getItem(TEST_KEY) ?? 'null'); if (t && typeof t === 'object') test = { use: !!t.use, values: t.values ?? {} }; } catch { /* none saved */ }
+const saveTest = () => { try { localStorage.setItem(TEST_KEY, JSON.stringify(test)); } catch { /* this session only */ } };
+function testFacts(): Facts | undefined {
+  if (!test.use) return undefined;
+  const out: Facts = {};
+  for (const [k, v] of Object.entries(test.values)) {
+    if (v === '') continue;
+    out[k] = v === 'yes' ? true : v === 'no' ? false : /^-?\d+(\.\d+)?$/.test(v) ? Number(v) : v;
+  }
+  return out;
+}
+let problems: Problem[] = [];
+/** The on-screen display widget being edited in Look. */
+let hudSel: string | null = null;
+const hudWidget = (id: string | undefined) => project.hud?.find(w => w.id === id);
+function refreshLookStage(): void {
+  const host = $('#lookstage');
+  if (host) host.innerHTML = lookStage(project, room(), hudSel, testFacts() ?? {});
+}
 /** Set when a conversation is opened, so the map opens on its start. */
 let freshConvo = false;
 
@@ -136,7 +161,15 @@ function crumbs(): [string, string][] {
   if (ui.view !== 'map') list.push(['room', r.name]);
   if (ui.view === 'convo' && e) list.push(['el', e.name], ['convo', 'Conversation']);
   if (ui.view === 'look') list.push(['look', 'Look']);
+  if (ui.view === 'check') list.push(['check', 'Check']);
   return list;
+}
+
+/** The Check button shows how many problems need a look. */
+function checkButton(): string {
+  problems = findProblems(project);
+  const n = problems.filter(x => x.level !== 'note').length;
+  return `<button class="btn${ui.view === 'check' ? ' ink' : ''}" data-act="check" title="Check your story for problems">Check${n ? ` <span class="badge">${n}</span>` : ''}</button>`;
 }
 
 function renderBar(): void {
@@ -147,7 +180,7 @@ function renderBar(): void {
     ? '<button class="btn ink" data-act="stop">Stop</button>'
     : `<button class="btn small quiet" data-act="undo" title="Undo (Ctrl+Z)"${past.length ? '' : ' disabled'}>Undo</button>
        <button class="btn small quiet" data-act="redo" title="Redo (Ctrl+Shift+Z)"${future.length ? '' : ' disabled'}>Redo</button>
-       <button class="btn${ui.view === 'look' ? ' ink' : ''}" data-act="look">Look</button><button class="btn play" data-act="play">Play</button>`;
+       ${checkButton()}<button class="btn${ui.view === 'look' ? ' ink' : ''}" data-act="look">Look</button><button class="btn play" data-act="play">Play</button>`;
 }
 
 function render(): void {
@@ -170,8 +203,9 @@ function render(): void {
       freshConvo = false;
       break;
     }
-    case 'look': main.innerHTML = viewLook(project, r); break;
+    case 'look': main.innerHTML = viewLook(project, r, hudSel, testFacts() ?? {}); break;
     case 'play': main.innerHTML = viewPlay(); break;
+    case 'check': main.innerHTML = viewCheck(project, problems, test); break;
   }
 }
 
@@ -240,10 +274,24 @@ function updateStatus(): void {
   const s = scriptStatus(project, room(), e.script);
   el.className = s.error ? 'status err' : 'status';
   el.textContent = s.text;
+  updateGutter();
   facts.innerHTML = s.facts.length
     ? `<div class="label">Story facts used here</div><div class="row">${s.facts.map(f => `<span class="chip">${esc(f)}</span>`).join('')}</div>`
     : '';
 }
+
+/** Line numbers beside the script, with the line that needs fixing marked. */
+function updateGutter(): void {
+  const t = $<HTMLTextAreaElement>('#script'), g = $('#gutter');
+  if (!t || !g) return;
+  const bad = new Set(parseScript(t.value).errors.map(x => x.n));
+  const n = t.value.split('\n').length;
+  g.innerHTML = Array.from({ length: n }, (_, i) => `<span${bad.has(i + 1) ? ' class="err"' : ''}>${i + 1}</span>`).join('\n');
+  g.scrollTop = t.scrollTop;
+}
+document.addEventListener('scroll', ev => {
+  if ((ev.target as HTMLElement).id === 'script') { const g = $('#gutter'); if (g) g.scrollTop = (ev.target as HTMLElement).scrollTop; }
+}, true);
 
 /** The strip under the game is editor-only: the player never sees it. */
 function updateStrip(s: Readonly<PlayState>): void {
@@ -252,7 +300,9 @@ function updateStrip(s: Readonly<PlayState>): void {
   const r = project.rooms.find(x => x.id === s.roomId);
   const idle = !s.event && !r?.els.some(e => e.script.trim());
   const facts = Object.entries(s.facts);
+  const tf = testFacts();
   strip.innerHTML = `<span class="label">Only you see this</span>`
+    + (tf && Object.keys(tf).length ? '<span class="testing">Testing with test values</span>' : '')
     + (s.problem ? `<span class="status err">${esc(s.problem)}</span>` : '')
     + (idle ? '<span>Nothing in this room is clickable yet. Stop, click a character, and make them say something.</span>'
       : !s.event ? '<span>Click a character or object in the picture.</span>' : '')
@@ -260,13 +310,15 @@ function updateStrip(s: Readonly<PlayState>): void {
   renderBar();
 }
 
-function startPlay(fromElement?: StoryElement): void {
+function startPlay(fromElement?: StoryElement, startPath?: string): void {
   ui.back = ui.view === 'play' ? ui.back : ui.view;
   ui.view = 'play';
   render();
   player = createPlayer($('#player')!, project, {
     roomId: fromElement ? room().id : undefined,
     elementId: fromElement?.id,
+    startPath,
+    facts: testFacts(),
     onChange: updateStrip
   });
 }
@@ -364,7 +416,7 @@ let lookReturn: { elId: string | null; mapSel: string | null } | null = null;
 let lookCompare: 'see-through' | 'difference' = 'see-through';
 
 /** Actions that never change the project, so they are not recorded for Undo. */
-const NOT_RECORDED = new Set(['once-lineup', 'look-compare', 'undo', 'redo', 'save-file', 'open-file', 'upload', 'play', 'play-convo', 'stop', 'convo-mode', 'look', 'crumb', 'add-looks', 'look-replace', 'once-picture', 'look-open', 'look-done']);
+const NOT_RECORDED = new Set(['make-game', 'hud-sel', 'play-here', 'check', 'goto-problem', 'test-clear', 'once-lineup', 'look-compare', 'undo', 'redo', 'save-file', 'open-file', 'upload', 'play', 'play-convo', 'stop', 'convo-mode', 'look', 'crumb', 'add-looks', 'look-replace', 'once-picture', 'look-open', 'look-done']);
 
 const actions: Record<string, (k: string) => void> = {
   crumb(k) {
@@ -499,6 +551,15 @@ const actions: Record<string, (k: string) => void> = {
   },
   undo() { undo(); },
   redo() { redo(); },
+  'make-game'() {
+    pruneOncePictures();
+    // The game's player is only loaded when a game file is made.
+    void import('./publish').then(({ downloadGame }) => {
+      const name = downloadGame(project);
+      const serious = problems.filter(x => x.level !== 'note').length;
+      toast(serious ? `${name} is in your downloads. Check found ${serious} ${serious === 1 ? 'problem' : 'problems'} players may run into.` : `${name} is in your downloads. Open it to play.`);
+    });
+  },
   'save-file'() { pruneOncePictures(); saveToFile(project); toast('Saved to a file in your downloads'); },
   'open-file'() { const input = $<HTMLInputElement>('#projectfile')!; input.value = ''; input.click(); },
   theme(k) { project.look.theme = k; save(); render(); },
@@ -508,6 +569,37 @@ const actions: Record<string, (k: string) => void> = {
   'bg-reset'() { const bg = room().bg; if (!bg) return; delete bg.fx; delete bg.fy; delete bg.zoom; save(); render(); },
   play() { startPlay(); },
   'play-convo'() { startPlay(selected()); },
+  'play-here'() { const e = selected(); if (e && mapSel) startPlay(e, mapSel.split('#')[0]); },
+  check() { go(ui.view === 'check' ? 'room' : 'check'); },
+  'goto-problem'(k) {
+    const pr = problems[Number(k)];
+    if (!pr) return;
+    ui.roomId = pr.roomId;
+    if (!pr.elId) { ui.sel = null; go('room'); return; }
+    ui.sel = pr.elId;
+    convoMode = pr.line !== undefined ? 'script' : 'map';
+    mapSel = pr.path ?? null;
+    freshConvo = !pr.path;
+    go('convo');
+    if (pr.path) requestAnimationFrame(() => $('.mnode.on, .mrow.on')?.scrollIntoView({ block: 'center', inline: 'center' }));
+    if (pr.line !== undefined) { const t = $<HTMLTextAreaElement>('#script'); if (t) { const at = t.value.split('\n').slice(0, pr.line - 1).join('\n').length + (pr.line > 1 ? 1 : 0); t.focus(); t.setSelectionRange(at, at); } }
+  },
+  'test-clear'() { test.values = {}; saveTest(); render(); },
+  'hud-add'(k) {
+    project.hud ??= [];
+    const meter = k === 'meter';
+    // Start with a story fact that is not shown yet, preferring numbers.
+    const used = new Set(project.hud.map(x => x.fact));
+    const free = storyFacts(project).filter(f => !used.has(f));
+    const fact = free.find(f => factKind(project, f) === 'number') ?? free[0] ?? (meter ? 'affection' : 'gold');
+    const text = fact.replace(/[_.]/g, ' ').replace(/^./, c => c.toUpperCase());
+    const w = { id: newId(), kind: meter ? 'meter' as const : 'label' as const, fact, text, max: meter ? 10 : 100, x: 2, y: 3 + project.hud.length * 9, w: 24 };
+    project.hud.push(w);
+    hudSel = w.id;
+    save(); render();
+  },
+  'hud-sel'(k) { hudSel = hudSel === k ? null : k; render(); },
+  'hud-remove'(k) { project.hud = (project.hud ?? []).filter(w => w.id !== k); if (!project.hud.length) delete project.hud; hudSel = null; save(); render(); },
   stop() {
     const back = ui.back === 'convo' && selected() ? 'convo' : ui.back === 'map' ? 'map' : 'room';
     if (back === 'convo') freshConvo = false;
@@ -643,6 +735,35 @@ document.addEventListener('pointerup', () => {
   const act = step.t === 'say' ? 'stage-place' : 'stg-place';
   applyMap(mapAction(ctx, act, `${d.who}|${d.x}|${Math.abs(d.y - 98) < 2 ? '' : d.y}`));
   record(before);
+});
+
+/* Dragging a widget of the on-screen display in Look places it. */
+let hudDrag: { id: string; node: HTMLElement; box: DOMRect; dx: number; dy: number; before: string; moved: boolean } | null = null;
+document.addEventListener('pointerdown', ev => {
+  const node = (ev.target as HTMLElement).closest<HTMLElement>('[data-hud]');
+  if (!node || ui.view !== 'look') return;
+  const stage = node.closest<HTMLElement>('[data-stage]')!;
+  const box = stage.getBoundingClientRect(), r = node.getBoundingClientRect();
+  hudDrag = { id: node.dataset.hud!, node, box, dx: ev.clientX - r.left, dy: ev.clientY - r.top, before: snapshot(), moved: false };
+  if (hudSel !== hudDrag.id) { hudSel = hudDrag.id; }
+  try { node.setPointerCapture(ev.pointerId); } catch { /* not supported */ }
+  ev.preventDefault();
+});
+document.addEventListener('pointermove', ev => {
+  const d = hudDrag, w = d && hudWidget(d.id);
+  if (!d || !w) return;
+  d.moved = true;
+  w.x = Math.round(Math.max(0, Math.min(95, (ev.clientX - d.dx - d.box.left) / d.box.width * 100)) * 10) / 10;
+  w.y = Math.round(Math.max(0, Math.min(95, (ev.clientY - d.dy - d.box.top) / d.box.height * 100)) * 10) / 10;
+  d.node.style.left = `${w.x}%`;
+  d.node.style.top = `${w.y}%`;
+});
+document.addEventListener('pointerup', () => {
+  const d = hudDrag;
+  hudDrag = null;
+  if (!d) return;
+  if (d.moved) { save(); record(d.before); }
+  render();
 });
 
 /* Dragging the map's background pans it. */
@@ -791,6 +912,14 @@ document.addEventListener('input', ev => {
     case 'look-scale': { const l = editedLook(); if (l && e) { l.scale = Number(t.value); if (node) node.innerHTML = elementArt(e, undefined, project.characters, l.id); } break; }
     case 'room-name': { room().name = t.value; const c = $('#crumbs [aria-current]'); if (c) c.textContent = t.value; break; }
     case 'room-auto': room().auto = t.checked; break;
+    case 'story-title': { const v = t.value.replace(/\s+/g, ' '); if (v.trim()) project.title = v; else delete project.title; break; }
+    case 'test-use': test.use = t.checked; saveTest(); return;
+    case 'hud-fact': { const w = hudWidget(t.dataset.k); if (w) { w.fact = t.value.trim().replace(/[^\w.]/g, '_') || 'fact'; refreshLookStage(); } break; }
+    case 'hud-text': { const w = hudWidget(t.dataset.k); if (w) { w.text = t.value; refreshLookStage(); } break; }
+    case 'hud-max': { const w = hudWidget(t.dataset.k); if (w) { w.max = Math.max(1, Number(t.value) || 1); refreshLookStage(); } break; }
+    case 'hud-w': { const w = hudWidget(t.dataset.k); if (w) { w.w = Number(t.value); refreshLookStage(); } break; }
+    case 'hud-hide': { const w = hudWidget(t.dataset.k); if (w) { w.hideUnset = t.checked || undefined; refreshLookStage(); } break; }
+    case 'test-fact': test.values[t.dataset.k ?? ''] = t.value.trim(); saveTest(); return;
     case 'bg-zoom': { const bg = room().bg; if (bg) { bg.zoom = Number(t.value); refreshBackdrop(); } break; }
     case 'bg-color': { const bg = room().bg; if (bg) { bg.color = t.value; refreshBackdrop(); } break; }
     case 'conv-staging': if (e) { e.staging = t.value === 'room' ? 'room' : undefined; refreshMap(); } break;
@@ -883,7 +1012,22 @@ document.addEventListener('keydown', ev => {
   }
   if (t.id === 'script' && ev.key === 'Tab') {
     ev.preventDefault();
-    t.setRangeText('  ', t.selectionStart, t.selectionEnd, 'end');
+    const start = t.value.lastIndexOf('\n', t.selectionStart - 1) + 1;
+    if (ev.shiftKey) {
+      // Shift+Tab takes up to two spaces off the start of the line.
+      const cut = t.value.slice(start, start + 2).match(/^ {1,2}/)?.[0].length ?? 0;
+      if (cut) { const at = t.selectionStart; t.setRangeText('', start, start + cut, 'preserve'); t.setSelectionRange(Math.max(start, at - cut), Math.max(start, at - cut)); }
+    } else t.setRangeText('  ', t.selectionStart, t.selectionEnd, 'end');
+    t.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+  if (t.id === 'script' && ev.key === 'Enter' && !ev.shiftKey && !ev.isComposing) {
+    // Enter keeps the indentation, and goes one step in after Choice, an answer, Only if or Otherwise.
+    ev.preventDefault();
+    const start = t.value.lastIndexOf('\n', t.selectionStart - 1) + 1;
+    const line = t.value.slice(start, t.selectionStart);
+    const indent = (line.match(/^ */) ?? [''])[0];
+    const deeper = /^\s*(choice|otherwise|only if .+|["\u201c].+)\s*$/i.test(line) ? '  ' : '';
+    t.setRangeText(`\n${indent}${deeper}`, t.selectionStart, t.selectionEnd, 'end');
     t.dispatchEvent(new Event('input', { bubbles: true }));
   }
 });

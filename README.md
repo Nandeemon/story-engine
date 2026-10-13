@@ -20,6 +20,24 @@ npm run check    # type-check, tests and build
 
 The editor keeps your story in this browser and warns you if it stops being able to save. **Save to file** on the Story map downloads the whole project, images included, as one `.story.json` file, and **Open a file** brings it back. Undo and Redo (Ctrl+Z, Ctrl+Shift+Z) cover every change to the project. Renaming a room updates every `Go to` that points at it, and renaming a character updates their lines.
 
+## Sharing your game
+
+Give the story a name on the Story map and press **Make a game file**. You get one `.html` file with the whole game inside: the story, the pictures and the player, behind a start screen. Open it in any browser, send it to someone, or upload it to itch.io or any web host. Nothing of the editor is in it. (A link that plays the game straight from the editor would need a server, and is not built yet.)
+
+## Testing your story
+
+**Check** in the top bar lists what would otherwise only show up while playing: doors to rooms that do not exist, looks a character does not have, names that are on no stage, steps that can never be reached, and rooms that nothing leads to. **Show** takes you to the step. The badge counts errors and warnings.
+
+Under **Test values** in Check you can set story facts before playing, for example `affection = 12` to test a line that needs affection 10. Play says when it is using test values. In the conversation map, **Play from here** starts at the selected line, with the scene as it stands at that point.
+
+## Script view
+
+The script keeps what you wrote. Changing a line in the map rewrites only that line; notes, blank lines and your indentation stay. Line numbers run down the side and the line with a problem is marked. Enter keeps the indentation (and goes one step in after `Choice`, an answer, `Only if` or `Otherwise`), Tab and Shift+Tab indent and outdent.
+
+## On-screen display
+
+In **Look**, under On-screen display, add a **Meter** (a bar, such as affection out of 10) or a **Number or word** (such as gold), pick the story fact it shows and drag it into place on the picture. It is shown over the game at all times, and can stay hidden until the story first sets the fact.
+
 ## Characters and looks
 
 Add a character with **Use your own picture**: that picture is the character's base. **Add looks** takes one or more pictures (expressions or poses), named after their files (`lin_happy.png` becomes `happy`). Click a look to line it up over the base picture, so the character stays still when the look changes. In a conversation, pick a look per line, or write `Lin (happy): Hi.` in the script; **Use a different picture here** gives one line a picture of its own. A character made from your pictures can be placed in any room and keeps its looks.
@@ -83,6 +101,6 @@ Otherwise
 
 ## Status
 
-Step 1 of the v1 build order is in place: rooms, characters and objects, the conversation map and writing mode, Play, the look of the game, and the story map. Characters with looks, staged conversations, choices in the dialogue box and backdrop framing are in place too. Next up: publishing, built looks from parts, stats and on-screen display, story testing tools and simulation.
+Step 1 of the v1 build order is in place: rooms, characters and objects, the conversation map and writing mode, Play, the look of the game, and the story map. Characters with looks, staged conversations, choices in the dialogue box, backdrop framing, game files, the problem list and test values, and the on-screen display are in place too. Next up: built looks from parts, saving progress in published games, and simulation.
 
 The design lives in two documents: the project brief and the design document.

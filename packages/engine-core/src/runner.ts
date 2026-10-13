@@ -58,8 +58,8 @@ const LOOP_LIMIT = 10_000;
  * Runs a conversation step by step. Facts are changed in place, so every
  * conversation in a playthrough shares the same story facts.
  */
-export function createRunner(steps: Step[], facts: Facts, onStage?: (step: StageStep) => void): Runner {
-  const stack: { steps: Step[]; i: number }[] = [{ steps, i: 0 }];
+export function createRunner(steps: Step[], facts: Facts, onStage?: (step: StageStep) => void, startAt?: string): Runner {
+  const stack: { steps: Step[]; i: number }[] = startAt ? framesFor(steps, startAt) : [{ steps, i: 0 }];
   return {
     next(): RunEvent {
       let quiet = 0;
@@ -106,4 +106,24 @@ export function createRunner(steps: Step[], facts: Facts, onStage?: (step: Stage
       return { t: 'end' };
     }
   };
+}
+
+/**
+ * The runner's position at a step, as if the conversation had just arrived there:
+ * every list on the way continues after the answer or condition that holds it.
+ */
+function framesFor(root: Step[], path: string): { steps: Step[]; i: number }[] {
+  const parts = path.split('.');
+  const frames: { steps: Step[]; i: number }[] = [];
+  let list: Step[] = root;
+  for (let k = 0; k < parts.length; k += 2) {
+    const idx = Number(parts[k]);
+    if (k + 1 >= parts.length) { frames.push({ steps: list, i: idx }); break; }
+    frames.push({ steps: list, i: idx + 1 });
+    const step = list[idx], branch = parts[k + 1];
+    if (step?.t === 'choice') list = step.options[Number(branch.slice(1))]?.steps ?? [];
+    else if (step?.t === 'if') list = branch === 't' ? step.then : step.else;
+    else break;
+  }
+  return frames;
 }

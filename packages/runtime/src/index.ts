@@ -5,3 +5,4 @@ export { createPlayer } from './player';
 export type { Player, PlayerOptions, PlayState } from './player';
 export { startScene, roomScene, applyToScene, nextMoment, sceneHTML, staged, stagedAttrs } from './scene';
 export type { Scene, StagedChar } from './scene';
+export { hudHTML } from './hud';

@@ -1,9 +1,10 @@
-import { createRunner, findRoomByName, parseScript } from '@story-engine/engine-core';
+import { createRunner, findRoomByName, parseScript, stepsBefore } from '@story-engine/engine-core';
 import type { ChoiceEvent, Facts, Project, Room, Runner, SayStep, StoryElement } from '@story-engine/engine-core';
 import { applyToScene, nextMoment, roomScene, staged, stagedAttrs, startScene } from './scene';
 import type { Scene } from './scene';
 import { backdropHTML, choicesHTML, elementArt, lookStyle, sayHTML } from './stage';
 import { esc } from './art';
+import { hudHTML } from './hud';
 
 export interface PlayState {
   roomId: string;
@@ -21,6 +22,10 @@ export interface PlayerOptions {
   roomId?: string;
   /** Start by running this element's conversation. */
   elementId?: string;
+  /** Start the element's conversation at this step instead of its first line (for testing). */
+  startPath?: string;
+  /** Story facts to start with (for testing); otherwise every fact starts unset. */
+  facts?: Facts;
   /** Called after every change, so the editor can show story facts beside the game. */
   onChange?: (state: Readonly<PlayState>) => void;
 }
@@ -39,7 +44,7 @@ const FX_CLASSES = ['in-fade', 'in-left', 'in-right', 'in-pop', 'out-fade', 'out
  */
 export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOptions = {}): Player {
   const first = project.rooms.find(r => r.id === opts.roomId) ?? project.rooms[0];
-  const s: PlayState = { roomId: first.id, facts: {}, event: null, problem: '', scene: null };
+  const s: PlayState = { roomId: first.id, facts: { ...(opts.facts ?? {}) }, event: null, problem: '', scene: null };
   let runner: Runner | null = null;
   let builtRoom = '';
   /** The last line shown, so a choice can keep the question in the dialogue box. */
@@ -56,7 +61,7 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
     const r = room();
     const objects = r.els.filter(e => e.kind !== 'char').map(e =>
       `<button class="el" data-el="${esc(e.id)}" style="left:${e.x}%;top:${e.y}%;height:${e.size}%" aria-label="${esc(e.name)}">${elementArt(e, undefined, project.characters)}</button>`).join('');
-    host.innerHTML = `<div class="stage play" data-stage style="${lookStyle(project.look)}"><div class="bg">${backdropHTML(r.bg)}</div>${objects}<div class="game"></div></div>`;
+    host.innerHTML = `<div class="stage play" data-stage style="${lookStyle(project.look)}"><div class="bg">${backdropHTML(r.bg)}</div>${objects}<div class="hudlayer"></div><div class="game"></div></div>`;
     builtRoom = r.id;
   }
 
@@ -74,7 +79,7 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
       if (!node) {
         node = document.createElement('button');
         node.dataset.el = c.key;
-        stage.insertBefore(node, game);
+        stage.insertBefore(node, stage.querySelector('.hudlayer') ?? game);
       }
       const el = r.els.find(e => e.id === c.elId);
       const clickable = !!el && canTalk(el) && c.visible;
@@ -108,6 +113,8 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
       n.tabIndex = el && canTalk(el) ? 0 : -1;
     });
 
+    const hud = stage.querySelector<HTMLElement>('.hudlayer');
+    if (hud) hud.innerHTML = hudHTML(project.hud, s.facts);
     const ev = s.event;
     game.innerHTML = !ev ? '' : ev.t === 'say' ? sayHTML(ev.who, ev.text)
       : choicesHTML(ev.options, true, project.look.choices ?? 'box', lastLine ?? undefined);
@@ -124,12 +131,14 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
     if (auto) talk(auto); else render();
   }
 
-  function talk(el: StoryElement): void {
+  function talk(el: StoryElement, startAt?: string): void {
     lastLine = null;
     const steps = parseScript(el.script).steps;
     const scene = startScene(room(), el, steps);
+    // Starting partway: the scene is set as it would stand by then.
+    if (startAt) for (const st of stepsBefore(steps, startAt)) { applyToScene(scene, st, project); nextMoment(scene); }
     s.scene = scene;
-    runner = createRunner(steps, s.facts, step => applyToScene(scene, step, project));
+    runner = createRunner(steps, s.facts, step => applyToScene(scene, step, project), startAt);
     advance();
   }
 
@@ -198,7 +207,7 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
   document.addEventListener('keydown', onKey);
 
   const startEl = opts.elementId ? first.els.find(el => el.id === opts.elementId) : undefined;
-  if (startEl) { render(); talk(startEl); } else enter(first);
+  if (startEl) { render(); talk(startEl, opts.startPath); } else enter(first);
 
   return {
     state: () => s,

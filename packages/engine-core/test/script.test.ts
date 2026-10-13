@@ -133,3 +133,44 @@ describe('paths', () => {
     expect(stepPathOf('2.o1', 3)).toBe('2.o1.3');
   });
 });
+
+describe('keeping the author\'s text', () => {
+  const AUTHOR = `# Scene one
+
+Mara: You came back.
+
+Choice
+    "Yes"    trust + 1
+        Mara: Good.
+    # the cold answer
+    "No"
+        Mara:   Fine.
+Mara: Bye.
+`;
+
+  it('writes an untouched script back exactly', () => {
+    expect(writeScript(parseScript(AUTHOR).steps)).toBe(AUTHOR);
+  });
+
+  it('changes only the line that was edited, in its own indentation', () => {
+    const steps = parseScript(AUTHOR).steps;
+    const good = getStep(steps, '2.o0.0') as { text: string };
+    good.text = 'Very good.';
+    expect(writeScript(steps)).toBe(AUTHOR.replace('        Mara: Good.', '        Mara: Very good.'));
+  });
+
+  it('writes a new line in the indentation of its neighbours', () => {
+    const steps = parseScript(AUTHOR).steps;
+    const list = getList(steps, '2.o1')!;
+    list.push({ t: 'end' });
+    const text = writeScript(steps);
+    expect(text).toContain('        Mara:   Fine.\n        End\nMara: Bye.');
+    expect(parseScript(text).errors).toEqual([]);
+  });
+
+  it('drops the blank lines of a deleted line and keeps the rest', () => {
+    const steps = parseScript(AUTHOR).steps;
+    steps.splice(1, 1);
+    expect(writeScript(steps)).toBe(AUTHOR.replace('\nMara: You came back.\n', ''));
+  });
+});

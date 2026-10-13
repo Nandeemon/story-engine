@@ -68,3 +68,53 @@ export function stepsBefore(root: Step[], path: StepPath): Step[] {
   }
   return out;
 }
+
+/** Visits every step with its path. */
+export function walkWithPaths(steps: Step[], visit: (s: Step, path: StepPath) => void, list: ListPath = ''): void {
+  steps.forEach((s, i) => {
+    const path = stepPathOf(list, i);
+    visit(s, path);
+    if (s.t === 'choice') s.options.forEach((o, k) => walkWithPaths(o.steps, visit, `${path}.o${k}`));
+    if (s.t === 'if') { walkWithPaths(s.then, visit, `${path}.t`); walkWithPaths(s.else, visit, `${path}.e`); }
+  });
+}
+
+const TERMINAL = new Set(['door', 'end', 'jump']);
+
+/** True when every way through a list of steps ends it (End, Go to, Go to part). */
+function alwaysEnds(list: Step[]): boolean {
+  for (const s of list) {
+    if (TERMINAL.has(s.t)) return true;
+    if (s.t === 'choice' && s.options.length && s.options.every(o => alwaysEnds(o.steps))) return true;
+    if (s.t === 'if' && alwaysEnds(s.then) && alwaysEnds(s.else)) return true;
+  }
+  return false;
+}
+
+/**
+ * Steps no playthrough can reach, because every way to them has ended before.
+ * Only the first such step of each run is listed. A part counts as reachable
+ * when a "Go to part" points at it.
+ */
+export function unreachableSteps(root: Step[]): StepPath[] {
+  const jumped = new Set<string>();
+  walkWithPaths(root, s => { if (s.t === 'jump') jumped.add(s.part.trim().toLowerCase()); });
+  const out: StepPath[] = [];
+  const scan = (list: Step[], lp: ListPath): void => {
+    let open = true;
+    let reported = false;
+    list.forEach((s, i) => {
+      const path = stepPathOf(lp, i);
+      if (s.t === 'part') { open = open || jumped.has(s.name.trim().toLowerCase()); reported = false; }
+      if (!open) {
+        if (!reported) { out.push(path); reported = true; }
+        return;
+      }
+      if (s.t === 'choice') s.options.forEach((o, k) => scan(o.steps, `${path}.o${k}`));
+      if (s.t === 'if') { scan(s.then, `${path}.t`); scan(s.else, `${path}.e`); }
+      if (TERMINAL.has(s.t) || ((s.t === 'choice' || s.t === 'if') && alwaysEnds([s]))) open = false;
+    });
+  };
+  scan(root, '');
+  return out;
+}

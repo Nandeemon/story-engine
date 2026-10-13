@@ -1,10 +1,12 @@
 import { characterOf, findRoomByName, parseScript, summarize, walkSteps } from '@story-engine/engine-core';
 import { missingLook, unknownSpeaker } from './map';
-import type { Character, Project, Room, StoryElement } from '@story-engine/engine-core';
-import { BACKDROPS, CHARACTERS, EXPRESSIONS, FONTS, OBJECTS, THEMES, backdropHTML, characterSVG, choicesHTML, esc, sayHTML, stageHTML } from '@story-engine/runtime';
+import { factKind, storyFacts } from './problems';
+import type { Problem } from './problems';
+import type { Character, FactValue, Project, Room, StoryElement } from '@story-engine/engine-core';
+import { BACKDROPS, CHARACTERS, EXPRESSIONS, FONTS, OBJECTS, THEMES, backdropHTML, characterSVG, choicesHTML, esc, hudHTML, sayHTML, stageHTML } from '@story-engine/runtime';
 import type { Preset } from '@story-engine/runtime';
 
-export type View = 'map' | 'room' | 'convo' | 'look' | 'play';
+export type View = 'map' | 'room' | 'convo' | 'look' | 'play' | 'check';
 export type Adding = 'char' | 'object' | 'bg' | null;
 
 export interface UI {
@@ -33,7 +35,11 @@ export function viewMap(p: Project, ui: UI): string {
     ? `<span class="hint">Erase everything?</span><button class="btn small danger" data-act="reset">Yes, start over</button><button class="btn small quiet" data-act="cancel">Keep it</button>`
     : `<button class="btn small" data-act="save-file">Save to file</button><button class="btn small" data-act="open-file">Open a file</button><button class="btn small quiet" data-act="sample"${hasContent(p) ? ' data-confirm="This replaces your story. Click again"' : ''}>Load the sample scene</button><button class="btn small quiet" data-act="ask-reset">Start over</button>`;
   const cards = p.rooms.map(r => `<button class="card" data-act="open-room" data-k="${esc(r.id)}"><span class="pic">${backdropHTML(r.bg)}</span><span class="meta"><b>${esc(r.name)}</b><span>${r.els.length} ${r.els.length === 1 ? 'thing' : 'things'} placed${r.auto ? ' · starts talking right away' : ''}</span></span></button>`).join('');
+  const publish = `<div class="publish">
+      <label class="field"><span>Name of your story</span><input type="text" id="story-title" data-in="story-title" value="${esc(p.title ?? '')}" placeholder="${esc(p.rooms[0]?.name ?? 'Untitled story')}"></label>
+      <div class="publishgo"><button class="btn play" data-act="make-game">Make a game file</button><p class="hint">One file with your whole game. Open it in any browser, or upload it to itch.io or a website so others can play.</p></div></div>`;
   return `<div class="side"><div class="maphead"><div><h2>Story map</h2><p class="hint">Every room in your story. Click one to work in it. Your story is kept in this browser; Save to file keeps a copy you can move or back up.</p></div><div class="row">${actions}</div></div>
+    ${publish}
     <div class="map">${cards}<button class="card new" data-act="new-room">+ New room</button></div></div>`;
 }
 
@@ -208,7 +214,7 @@ export function viewConvo(p: Project, r: Room, e: StoryElement, mode: ConvoMode,
   const who = e.kind === 'char' ? esc(e.name) : 'Narrator';
   return `<div class="work"><div class="mapwrap">${convoBar(mode)}<div class="paper">
       <div class="row">${inserts(p, r, e).map((x, i) => `<button class="btn small quiet" data-act="insert" data-k="${i}">+ ${x.label}</button>`).join('')}</div>
-      <textarea id="script" data-in="script" spellcheck="false" aria-label="What ${esc(e.name)} says" placeholder="${who}: Type the first line here.">${esc(e.script)}</textarea>
+      <div class="scriptbox"><pre class="gutter" id="gutter" aria-hidden="true"></pre><textarea id="script" data-in="script" spellcheck="false" aria-label="What ${esc(e.name)} says" placeholder="${who}: Type the first line here.">${esc(e.script)}</textarea></div>
       <p class="status" id="status" role="status"></p>
     </div></div>
     <aside class="side"><h2>What ${e.kind === 'char' ? `${esc(e.name)} says` : 'happens'}</h2>
@@ -248,14 +254,49 @@ export function scriptStatus(p: Project, r: Room, script: string): { text: strin
   return { text: reads + note, error: false, facts: s.facts };
 }
 
-export function viewLook(p: Project, r: Room): string {
+/** The look stage, with the on-screen display drawn from test values or examples. */
+export function lookStage(p: Project, r: Room, hudSel: string | null, facts: Record<string, unknown>): string {
   const L = p.look;
   const box = (L.choices ?? 'box') === 'box';
   const demo = box
     ? choicesHTML([{ text: 'Answers look like this' }, { text: 'And another one' }], false, 'box', { who: 'Mara', text: 'This is how a question and its answers look in your game.' })
     : choicesHTML([{ text: 'A choice looks like this' }, { text: 'And another one' }], false).replace('class="choices"', 'class="choices demo"')
       + sayHTML('Mara', 'This is how a line of dialogue looks in your game.', false);
-  return `<div class="work"><div>${stageHTML(r, { mode: 'look', look: L, game: demo, characters: p.characters })}</div><aside class="side"><h2>The look of your game</h2>
+  const sample: Record<string, FactValue> = {};
+  for (const w of p.hud ?? []) sample[w.fact] = (facts[w.fact] as FactValue | undefined) ?? (w.kind === 'meter' ? Math.round(w.max * 0.6) : 12);
+  return stageHTML(r, { mode: 'look', look: L, game: demo + hudHTML(p.hud, sample, { editable: true, selected: hudSel ?? undefined }), characters: p.characters });
+}
+
+function hudSection(p: Project, hudSel: string | null): string {
+  const list = (p.hud ?? []).map(w => {
+    const on = w.id === hudSel;
+    const head = `<button class="hudrow${on ? ' on' : ''}" data-act="hud-sel" data-k="${esc(w.id)}"><b>${w.kind === 'meter' ? 'Meter' : 'Number or word'}</b><span>${esc(w.text || w.fact)} · ${esc(w.fact)}</span></button>`;
+    if (!on) return head;
+    return `${head}<div class="hudedit">
+      <label class="field"><span>Story fact</span><input type="text" list="hud-facts" id="hud-fact" data-in="hud-fact" data-k="${esc(w.id)}" value="${esc(w.fact)}"></label>
+      <label class="field"><span>Words shown with it</span><input type="text" id="hud-text" data-in="hud-text" data-k="${esc(w.id)}" value="${esc(w.text)}" placeholder="For example: Affection"></label>
+      ${w.kind === 'meter' ? `<label class="field"><span>Full at</span><input type="number" id="hud-max" data-in="hud-max" data-k="${esc(w.id)}" value="${w.max}" min="1"></label>
+      <label class="field"><span>Width</span><input type="range" id="hud-w" data-in="hud-w" data-k="${esc(w.id)}" min="8" max="60" value="${w.w}"></label>` : ''}
+      <label class="check"><input type="checkbox" id="hud-hide" data-in="hud-hide" data-k="${esc(w.id)}"${w.hideUnset ? ' checked' : ''}><span>Hide until the story sets it</span></label>
+      <p class="hint">Drag it in the picture to place it.</p>
+      <button class="btn small danger" data-act="hud-remove" data-k="${esc(w.id)}">Remove</button></div>`;
+  }).join('');
+  return `<div class="field"><span>On-screen display</span>
+    <p class="hint">Show a story fact over the game all the time, such as affection as a meter or money as a number.</p>
+    <div class="row"><button class="btn small" data-act="hud-add" data-k="meter">+ Meter</button><button class="btn small" data-act="hud-add" data-k="label">+ Number or word</button></div>
+    <datalist id="hud-facts">${storyFacts(p).map(f => `<option value="${esc(f)}">`).join('')}</datalist>
+    <div class="hudlist">${list}</div></div>`;
+}
+
+export function viewLook(p: Project, r: Room, hudSel: string | null = null, facts: Record<string, unknown> = {}): string {
+  const L = p.look;
+  const box = (L.choices ?? 'box') === 'box';
+  const demo = box
+    ? choicesHTML([{ text: 'Answers look like this' }, { text: 'And another one' }], false, 'box', { who: 'Mara', text: 'This is how a question and its answers look in your game.' })
+    : choicesHTML([{ text: 'A choice looks like this' }, { text: 'And another one' }], false).replace('class="choices"', 'class="choices demo"')
+      + sayHTML('Mara', 'This is how a line of dialogue looks in your game.', false);
+  void demo;
+  return `<div class="work"><div id="lookstage">${lookStage(p, r, hudSel, facts)}</div><aside class="side"><h2>The look of your game</h2>
       <div class="field"><span>Theme</span><div class="row">${Object.entries(THEMES).map(([k, t]) => `<button class="btn small${L.theme === k ? ' ink' : ''}" data-act="theme" data-k="${k}" aria-pressed="${L.theme === k}">${t.name}</button>`).join('')}</div></div>
       <label class="field"><span>Typeface</span><select id="look-font" data-in="look-font">${Object.keys(FONTS).map(f => `<option${f === L.font ? ' selected' : ''}>${f}</option>`).join('')}</select></label>
       <label class="field"><span>Corners</span><input type="range" id="look-radius" data-in="look-radius" min="0" max="28" value="${L.radius}"></label>
@@ -264,9 +305,36 @@ export function viewLook(p: Project, r: Room): string {
         <button class="btn small${box ? ' ink' : ''}" data-act="look-choices" data-k="box" aria-pressed="${box}">In the dialogue box</button>
         <button class="btn small${box ? '' : ' ink'}" data-act="look-choices" data-k="center" aria-pressed="${!box}">In the middle</button></div></div>
       <p class="hint">Changes show in the picture as you make them, and apply to the whole game.</p>
+      ${hudSection(p, hudSel)}
       <button class="btn block" data-act="crumb" data-k="room">Done</button></aside></div>`;
 }
 
 export function viewPlay(): string {
   return `<div><div id="player"></div><div class="strip" id="strip"></div></div>`;
+}
+
+/* ---------- Checking the story ---------- */
+
+const LEVEL_WORDS = { error: 'Needs fixing', warning: 'Probably a mistake', note: 'Note' } as const;
+
+export function viewCheck(p: Project, problems: Problem[], test: { use: boolean; values: Record<string, string> }): string {
+  const list = problems.length
+    ? problems.map((x, i) => `<div class="prob ${x.level}"><div class="probhead"><span class="lvl">${LEVEL_WORDS[x.level]}</span><b>${esc(x.where)}</b></div><p>${esc(x.text)}</p><button class="btn small" data-act="goto-problem" data-k="${i}">Show</button></div>`).join('')
+    : '<p class="allgood">No problems found. Every door leads somewhere, every look exists, and every step can be reached.</p>';
+  const facts = storyFacts(p);
+  const rows = facts.map(f => {
+    const kind = factKind(p, f), v = test.values[f] ?? '';
+    const input = kind === 'yesno'
+      ? `<select id="tf-${esc(f)}" data-in="test-fact" data-k="${esc(f)}"><option value=""${v === '' ? ' selected' : ''}>not set</option><option value="yes"${v === 'yes' ? ' selected' : ''}>yes</option><option value="no"${v === 'no' ? ' selected' : ''}>no</option></select>`
+      : `<input type="${kind === 'number' ? 'number' : 'text'}" id="tf-${esc(f)}" data-in="test-fact" data-k="${esc(f)}" value="${esc(v)}" placeholder="not set">`;
+    return `<label class="tfact"><span>${esc(f)}</span>${input}</label>`;
+  }).join('');
+  return `<div class="work"><div class="side"><div class="maphead"><div><h2>Check your story</h2><p class="hint">Everything here would otherwise only show up while playing. Click Show to go to the step.</p></div></div>
+      <div class="probs">${list}</div></div>
+    <aside class="side"><h2>Test values</h2>
+      <p class="hint">Try the story with story facts already set, for example to test a line that needs affection 10. Players always start with every fact unset.</p>
+      ${facts.length ? `<label class="check"><input type="checkbox" id="test-use" data-in="test-use"${test.use ? ' checked' : ''}><span>Use these values when I press Play</span></label>
+      <div class="tfacts">${rows}</div>
+      <button class="btn small quiet" data-act="test-clear">Clear test values</button>` : '<p class="hint">Your story has no story facts yet.</p>'}
+    </aside></div>`;
 }

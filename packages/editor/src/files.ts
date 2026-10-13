@@ -3,7 +3,7 @@ import type { Project } from '@story-engine/engine-core';
 
 /** Downloads the whole project, images included, as one file. */
 export function saveToFile(project: Project): void {
-  const first = project.rooms[0]?.name ?? 'story';
+  const first = project.title?.trim() || project.rooms[0]?.name || 'story';
   const slug = first.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'story';
   const date = new Date().toISOString().slice(0, 10);
   const blob = new Blob([JSON.stringify(project, null, 1)], { type: 'application/json' });
