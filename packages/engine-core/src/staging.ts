@@ -1,4 +1,4 @@
-import type { Placement } from './types';
+import type { Idle, Placement } from './types';
 
 /** Named places on stage, by the x of a character's bottom centre in percent. */
 export const SPOTS: [string, number][] = [['far left', 15], ['left', 30], ['center', 50], ['right', 70], ['far right', 85]];
@@ -58,4 +58,24 @@ export function placeText(at: Placement): string {
 export function snapToSpot(x: number, within = 3): number {
   const near = SPOTS.find(([, sx]) => Math.abs(sx - x) <= within);
   return near ? near[1] : Math.round(x * 10) / 10;
+}
+
+/** Movements a character can repeat while standing. */
+export const IDLE_MOVES = ['breathe', 'sway', 'bob', 'float', 'bounce'] as const;
+
+/** Reads "sway", "bob strength 2 speed 4" or "none". Returns null when the words are not a movement. */
+export function parseIdle(text: string): Idle | null {
+  const m = text.trim().toLowerCase().match(/^([a-z]+)((?:\s+(?:strength\s+[1-5]|speed\s+[1-5]))*)$/);
+  if (!m) return null;
+  if (/^(none|nothing|off|still)$/.test(m[1])) return { move: 'none' };
+  if (!(IDLE_MOVES as readonly string[]).includes(m[1])) return null;
+  const out: Idle = { move: m[1] };
+  const st = m[2].match(/strength\s+([1-5])/), sp = m[2].match(/speed\s+([1-5])/);
+  if (st && st[1] !== '3') out.strength = Number(st[1]);
+  if (sp && sp[1] !== '3') out.speed = Number(sp[1]);
+  return out;
+}
+
+export function idleText(i: Idle): string {
+  return [i.move, i.strength && i.strength !== 3 ? `strength ${i.strength}` : '', i.speed && i.speed !== 3 ? `speed ${i.speed}` : ''].filter(Boolean).join(' ');
 }

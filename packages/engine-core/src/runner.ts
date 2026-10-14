@@ -97,6 +97,8 @@ export function createRunner(steps: Step[], facts: Facts, onStage?: (step: Stage
           case 'show':
           case 'move':
           case 'hide':
+          case 'mark':
+          case 'loop':
           case 'music': onStage?.(s); continue;
           case 'part':
           case 'note': continue;

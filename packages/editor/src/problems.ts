@@ -5,6 +5,7 @@
 import { storyFactNames, talkedFact, findRoomByName, getStep, parseScript, summarize, unreachableSteps, walkSteps, walkWithPaths, writeScript } from '@story-engine/engine-core';
 import type { FactValue, Project } from '@story-engine/engine-core';
 import { missingLook, stageText, unknownSpeaker } from './map';
+import { findMark } from '@story-engine/runtime';
 
 export interface Problem {
   /** error: the story will not play as written; warning: probably a mistake; note: worth a look. */
@@ -41,7 +42,7 @@ export function findProblems(p: Project): Problem[] {
           if (!findRoomByName(p, s.room)) out.push({ ...base, level: 'error', path, text: `"Go to ${s.room}": there is no room with that name.` });
         }
         if (s.t === 'say' && s.expr && missingLook(p, room, s.who, s.expr)) out.push({ ...base, level: 'warning', path, text: `${s.who} has no look called "${s.expr}", so the base picture shows.` });
-        if ((s.t === 'show' || s.t === 'move' || s.t === 'hide') && unknownSpeaker(ctx, s.who)) out.push({ ...base, level: 'error', path, text: `"${stageText(s)}": there is no character called ${s.who}.` });
+        if ((s.t === 'show' || s.t === 'move' || s.t === 'hide' || s.t === 'mark' || s.t === 'loop') && unknownSpeaker(ctx, s.who)) out.push({ ...base, level: 'error', path, text: `"${stageText(s)}": there is no character called ${s.who}.` });
         if (s.t === 'say' && unknownSpeaker(ctx, s.who)) out.push({ ...base, level: 'note', path, text: `"${s.who}" has no character, so this line is a voice without a picture.` });
       });
       for (const path of unreachableSteps(steps)) {
@@ -69,6 +70,9 @@ export function findProblems(p: Project): Problem[] {
     if (el.sound && !sounds.has(el.sound.toLowerCase())) out.push({ ...base, inRoom: true, level: 'warning', text: `The sound "${el.sound}" played on click is not among your sounds.` });
     walkWithPaths(parseScript(el.script).steps, (st, path) => {
       if (st.t === 'say' && st.sound && !sounds.has(st.sound.toLowerCase())) out.push({ ...base, level: 'warning', path, text: `The sound "${st.sound}" is not among your sounds. Add it on the Story map, or pick another.` });
+      for (const mk of st.t === 'say' ? st.marks ?? [] : st.t === 'mark' && st.mark ? [st.mark] : []) {
+        if (!findMark(p, mk)) out.push({ ...base, level: 'warning', path, text: `There is no mark called "${mk}". Add it under Marks on the Story map, or pick another.` });
+      }
       if (st.t === 'music' && st.track && !sounds.has(st.track.toLowerCase())) out.push({ ...base, level: 'warning', path, text: `The music "${st.track}" is not among your music. Add it on the Story map, or pick another.` });
     });
   }

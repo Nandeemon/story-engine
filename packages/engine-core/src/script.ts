@@ -1,5 +1,5 @@
 import type { CompareOp, Condition, Effect, FactValue, ParseResult, Placement, ScriptError, Step } from './types';
-import { lineFxText, parseLineFx, parsePlace, placeText } from './staging';
+import { idleText, lineFxText, parseIdle, parseLineFx, parsePlace, placeText } from './staging';
 
 /**
  * Writing mode: turns a conversation written like a script into steps, and back.
@@ -175,22 +175,30 @@ function parse(src: string, noteSources: boolean): ParseResult {
       } else if ((m = l.text.match(/^hide\s+(.+?)(?:\s+with\s+(.+?))?$/i)) && looksLikeName(m[1]) && !/[.!?]$/.test(l.text)) {
         pos++;
         steps.push(mark({ t: 'hide', who: m[1].trim(), fx: (m[2] ?? '').trim().toLowerCase() }, l));
+      } else if ((m = l.text.match(/^(un)?mark\s+(.+?)(?:\s+with\s+(.+?))?$/i)) && looksLikeName(m[2]) && (m[3] || m[1]) && !/[.!?]$/.test(l.text)) {
+        pos++;
+        steps.push(mark(m[1] ? { t: 'mark', who: m[2].trim(), mark: (m[3] ?? '').trim().toLowerCase(), off: true } : { t: 'mark', who: m[2].trim(), mark: m[3].trim().toLowerCase() }, l));
+      } else if ((m = l.text.match(/^loop\s+(.+?)\s+with\s+(.+?)$/i)) && looksLikeName(m[1]) && parseIdle(m[2])) {
+        pos++;
+        steps.push(mark({ t: 'loop', who: m[1].trim(), move: parseIdle(m[2])! }, l));
       } else if ((m = l.text.match(/^([^:"()]{1,40}?)\s*(?:\(([^)]+)\))?\s*:\s*(.+)$/))) {
         pos++;
         const who = m[1].trim();
         // "(sad, shake strength 4, sound laugh)": a look, a line effect and a sound, in any order.
         const parts = (m[2] ?? '').split(',').map(x => x.trim()).filter(Boolean);
         let fx: ReturnType<typeof parseLineFx> = null, sound = '';
-        const looks: string[] = [];
+        const looks: string[] = [], marks: string[] = [];
         for (const part of parts) {
           const f: ReturnType<typeof parseLineFx> = !fx ? parseLineFx(part) : null;
           const snd = part.match(/^sound\s+(.+)$/i);
-          if (f) fx = f; else if (snd && !sound) sound = snd[1].trim(); else looks.push(part);
+          const mk = part.match(/^mark\s+(.+)$/i);
+          if (f) fx = f; else if (snd && !sound) sound = snd[1].trim(); else if (mk) marks.push(mk[1].trim().toLowerCase()); else looks.push(part);
         }
         const expr = looks.join(', ');
         const say: Step = /^narration$/i.test(who) ? { t: 'say', who: '', expr: '', text: m[3] } : { t: 'say', who, expr, text: m[3] };
         if (fx && say.who) { say.fx = fx.fx; if (Object.keys(fx.opts).length) say.fxOpts = fx.opts; }
         if (sound) say.sound = sound;
+        if (marks.length && say.who) say.marks = marks;
         steps.push(mark(say, l));
       } else {
         pos++;
@@ -285,7 +293,8 @@ function headerOf(s: Step): string | null {
       const text = oneLine(s.text) || '...';
       const who = cleanName(s.who);
       const sound = s.sound ? `sound ${cleanName(s.sound).replace(/,/g, ' ')}` : '';
-      const paren = [cleanName(s.expr).replace(/,/g, ' '), s.fx && who ? lineFxText(s.fx, s.fxOpts) : '', sound].filter(Boolean).join(', ');
+      const marks = who ? (s.marks ?? []).map(x => `mark ${cleanName(x).replace(/,/g, ' ')}`) : [];
+      const paren = [cleanName(s.expr).replace(/,/g, ' '), s.fx && who ? lineFxText(s.fx, s.fxOpts) : '', ...marks, sound].filter(Boolean).join(', ');
       if (who) return `${who}${paren ? ` (${paren})` : ''}: ${text}`;
       if (sound) return `Narration (${sound}): ${text}`;
       return plainNarration(text) ? text : `Narration: ${text}`;
@@ -309,6 +318,8 @@ function headerOf(s: Step): string | null {
       return `Move ${cleanName(s.who)}${where ? ` to ${where}` : ''}${s.at.size !== undefined ? ` size ${s.at.size}` : ''}${flip}`;
     }
     case 'hide': return `Hide ${cleanName(s.who)}${s.fx ? ` with ${s.fx}` : ''}`;
+    case 'mark': return s.off ? `Unmark ${cleanName(s.who)}${s.mark ? ` with ${oneLine(s.mark)}` : ''}` : `Mark ${cleanName(s.who)} with ${oneLine(s.mark)}`;
+    case 'loop': return `Loop ${cleanName(s.who)} with ${idleText(s.move)}`;
     case 'music': return s.track ? `Music${s.once ? ' once' : ''}: ${oneLine(s.track)}` : 'Music: off';
   }
 }

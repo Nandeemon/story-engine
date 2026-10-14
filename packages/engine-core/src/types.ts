@@ -28,6 +28,8 @@ export interface SayStep {
   fxOpts?: { strength?: number; speed?: number; times?: number };
   /** A sound from the story's sounds, by name, played as the line appears. */
   sound?: string;
+  /** Marks (an anger sign, a sweat drop, a puff) on the speaker for this line only. */
+  marks?: string[];
 }
 
 /** Where a character stands on stage: x and y are the bottom centre in percent of the stage, size is height in percent. */
@@ -38,6 +40,12 @@ export interface ShowStep { t: 'show'; who: string; look: string; at: Placement;
 export interface MoveStep { t: 'move'; who: string; at: Placement }
 /** Take a character off stage. */
 export interface HideStep { t: 'hide'; who: string; fx: string }
+/** Put a mark on someone until it is taken off (off), or take all their marks off (off with no mark). */
+export interface MarkStep { t: 'mark'; who: string; mark: string; off?: boolean }
+/** How someone moves while standing, from here on: breathe, sway, bob, float, bounce, or none. */
+export interface LoopStep { t: 'loop'; who: string; move: Idle }
+/** A movement a character repeats while standing. Strength and speed run from 1 to 5 (3 is normal). */
+export interface Idle { move: string; strength?: number; speed?: number }
 export interface ChoiceOption { text: string; effects: Effect[]; steps: Step[] }
 export interface ChoiceStep { t: 'choice'; options: ChoiceOption[] }
 export interface IfStep { t: 'if'; cond: Condition; then: Step[]; else: Step[] }
@@ -54,8 +62,8 @@ export interface MusicStep { t: 'music'; track: string; once?: boolean }
 export interface NoteStep { t: 'note'; text: string }
 
 /** One step of a conversation. */
-export type Step = SayStep | ChoiceStep | IfStep | ChangeStep | DoorStep | EndStep | PartStep | JumpStep | NoteStep | ShowStep | MoveStep | HideStep | MusicStep;
-export type StageStep = ShowStep | MoveStep | HideStep;
+export type Step = SayStep | ChoiceStep | IfStep | ChangeStep | DoorStep | EndStep | PartStep | JumpStep | NoteStep | ShowStep | MoveStep | HideStep | MusicStep | MarkStep | LoopStep;
+export type StageStep = ShowStep | MoveStep | HideStep | MarkStep | LoopStep;
 
 export interface ScriptError {
   /** 1-based line number in the written script. */
@@ -129,6 +137,10 @@ export interface Character {
   about?: string;
   /** Story facts the author keeps track of for this character. */
   facts?: FactDef[];
+  /** How the character moves while standing, wherever they are placed. */
+  idle?: Idle;
+  /** Where marks sit on this character, by mark name, when moved from the mark's own spot. */
+  markAt?: Record<string, MarkSpot>;
   /** The base picture, shown as the look called "default". */
   base: string;
   looks: CharacterLook[];
@@ -158,6 +170,8 @@ export interface StoryElement {
   once?: 'stay' | 'hide';
   /** A sound from the story's sounds, by name, played when the player clicks it. */
   sound?: string;
+  /** For characters: how they move while standing; the character's own setting when left out. */
+  idle?: Idle;
   /** Starting expression or look for characters. */
   expr?: string;
   /** How this element's conversation opens: other characters step aside (default) or the room stays. */
@@ -226,6 +240,24 @@ export interface HudWidget {
   hideUnset?: boolean;
 }
 
+/** Where a mark sits on a character: its centre in percent of the character's picture, and its height in percent of it. */
+export interface MarkSpot { x: number; y: number; size: number }
+
+/**
+ * A small picture shown on a character, such as an anger sign or a puff of air:
+ * a starter mark (preset) or the author's own picture (a GIF animates by itself),
+ * with an animation and the spot it takes on a character.
+ */
+export interface MarkDef extends MarkSpot {
+  id: string;
+  name: string;
+  preset?: string;
+  img?: string;
+  anim: 'none' | 'pulse' | 'float' | 'drift' | 'bob' | 'spin' | 'pop' | 'shake' | 'drip' | 'fade';
+  /** 1 to 5, 3 is normal. */
+  speed?: number;
+}
+
 /** A sound the author uploaded, played by name. */
 export interface Sound {
   id: string;
@@ -251,4 +283,6 @@ export interface Project {
   hud?: HudWidget[];
   /** Sounds the author uploaded. */
   sounds?: Sound[];
+  /** Marks the author added, or starter marks they changed. */
+  marks?: MarkDef[];
 }

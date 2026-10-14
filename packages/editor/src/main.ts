@@ -1,8 +1,8 @@
 import '@story-engine/runtime/game.css';
 import './editor.css';
-import { walkSteps, characterOf, cleanLookName, cleanSoundName, factName, renameSoundInScript, toValue, createProject, createRoom, findLook, findRoomByName, newId, normalizeProject, parseScript, renameLookInScript, renameRoomInScript, renameSpeakerInScript, uniqueLookName, writeScript, getStep } from '@story-engine/engine-core';
-import type { Character, CharacterLook, FactDef, Facts, Project, Room, StoryElement } from '@story-engine/engine-core';
-import { BACKDROPS, CHARACTERS, OBJECTS, backdropHTML, createPlayer, elementArt, esc, fxVars, lookStyle, sayHTML } from '@story-engine/runtime';
+import { walkSteps, characterOf, cleanLookName, cleanMarkName, cleanSoundName, factName, renameMarkInScript, renameSoundInScript, toValue, createProject, createRoom, findLook, findRoomByName, newId, normalizeProject, parseScript, renameLookInScript, renameRoomInScript, renameSpeakerInScript, uniqueLookName, writeScript, getStep } from '@story-engine/engine-core';
+import type { Character, CharacterLook, FactDef, Facts, Idle, MarkDef, Project, Room, StoryElement } from '@story-engine/engine-core';
+import { BACKDROPS, CHARACTERS, OBJECTS, STARTER_MARKS, findMark, backdropHTML, createPlayer, elementArt, esc, fxVars, lookStyle, sayHTML } from '@story-engine/runtime';
 import type { Player, PlayState } from '@story-engine/runtime';
 import { addStory, deleteStory, duplicateStory, listStories, loadStory, sampleProject, saveStory, whenSaved } from './store';
 import type { StoryInfo } from './store';
@@ -522,7 +522,7 @@ let lookReturn: { elId: string | null; mapSel: string | null } | null = null;
 let lookCompare: 'see-through' | 'difference' = 'see-through';
 
 /** Actions that never change the project, so they are not recorded for Undo. */
-const NOT_RECORDED = new Set(['music-add', 'cast-sound-add', 'sound-add', 'sound-play', 'cast', 'cast-open', 'cast-back', 'cast-new', 'cast-promote', 'cast-add-looks', 'cast-goto-room', 'cast-goto-convo', 'fx-try', 'scene-toggle', 'home', 'open-story', 'new-story', 'new-sample', 'import-story', 'duplicate-story', 'delete-story', 'test-off', 'look-tab', 'make-game', 'hud-sel', 'play-here', 'check', 'goto-problem', 'test-clear', 'once-lineup', 'look-compare', 'undo', 'redo', 'save-file', 'open-file', 'upload', 'play', 'play-convo', 'stop', 'convo-mode', 'look', 'crumb', 'add-looks', 'look-replace', 'once-picture', 'look-open', 'look-done']);
+const NOT_RECORDED = new Set(['mark-add', 'music-add', 'cast-sound-add', 'sound-add', 'sound-play', 'cast', 'cast-open', 'cast-back', 'cast-new', 'cast-promote', 'cast-add-looks', 'cast-goto-room', 'cast-goto-convo', 'fx-try', 'scene-toggle', 'home', 'open-story', 'new-story', 'new-sample', 'import-story', 'duplicate-story', 'delete-story', 'test-off', 'look-tab', 'make-game', 'hud-sel', 'play-here', 'check', 'goto-problem', 'test-clear', 'once-lineup', 'look-compare', 'undo', 'redo', 'save-file', 'open-file', 'upload', 'play', 'play-convo', 'stop', 'convo-mode', 'look', 'crumb', 'add-looks', 'look-replace', 'once-picture', 'look-open', 'look-done']);
 
 const actions: Record<string, (k: string) => void> = {
   crumb(k) {
@@ -621,6 +621,14 @@ const actions: Record<string, (k: string) => void> = {
     refreshMap();
   },
   'fx-try'() { tryEffect(); },
+  'mark-add'() { const input = $<HTMLInputElement>('#markfile')!; input.value = ''; input.click(); },
+  'mark-reset'(k) { project.marks = project.marks?.filter(m => m.name !== k); if (!project.marks?.length) delete project.marks; for (const c of project.characters) if (c.markAt) delete c.markAt[k]; save(); render(); },
+  'mark-delete'(k) {
+    project.marks = project.marks?.filter(m => m.name !== k);
+    if (!project.marks?.length) delete project.marks;
+    for (const r of project.rooms) for (const e of r.els) e.script = renameMarkInScript(e.script, k, '');
+    save(); render();
+  },
   'sound-add'() { pickSound(() => undefined); },
   'sound-play'(k) { const x = project.sounds?.find(y => y.id === k); if (x) previewSound(x.name, true); },
   'music-add'() { pickSound(() => undefined, null, true); },
@@ -870,6 +878,49 @@ $('#charfile')!.addEventListener('change', async ev => {
   record(before);
 });
 
+/* ---------- Marks ---------- */
+
+/** The project's own copy of a mark, made from the starter mark the first time it is changed. */
+function ownMark(name: string): MarkDef | undefined {
+  const own = project.marks?.find(m => m.name === name);
+  if (own) return own;
+  const base = findMark(project, name);
+  if (!base) return undefined;
+  project.marks ??= [];
+  const copy = { ...base, id: newId() };
+  project.marks.push(copy);
+  return copy;
+}
+
+$('#markfile')!.addEventListener('change', ev => {
+  const f = (ev.target as HTMLInputElement).files?.[0];
+  if (!f) return;
+  if (f.size > 2 * 1024 * 1024) { toast('That picture is larger than 2 MB. Marks are small: try a smaller GIF or PNG.'); return; }
+  const reader = new FileReader();
+  reader.onload = () => {
+    const before = snapshot();
+    project.marks ??= [];
+    let name = cleanMarkName(f.name), i = 2;
+    const base = name;
+    while (findMark(project, name)) name = `${base} ${i++}`;
+    // Kept as it came, so a GIF keeps its animation.
+    project.marks.push({ id: newId(), name, img: String(reader.result), anim: 'none', x: 66, y: 8, size: 10 });
+    save(); record(before); render();
+    toast(`Added the mark "${name}". Pick it in a line, then drag it into place in the scene.`);
+  };
+  reader.readAsDataURL(f);
+});
+
+/** Reads a standing movement from its pick list and sliders. */
+function idleFrom(prefix: string, cur: Idle | undefined, field: string, value: string): Idle | undefined {
+  if (field === prefix) return value ? (value === 'none' ? { move: 'none' } : { ...(cur ?? {}), move: value }) : undefined;
+  if (!cur) return cur;
+  const key = field.slice(prefix.length + 1) as 'strength' | 'speed';
+  const next = { ...cur };
+  if (Number(value) === 3) delete next[key]; else next[key] = Number(value);
+  return next;
+}
+
 /* ---------- Sounds ---------- */
 
 let soundDone: ((name: string) => void) | null = null;
@@ -1034,6 +1085,63 @@ document.addEventListener('pointerup', () => {
   pointerDown = false;
   setTimeout(() => { if (pendingRefresh) refreshMap(); }, 0);
 }, true);
+
+/* Dragging a mark in the scene moves it on that character (or for everyone, on a starter figure); the wheel resizes it. */
+let markDrag: { node: HTMLElement; box: DOMRect; name: string; who: string; before: string; x: number; y: number } | null = null;
+function markTarget(who: string, name: string): { set(at: { x?: number; y?: number; size?: number }): void; size: number } | null {
+  const def = findMark(project, name);
+  if (!def) return null;
+  const c = project.characters.find(x => x.name.trim().toLowerCase() === who.trim().toLowerCase());
+  const cur = c?.markAt?.[name] ?? { x: def.x, y: def.y, size: def.size };
+  return {
+    size: cur.size,
+    set(at) {
+      const next = { ...cur, ...at };
+      if (c) { c.markAt ??= {}; c.markAt[name] = next; } else { const m = ownMark(name); if (m) Object.assign(m, next); }
+    }
+  };
+}
+document.addEventListener('pointerdown', ev => {
+  const node = (ev.target as HTMLElement).closest<HTMLElement>('.mpreview [data-mark]');
+  if (!node || ev.button !== 0) return;
+  const art = node.closest<HTMLElement>('.mv');
+  if (!art) return;
+  markDrag = { node, box: art.getBoundingClientRect(), name: node.dataset.mark ?? '', who: node.dataset.who ?? '', before: snapshot(), x: 0, y: 0 };
+  try { node.setPointerCapture(ev.pointerId); } catch { /* not supported */ }
+  ev.preventDefault();
+  ev.stopPropagation();
+}, true);
+document.addEventListener('pointermove', ev => {
+  const d = markDrag;
+  if (!d) return;
+  const flipped = !!d.node.closest('.el.flip');
+  const fx = (ev.clientX - d.box.left) / d.box.width * 100;
+  d.x = Math.round((flipped ? 100 - fx : fx) * 10) / 10;
+  d.y = Math.round((ev.clientY - d.box.top) / d.box.height * 1000) / 10;
+  d.node.style.left = `${d.x}%`;
+  d.node.style.top = `${d.y}%`;
+});
+document.addEventListener('pointerup', () => {
+  const d = markDrag;
+  markDrag = null;
+  if (!d || (!d.x && !d.y)) return;
+  markTarget(d.who, d.name)?.set({ x: d.x, y: d.y });
+  save(); record(d.before); refreshMap();
+});
+let wheelBefore: string | null = null, wheelTimer = 0;
+document.addEventListener('wheel', ev => {
+  const node = (ev.target as HTMLElement).closest<HTMLElement>('.mpreview [data-mark]');
+  if (!node) return;
+  ev.preventDefault();
+  const t = markTarget(node.dataset.who ?? '', node.dataset.mark ?? '');
+  if (!t) return;
+  wheelBefore ??= snapshot();
+  const size = Math.round(Math.max(1, Math.min(100, t.size * (ev.deltaY < 0 ? 1.08 : 1 / 1.08))) * 10) / 10;
+  t.set({ size });
+  node.style.height = `${size}%`;
+  clearTimeout(wheelTimer);
+  wheelTimer = window.setTimeout(() => { save(); if (wheelBefore) record(wheelBefore); wheelBefore = null; }, 400);
+}, { passive: false });
 
 /* Dragging someone in the line preview places them for that line. */
 let previewDrag: { node: HTMLElement; box: DOMRect; who: string; dx: number; dy: number; x: number; y: number; moved: boolean } | null = null;
@@ -1272,6 +1380,24 @@ document.addEventListener('input', ev => {
     case 'look-scale': { const l = editedLook(); if (l && e) { l.scale = Number(t.value); if (node) node.innerHTML = elementArt(e, undefined, project.characters, l.id); } break; }
     case 'room-name': { room().name = t.value; const c = $('#crumbs [aria-current]'); if (c) c.textContent = t.value; break; }
     case 'room-auto': { const r = room(); r.auto = !!t.value; if (t.value) r.autoEl = t.value; else { delete r.autoEl; delete r.autoOnce; } save(); render(); return; }
+    case 'mark-anim': { const m = ownMark(t.dataset.k ?? ''); if (m) { m.anim = t.value as MarkDef['anim']; save(); render(); } return; }
+    case 'mark-speed': { const m = ownMark(t.dataset.k ?? ''); if (m) { const n = Number(t.value); if (n === 3) delete m.speed; else m.speed = n; } break; }
+    case 'mark-size': { const m = ownMark(t.dataset.k ?? ''); if (m) m.size = Number(t.value); break; }
+    case 'el-idle': case 'el-idle-strength': case 'el-idle-speed': {
+      if (!e) break;
+      const next = idleFrom('el-idle', e.idle ?? characterOf(project, e)?.idle, k, t.value);
+      if (next) e.idle = next; else delete e.idle;
+      if (k === 'el-idle') { save(); render(); return; }
+      break;
+    }
+    case 'cast-idle': case 'cast-idle-strength': case 'cast-idle-speed': {
+      const c = project.characters.find(x => x.id === castSel);
+      if (!c) break;
+      const next = idleFrom('cast-idle', c.idle, k, t.value);
+      if (next) c.idle = next; else delete c.idle;
+      if (k === 'cast-idle') { save(); render(); return; }
+      break;
+    }
     case 'sound-volume': {
       const x = project.sounds?.find(y => y.id === t.dataset.k);
       if (x) { x.volume = Number(t.value); if (x.volume === 100) delete x.volume; if (previewAudio && previewing === x.id) previewAudio.volume = Number(t.value) / 100; }
@@ -1372,6 +1498,19 @@ document.addEventListener('change', ev => {
     if (n) toast(`Updated "Go to" in ${n} conversation${n === 1 ? '' : 's'}`);
     renameFrom = room().name;
     save();
+  }
+  if (t.dataset.in === 'mark-speed' || t.dataset.in === 'mark-size') { save(); render(); }
+  if (t.dataset.in === 'mark-name') {
+    const m = project.marks?.find(x => x.name === t.dataset.k);
+    if (m) {
+      let name = cleanMarkName(t.value || m.name);
+      if (name !== m.name && (findMark(project, name) || STARTER_MARKS[name])) name = m.name;
+      const old = m.name;
+      m.name = name;
+      for (const r of project.rooms) for (const e of r.els) e.script = renameMarkInScript(e.script, old, name);
+      for (const c of project.characters) if (c.markAt?.[old]) { c.markAt[name] = c.markAt[old]; delete c.markAt[old]; }
+      save(); render();
+    }
   }
   if (t.dataset.in === 'sound-volume') {
     const x = project.sounds?.find(y => y.id === t.dataset.k);

@@ -1,5 +1,5 @@
-import type { Backdrop, Character, CharacterLook, CompareOp, Condition, FactDef, FactValue, Facts, HudWidget, Look, Project, Room, Sound, StoryElement } from './types';
-import { isLineEffect } from './staging';
+import type { Idle, MarkDef, MarkSpot, Backdrop, Character, CharacterLook, CompareOp, Condition, FactDef, FactValue, Facts, HudWidget, Look, Project, Room, Sound, StoryElement } from './types';
+import { IDLE_MOVES, isLineEffect } from './staging';
 import { renameLookInScript } from './refs';
 
 export const DEFAULT_LOOK: Look = { theme: 'velvet', font: 'Lora', radius: 14, size: 2 };
@@ -26,6 +26,25 @@ const str = (v: unknown, fallback: string): string => (typeof v === 'string' ? v
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 const hex = (v: unknown): boolean => typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v);
+
+function normalizeIdle(raw: unknown): Idle | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const i = raw as Record<string, unknown>;
+  const move = str(i.move, '');
+  if (move !== 'none' && !(IDLE_MOVES as readonly string[]).includes(move)) return undefined;
+  const lvl = (v: unknown) => typeof v === 'number' && v >= 1 && v <= 5 && v !== 3 ? Math.round(v) : undefined;
+  return { move, ...(lvl(i.strength) ? { strength: lvl(i.strength) } : {}), ...(lvl(i.speed) ? { speed: lvl(i.speed) } : {}) };
+}
+function normalizeSpot(raw: unknown, fallback: MarkSpot): MarkSpot {
+  const o = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+  return { x: clamp(num(o.x, fallback.x), -50, 150), y: clamp(num(o.y, fallback.y), -50, 150), size: clamp(num(o.size, fallback.size), 1, 100) };
+}
+const ANIMS: MarkDef['anim'][] = ['none', 'pulse', 'float', 'drift', 'bob', 'spin', 'pop', 'shake', 'drip', 'fade'];
+
+/** A mark name: lower case, without characters that would break "(mark anger)" in a line. */
+export function cleanMarkName(name: string): string {
+  return name.replace(/\.[a-z0-9]{2,4}$/i, '').replace(/[():,"_]/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase().slice(0, 30) || 'mark';
+}
 
 const isValue = (v: unknown): v is FactValue => typeof v === 'number' || typeof v === 'boolean' || typeof v === 'string';
 function normalizeFacts(raw: unknown): FactDef[] {
@@ -105,6 +124,7 @@ export function normalizeProject(raw: unknown): Project | null {
       y: num(e.y, 98),
       size: num(e.size, 50),
       ...(e.kind === 'area' ? { w: clamp(num(e.w, 20), 1, 100) } : {}),
+      ...(e.kind === 'char' && normalizeIdle(e.idle) ? { idle: normalizeIdle(e.idle) } : {}),
       ...(normalizeCondition(e.cond) ? { cond: normalizeCondition(e.cond) } : {}),
       ...(e.once === 'stay' || e.once === 'hide' ? { once: e.once } : {}),
       ...(typeof e.sound === 'string' && e.sound ? { sound: e.sound } : {}),
@@ -135,7 +155,10 @@ export function normalizeProject(raw: unknown): Project | null {
           dx: num(l.dx, 0), dy: num(l.dy, 0), scale: num(l.scale, 1), ...(l.once === true ? { once: true } : {}),
           ...(typeof l.sound === 'string' && l.sound ? { sound: l.sound } : {})
         })),
-      ...(normalizeFacts(c.facts).length ? { facts: normalizeFacts(c.facts) } : {})
+      ...(normalizeFacts(c.facts).length ? { facts: normalizeFacts(c.facts) } : {}),
+      ...(normalizeIdle(c.idle) ? { idle: normalizeIdle(c.idle) } : {}),
+      ...(c.markAt && typeof c.markAt === 'object' && Object.keys(c.markAt).length
+        ? { markAt: Object.fromEntries(Object.entries(c.markAt as Record<string, unknown>).map(([k, v]) => [cleanMarkName(k), normalizeSpot(v, { x: 50, y: 10, size: 10 })])) } : {})
     }));
   // A look whose name is now an effect word was renamed above: its lines follow.
   for (const c of characters) for (const l of c.looks) {
@@ -168,6 +191,13 @@ export function normalizeProject(raw: unknown): Project | null {
     .map((x: Record<string, unknown>) => ({ id: str(x.id, newId()), name: cleanSoundName(str(x.name, 'sound')), data: x.data as string, ...(typeof x.owner === 'string' && characters.some(c => c.id === x.owner) ? { owner: x.owner } : {}),
       ...(typeof x.volume === 'number' && x.volume !== 100 ? { volume: clamp(Math.round(x.volume), 0, 100) } : {}),
       ...(x.music === true ? { music: true } : {}) }));
+  const marks: MarkDef[] = (Array.isArray(r.marks) ? r.marks : []).filter(x => x && typeof x === 'object').map((x: Record<string, unknown>) => ({
+    id: str(x.id, newId()), name: cleanMarkName(str(x.name, 'mark')),
+    ...(typeof x.preset === 'string' ? { preset: x.preset } : {}), ...(typeof x.img === 'string' ? { img: x.img } : {}),
+    anim: ANIMS.includes(x.anim as MarkDef['anim']) ? x.anim as MarkDef['anim'] : 'none',
+    ...(typeof x.speed === 'number' && x.speed >= 1 && x.speed <= 5 && x.speed !== 3 ? { speed: Math.round(x.speed) } : {}),
+    ...normalizeSpot(x, { x: 50, y: 10, size: 10 })
+  })).filter(m => m.preset || m.img);
   return {
     version: 1,
     ...(typeof r.title === 'string' && r.title.trim() ? { title: r.title.trim().slice(0, 80) } : {}),
@@ -175,6 +205,7 @@ export function normalizeProject(raw: unknown): Project | null {
     characters,
     ...(hud.length ? { hud } : {}),
     ...(sounds.length ? { sounds } : {}),
+    ...(marks.length ? { marks } : {}),
     look: {
       theme: str(look.theme, DEFAULT_LOOK.theme),
       font: str(look.font, DEFAULT_LOOK.font),
@@ -206,7 +237,7 @@ export function cleanSoundName(name: string): string {
 /** Look names sit inside "Lin (happy): ..." in the script, so they cannot hold ( ) : , or quotes, or be an effect word. */
 export function cleanLookName(name: string): string {
   const n = name.replace(/[():,"]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 30) || 'look';
-  return isLineEffect(n) || /^sound\s/i.test(n) ? `${n} look` : n;
+  return isLineEffect(n) || /^(sound|mark)\s/i.test(n) ? `${n} look` : n;
 }
 
 export function characterOf(project: Project, el: StoryElement): Character | undefined {

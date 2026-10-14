@@ -209,3 +209,17 @@ describe('music', () => {
     expect(writeScript(steps)).toBe('Music once: rain theme\nMusic once: sting\nMusic: off');
   });
 });
+
+describe('marks and loops', () => {
+  it('reads and writes marks on lines and as steps', () => {
+    const src = 'Mara (angry, mark anger, mark sweat): What?\nMark Mara with puff\nUnmark Mara with puff\nUnmark Mara\nLoop Mara with sway speed 4\nLoop Mara with none\nMark my words.';
+    const { steps, errors } = parseScript(src);
+    expect(errors).toEqual([]);
+    expect(steps[0]).toMatchObject({ t: 'say', expr: 'angry', marks: ['anger', 'sweat'] });
+    expect(steps.slice(1, 6)).toEqual([
+      { t: 'mark', who: 'Mara', mark: 'puff' }, { t: 'mark', who: 'Mara', mark: 'puff', off: true }, { t: 'mark', who: 'Mara', mark: '', off: true },
+      { t: 'loop', who: 'Mara', move: { move: 'sway', speed: 4 } }, { t: 'loop', who: 'Mara', move: { move: 'none' } }]);
+    expect(steps[6]).toMatchObject({ t: 'say', who: '', text: 'Mark my words.' });
+    expect(writeScript(steps)).toBe(src);
+  });
+});

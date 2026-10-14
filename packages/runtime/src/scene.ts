@@ -4,7 +4,8 @@
  * functions, so the preview shows what the player will see.
  */
 import { findLook, testCondition, walkSteps } from '@story-engine/engine-core';
-import type { Character, Facts, FxOptions, Look, Placement, Project, Room, Step, StoryElement } from '@story-engine/engine-core';
+import type { Facts, FxOptions, Idle, Look, Placement, Project, Room, Step, StoryElement } from '@story-engine/engine-core';
+import { findMark, markHTML } from './marks';
 import { backdropHTML, elementArt, lookStyle } from './stage';
 import { esc } from './art';
 
@@ -29,6 +30,11 @@ export interface StagedChar {
   fx: string;
   /** How a line effect plays. */
   fxOpts?: FxOptions;
+  /** Marks that stay until taken off, and marks for the current line only. */
+  marks: string[];
+  lineMarks: string[];
+  /** How they move while standing; the character's own setting when not set. */
+  idle?: Idle;
 }
 
 /** Where the player is in the story beyond facts: conversations had and rooms visited. */
@@ -57,10 +63,10 @@ const EXIT: Record<string, string> = { fade: 'out-fade', 'slide to left': 'out-l
 function castOf(steps: Step[]): Set<string> {
   const first = new Map<string, string>();
   walkSteps(steps, s => {
-    const who = s.t === 'say' || s.t === 'show' || s.t === 'move' || s.t === 'hide' ? lower(s.who) : '';
+    const who = s.t === 'say' || s.t === 'show' || s.t === 'move' || s.t === 'hide' || s.t === 'mark' || s.t === 'loop' ? lower(s.who) : '';
     if (who && !first.has(who)) first.set(who, s.t);
   });
-  return new Set([...first].filter(([, t]) => t === 'say' || t === 'move').map(([name]) => name));
+  return new Set([...first].filter(([, t]) => t === 'say' || t === 'move' || t === 'mark' || t === 'loop').map(([name]) => name));
 }
 
 /**
@@ -77,7 +83,7 @@ export function startScene(room: Room, owner: StoryElement, steps: Step[], progr
   return {
     chars: room.els.filter(e => e.kind === 'char' && (e === owner || present(e, progress))).map(e => ({
       key: e.id, name: e.name, elId: e.id, characterId: e.characterId, preset: e.preset, img: e.img,
-      x: e.x, y: e.y, size: e.size, flip: false, look: e.expr ?? '', lineLook: '',
+      x: e.x, y: e.y, size: e.size, flip: false, look: e.expr ?? '', lineLook: '', marks: [], lineMarks: [], idle: e.idle,
       visible: aside ? cast.has(lower(e.name)) : !(entering.has(lower(e.name)) && !cast.has(lower(e.name))), fx: ''
     }))
   };
@@ -88,7 +94,7 @@ export function roomScene(room: Room, progress?: Progress): Scene {
   return {
     chars: room.els.filter(e => e.kind === 'char' && present(e, progress)).map(e => ({
       key: e.id, name: e.name, elId: e.id, characterId: e.characterId, preset: e.preset, img: e.img,
-      x: e.x, y: e.y, size: e.size, flip: false, look: e.expr ?? '', lineLook: '', visible: true, fx: ''
+      x: e.x, y: e.y, size: e.size, flip: false, look: e.expr ?? '', lineLook: '', marks: [], lineMarks: [], idle: e.idle, visible: true, fx: ''
     }))
   };
 }
@@ -110,8 +116,8 @@ function cast(scene: Scene, project: Project, who: string): StagedChar | undefin
   const elsewhere = character ? undefined : project.rooms.flatMap(r => r.els).find(e => e.kind === 'char' && lower(e.name) === key);
   if (!character && !elsewhere) return undefined;
   const c: StagedChar = character
-    ? { key: `c:${character.id}`, name: character.name, characterId: character.id, x: freeSpot(scene), y: 98, size, flip: false, look: '', lineLook: '', visible: false, fx: '' }
-    : { key: `e:${elsewhere!.id}`, name: elsewhere!.name, preset: elsewhere!.preset, characterId: elsewhere!.characterId, img: elsewhere!.img, x: freeSpot(scene), y: 98, size: elsewhere!.size || size, flip: false, look: elsewhere!.expr ?? '', lineLook: '', visible: false, fx: '' };
+    ? { key: `c:${character.id}`, name: character.name, characterId: character.id, x: freeSpot(scene), y: 98, size, flip: false, look: '', lineLook: '', marks: [], lineMarks: [], visible: false, fx: '' }
+    : { key: `e:${elsewhere!.id}`, name: elsewhere!.name, preset: elsewhere!.preset, characterId: elsewhere!.characterId, img: elsewhere!.img, x: freeSpot(scene), y: 98, size: elsewhere!.size || size, flip: false, look: elsewhere!.expr ?? '', lineLook: '', marks: [], lineMarks: [], idle: elsewhere!.idle, visible: false, fx: '' };
   scene.chars.push(c);
   return c;
 }
@@ -131,7 +137,7 @@ function enter(c: StagedChar, fx = 'in-fade'): void {
 
 /** Clears what belongs to one moment only: effects and pictures for a single line. */
 export function nextMoment(scene: Scene): void {
-  for (const c of scene.chars) { c.fx = ''; c.fxOpts = undefined; c.lineLook = ''; }
+  for (const c of scene.chars) { c.fx = ''; c.fxOpts = undefined; c.lineLook = ''; c.lineMarks = []; }
 }
 
 /** Applies one step to the scene. Lines bring their speaker on stage if needed. */
@@ -153,6 +159,19 @@ export function applyToScene(scene: Scene, step: Step, project: Project): void {
       enter(c);
       return;
     }
+    case 'mark': {
+      const c = cast(scene, project, step.who);
+      if (!c) return;
+      const key = lower(step.mark);
+      if (step.off) c.marks = key ? c.marks.filter(m => m !== key) : [];
+      else if (key && !c.marks.includes(key)) c.marks.push(key);
+      return;
+    }
+    case 'loop': {
+      const c = cast(scene, project, step.who);
+      if (c) c.idle = step.move;
+      return;
+    }
     case 'hide': {
       const c = scene.chars.find(x => lower(x.name) === lower(step.who));
       if (!c || !c.visible) return;
@@ -170,6 +189,7 @@ export function applyToScene(scene: Scene, step: Step, project: Project): void {
         else c.look = step.expr;
       }
       if (step.fx) { c.fx = step.fx; c.fxOpts = step.fxOpts; }
+      if (step.marks?.length) c.lineMarks = step.marks.map(lower);
       return;
     }
   }
@@ -180,8 +200,23 @@ function asElement(c: StagedChar): StoryElement {
   return { id: c.key, kind: 'char', name: c.name, preset: c.preset, characterId: c.characterId, img: c.img, x: c.x, y: c.y, size: c.size, expr: c.look, script: '' };
 }
 
-export function staged(c: StagedChar, characters: Character[]): string {
-  return elementArt(asElement(c), c.lineLook || c.look || undefined, characters);
+/**
+ * A staged character's picture: the art, its marks on top, wrapped so a standing
+ * movement (sway, bob) can play without getting in the way of line effects.
+ */
+export function staged(c: StagedChar, project: Project, opts: { editable?: boolean } = {}): string {
+  const character = c.characterId ? project.characters.find(x => x.id === c.characterId) : undefined;
+  const idle = c.idle ?? character?.idle;
+  const names = [...new Set([...c.marks, ...c.lineMarks])];
+  const marks = names.map(n => findMark(project, n)).filter(Boolean).map(d => markHTML(d!, character, opts.editable ? { who: c.name } : {})).join('');
+  const move = idle && idle.move !== 'none' ? ` idle-${idle.move}` : '';
+  const vars = move ? ` style="--idk:${((idle!.strength ?? 3) / 3).toFixed(2)};--idd:${[1.8, 1.35, 1, 0.72, 0.5][(idle!.speed ?? 3) - 1]}"` : '';
+  return `<span class="mv${move}"${vars}>${elementArt(asElement(c), c.lineLook || c.look || undefined, project.characters)}${marks}</span>`;
+}
+
+/** What a staged character looks like right now, so the player redraws only when it changes. */
+export function stagedKey(c: StagedChar): string {
+  return [c.characterId ?? c.preset ?? '', c.lineLook || c.look, c.marks.join(','), c.lineMarks.join(','), c.idle ? `${c.idle.move}${c.idle.strength ?? ''}${c.idle.speed ?? ''}` : ''].join('|');
 }
 
 /** CSS settings for a line effect: strength, speed and repeats. */
@@ -204,7 +239,7 @@ export function sceneHTML(project: Project, room: Room, scene: Scene, look: Look
   const chars = scene.chars.filter(c => c.visible).map(c => {
     const a = stagedAttrs(c);
     const focus = opts.focus && lower(opts.focus) === lower(c.name) ? ' focus' : '';
-    return `<span class="${a.cls}${focus}${opts.draggable ? ' drag' : ''}" data-who="${esc(c.name)}" style="${a.style}"><span class="art">${staged(c, project.characters)}</span></span>`;
+    return `<span class="${a.cls}${focus}${opts.draggable ? ' drag' : ''}" data-who="${esc(c.name)}" style="${a.style}"><span class="art">${staged(c, project, { editable: opts.draggable })}</span></span>`;
   }).join('');
   return `<div class="stage look" data-stage style="${lookStyle(look)}"><div class="bg">${backdropHTML(room.bg)}</div>${objects}${chars}<div class="game">${game}</div></div>`;
 }

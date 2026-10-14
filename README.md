@@ -45,6 +45,12 @@ In **Look**, under On-screen display, add a **Meter** (a bar, such as affection 
 - **Once:** a conversation can happen every time, or once, after which the thing cannot be clicked or is gone.
 - **When the player enters:** a room can start a conversation straight away, on every visit or only the first.
 
+## Marks and movement
+
+**Marks** are small pictures on a character: twelve starter marks (anger, sweat, puff, hearts, sparkle, shock, question, music note, sleepy, gloom, blush, tears), each animated (pulses, floats up, glides out, drips down…), and your own pictures, where a GIF animates by itself. Pick marks for one line in the line's panel (`Mara (angry, mark anger): …`), or keep one on with **Put a mark on someone** (`Mark Mara with puff`, `Unmark Mara`). Drag a mark in the scene to move it on that character, and use the wheel over it to resize it. The Story map lists the marks, to change their animation, speed and size.
+
+Characters can **move while standing**: breathe, sway, bob, float or bounce, with strength and speed. Set it on a character's page or under More on a placed character, or change it in a conversation with **Change how someone moves** (`Loop Mara with sway speed 4`, `Loop Mara with none`).
+
 ## Music and volume
 
 Add music on the Story map (up to 15 MB a track; MP3 or OGG keeps it small). A room can start its own music when the player enters, looping or once, or go silent; left alone, whatever plays goes on. A conversation can change it with a **Music** step (`Music: rain theme`, `Music once: sting`, `Music: off`). Every sound and track has its own volume slider.

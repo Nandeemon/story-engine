@@ -1,6 +1,6 @@
 import { createRunner, findLook, findRoomByName, parseScript, startFacts, stepsBefore, talkedFact } from '@story-engine/engine-core';
 import type { ChoiceEvent, Facts, Project, Room, Runner, SayStep, StoryElement } from '@story-engine/engine-core';
-import { applyToScene, fxVars, nextMoment, present, roomScene, staged, stagedAttrs, startScene } from './scene';
+import { applyToScene, fxVars, nextMoment, present, roomScene, staged, stagedAttrs, stagedKey, startScene } from './scene';
 import type { Scene } from './scene';
 import { areaArt, backdropHTML, choicesHTML, elementArt, elementStyle, lookStyle, sayHTML } from './stage';
 import { esc } from './art';
@@ -145,9 +145,9 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
       if (c.fx) node.style.cssText += `;${fxVars(c.fxOpts)}`;
       node.setAttribute('aria-label', c.name);
       node.tabIndex = clickable ? 0 : -1;
-      const artKey = `${c.characterId ?? c.preset ?? ''}|${c.lineLook || c.look}`;
+      const artKey = stagedKey(c);
       if (node.dataset.art !== artKey) {
-        node.innerHTML = `<span class="art">${staged(c, project.characters)}</span>`;
+        node.innerHTML = `<span class="art">${staged(c, project)}</span>`;
         node.dataset.art = artKey;
       }
       if (c.fx) {

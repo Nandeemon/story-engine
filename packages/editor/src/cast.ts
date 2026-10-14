@@ -7,6 +7,7 @@ import { parseScript, talkedFact, valueText, walkSteps } from '@story-engine/eng
 import type { Character, FactDef, Project, Room, Step, StoryElement } from '@story-engine/engine-core';
 import { esc } from '@story-engine/runtime';
 import { soundRow } from './widgets';
+import { idleField } from './views';
 
 const lower = (s: string) => s.trim().toLowerCase();
 
@@ -196,6 +197,7 @@ function castDetail(p: Project, c: Character): string {
       <div class="castleft">
         <div class="castbase"><img src="${esc(c.base)}" alt=""></div>
         <label class="field"><span>Name</span><input type="text" id="cast-name" data-in="cast-name" value="${esc(c.name)}"></label>
+        ${idleField('cast-idle', c.idle, 'Stands still')}
         <label class="field"><span>About ${esc(c.name)} (only you see this)</span><textarea id="cast-about" data-in="cast-about" rows="4" placeholder="Who they are, what they want, how they talk">${esc(c.about ?? '')}</textarea></label>
         <button class="btn small danger" data-act="cast-delete" data-confirm="${info.placed.length ? `Also removes ${c.name} from ${plural(info.placed.length, 'room')}. Click again` : 'Click again to delete'}">Delete character</button>
       </div>

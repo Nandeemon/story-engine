@@ -64,3 +64,22 @@ export function renameSoundInScript(script: string, oldName: string, newName: st
     return inner ? `${m[1]}${parts.join(',').replace(/^\s+/, '')}${m[3]}` : `${m[1].replace(/\s*\($/, '')}${m[3].replace(/^\)/, '')}`;
   }).join('\n');
 }
+
+/** Points "(mark <old>)" on lines and "Mark … with <old>" steps at the new mark name; an empty new name takes the mark off lines. */
+export function renameMarkInScript(script: string, oldName: string, newName: string): string {
+  const from = lower(oldName), to = newName.trim().toLowerCase().replace(/[():,"]/g, ' ').trim();
+  if (!from || from === to) return script;
+  return script.split('\n').map(line => {
+    const st = line.match(/^(\s*(?:un)?mark\s+.+?\s+with\s+)(.+?)\s*$/i);
+    if (st) return lower(st[2]) === from ? (to ? `${st[1]}${to}` : line) : line;
+    const m = line.match(/^(\s*[^:"()#]{1,40}?\s*\()([^)]*)(\)\s*:.*)$/);
+    if (!m) return line;
+    const parts = m[2].split(',');
+    const i = parts.findIndex(p => { const x = p.trim().match(/^mark\s+(.+)$/i); return !!x && lower(x[1]) === from; });
+    if (i < 0) return line;
+    if (to) parts[i] = parts[i].replace(/mark\s+.+/i, `mark ${to}`);
+    else parts.splice(i, 1);
+    const inner = parts.join(',').trim();
+    return inner ? `${m[1]}${parts.join(',').replace(/^\s+/, '')}${m[3]}` : `${m[1].replace(/\s*\($/, '')}${m[3].replace(/^\)/, '')}`;
+  }).join('\n');
+}

@@ -1,11 +1,11 @@
-import { CONDITION_WORDS, characterOf, findRoomByName, parseScript, summarize, valueText, walkSteps } from '@story-engine/engine-core';
+import { CONDITION_WORDS, IDLE_MOVES, characterOf, findRoomByName, parseScript, summarize, valueText, walkSteps } from '@story-engine/engine-core';
 import { missingLook, unknownSpeaker } from './map';
 import { factKind, storyFacts } from './problems';
 import { musicSelect, soundRow, soundSelect } from './widgets';
 import type { Problem } from './problems';
 import type { StoryInfo } from './store';
-import type { Character, CompareOp, FactValue, Project, Room, Sound, StoryElement } from '@story-engine/engine-core';
-import { BACKDROPS, CHARACTERS, EXPRESSIONS, FONTS, OBJECTS, THEMES, backdropHTML, characterSVG, choicesHTML, esc, hudHTML, sayHTML, stageHTML } from '@story-engine/runtime';
+import type { Character, CompareOp, FactValue, Idle, Project, Room, Sound, StoryElement } from '@story-engine/engine-core';
+import { BACKDROPS, CHARACTERS, EXPRESSIONS, FONTS, OBJECTS, THEMES, allMarks, markArt, backdropHTML, characterSVG, choicesHTML, esc, hudHTML, sayHTML, stageHTML } from '@story-engine/runtime';
 import type { Preset } from '@story-engine/runtime';
 
 export type View = 'home' | 'cast' | 'map' | 'room' | 'convo' | 'look' | 'play' | 'check';
@@ -88,6 +88,25 @@ function soundsSection(p: Project): string {
     <p class="hint">A room can start its own music (in the room's panel), and a conversation can change it with a Music step. Music loops unless you set it to play once.</p></section>`;
 }
 
+const ANIM_WORDS: [string, string][] = [['none', 'Still'], ['pulse', 'Pulses'], ['float', 'Floats up'], ['drift', 'Glides out'], ['bob', 'Bobs'], ['spin', 'Spins'], ['pop', 'Pops in'], ['shake', 'Shakes'], ['drip', 'Drips down'], ['fade', 'Fades in']];
+
+/** Marks: starter marks and the author's own pictures, each with its animation, speed and size. */
+function marksSection(p: Project): string {
+  const cards = allMarks(p).map(m => {
+    const changed = !!m.preset && !!p.marks?.some(x => x.name === m.name);
+    return `<div class="markcard"><span class="markpic"><span class="mk an-${m.anim}" style="--mkd:${[1.8, 1.35, 1, 0.72, 0.5][(m.speed ?? 3) - 1]}">${markArt(m)}</span></span>
+      ${m.preset ? `<b>${esc(m.name)}</b>` : `<input type="text" id="mark-name-${esc(m.id)}" data-in="mark-name" data-k="${esc(m.name)}" value="${esc(m.name)}" aria-label="Name">`}
+      <select id="mark-anim-${esc(m.id)}" data-in="mark-anim" data-k="${esc(m.name)}" aria-label="Animation">${ANIM_WORDS.map(([k, w]) => `<option value="${k}"${k === m.anim ? ' selected' : ''}>${w}</option>`).join('')}</select>
+      <label class="mini"><span>Speed</span><input type="range" id="mark-speed-${esc(m.id)}" data-in="mark-speed" data-k="${esc(m.name)}" min="1" max="5" value="${m.speed ?? 3}"></label>
+      <label class="mini"><span>Size</span><input type="range" id="mark-size-${esc(m.id)}" data-in="mark-size" data-k="${esc(m.name)}" min="2" max="40" value="${Math.round(m.size)}"></label>
+      ${m.preset ? (changed ? `<button class="linkbtn" data-act="mark-reset" data-k="${esc(m.name)}">Back to how it was</button>` : '') : `<button class="linkbtn danger" data-act="mark-delete" data-k="${esc(m.name)}" data-confirm="Delete?">Delete</button>`}</div>`;
+  }).join('');
+  return `<section class="soundsec marksec"><div class="label">Marks</div>
+    <p class="hint">Small pictures shown on a character for a line or until taken off: pick them in a line's panel, or with "Put a mark on someone". Your own pictures can be GIFs that animate by themselves.</p>
+    <div class="markgrid">${cards}</div>
+    <div class="row"><button class="btn small" data-act="mark-add">+ Add your own mark</button></div></section>`;
+}
+
 export function viewMap(p: Project, ui: UI, errors = 0): string {
   const actions = ui.confirmReset
     ? `<span class="hint">Erase everything?</span><button class="btn small danger" data-act="reset">Yes, start over</button><button class="btn small quiet" data-act="cancel">Keep it</button>`
@@ -99,6 +118,7 @@ export function viewMap(p: Project, ui: UI, errors = 0): string {
   return `<div class="side"><div class="maphead"><div><h2>Story map</h2><p class="hint">Every room in this story. Click one to work in it. Save to file keeps a copy you can move or back up.</p></div><div class="row">${actions}</div></div>
     ${publish}
     <div class="map">${cards}<button class="card new" data-act="new-room">+ New room</button></div>
+    ${marksSection(p)}
     ${soundsSection(p)}</div>`;
 }
 
@@ -167,6 +187,14 @@ function lookPanel(p: Project, c: Character, lookId: string): string {
     <div class="row"><button class="btn small danger" data-act="look-delete" data-confirm="${used ? `${used} line${used === 1 ? ' uses' : 's use'} it. Click again` : 'Click again to delete the look'}">Delete this look</button></div>`;
 }
 
+/** How a character moves while standing: a pick list, with strength and speed when it moves. */
+export function idleField(id: string, idle: Idle | undefined, unsetLabel: string): string {
+  const v = idle?.move ?? '';
+  const lvl = (key: 'strength' | 'speed', label: string) => `<label class="mini"><span>${label}</span><input type="range" id="${id}-${key}" data-in="${id}-${key}" min="1" max="5" value="${idle?.[key] ?? 3}"></label>`;
+  return `<div class="field"><span>Moves while standing</span><select id="${id}" data-in="${id}"><option value=""${v ? '' : ' selected'}>${unsetLabel}</option>${['none', ...IDLE_MOVES].map(x => `<option value="${x}"${x === v ? ' selected' : ''}>${x === 'none' ? 'Stands still' : x}</option>`).join('')}</select>
+    ${v && v !== 'none' ? `<div class="row">${lvl('strength', 'Strength')}${lvl('speed', 'Speed')}</div>` : ''}</div>`;
+}
+
 const OPS: [CompareOp, string][] = [...CONDITION_WORDS.map(([w, op]) => [op, w] as [CompareOp, string]), ['truthy', 'is yes']];
 
 /** Settings every room thing shares, under More: when it is there, how often it talks, its sound. */
@@ -230,6 +258,7 @@ function elementPanel(p: Project, e: StoryElement, r?: Room): string {
     <label class="field"><span>Size</span><input type="range" id="el-size" data-in="el-size" min="6" max="110" value="${e.size}"></label>
     ${c ? looksStrip(c, e) : ''}
     <details class="more" id="el-more"><summary>More</summary><div>${expr}${builtIn}
+      ${e.kind === 'char' ? idleField('el-idle', e.idle, c?.idle ? `As ${esc(c.name)} usually does (${esc(c.idle.move)})` : 'Stands still') : ''}
       ${moreFields(p, e)}
       <div class="row"><button class="btn small quiet" data-act="front">Bring to front</button><button class="btn small danger" data-act="remove" data-confirm="Click again to remove">Remove</button></div>
     </div></details>

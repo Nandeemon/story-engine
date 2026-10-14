@@ -3,10 +3,10 @@ export { parseScript, writeScript, summarize, walkSteps, toValue, valueText, eff
 export type { ScriptSummary } from './script';
 export { createRunner, applyEffects, testCondition, getFact } from './runner';
 export type { Runner, RunEvent, ChoiceEvent, EndEvent } from './runner';
-export { createProject, createRoom, newId, normalizeProject, findRoomByName, DEFAULT_LOOK, DEFAULT_LOOK_NAME, cleanLookName, cleanSoundName, factName, talkedFact, startFacts, characterOf, findLook, hasLook, uniqueLookName } from './project';
+export { createProject, createRoom, newId, normalizeProject, findRoomByName, DEFAULT_LOOK, DEFAULT_LOOK_NAME, cleanLookName, cleanSoundName, cleanMarkName, factName, talkedFact, startFacts, characterOf, findLook, hasLook, uniqueLookName } from './project';
 export { getList, getStep, splitPath, stepPathOf, stepsBefore, walkWithPaths, unreachableSteps } from './paths';
-export { SPOTS, ENTER_EFFECTS, EXIT_EFFECTS, LINE_EFFECTS, FX_NORMAL, isLineEffect, parseLineFx, lineFxText, parsePlace, placeText, snapToSpot } from './staging';
+export { SPOTS, ENTER_EFFECTS, EXIT_EFFECTS, LINE_EFFECTS, FX_NORMAL, IDLE_MOVES, parseIdle, idleText, isLineEffect, parseLineFx, lineFxText, parsePlace, placeText, snapToSpot } from './staging';
 export type { FxOptions } from './staging';
 export type { StepPath, ListPath } from './paths';
-export { renameRoomInScript, renameSpeakerInScript, renameLookInScript, renameSoundInScript } from './refs';
+export { renameRoomInScript, renameSpeakerInScript, renameLookInScript, renameSoundInScript, renameMarkInScript } from './refs';
 export { storyFactNames } from './facts';
