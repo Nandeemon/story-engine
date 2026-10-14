@@ -507,3 +507,8 @@ body.wide .wrap { max-width: min(100%, 2200px); }
 .altrow input:disabled { opacity: .7; }
 .btn.rec { border-color: var(--bad); background: var(--bad); color: #fff; animation: rec 1s ease-in-out infinite; }
 @keyframes rec { 50% { opacity: .7; } }
+
+input[type=range] { accent-color: var(--violet); }
+.markpic { background: #8f88ab; }
+.mpreview [data-mark]::before { content: ''; position: absolute; inset: -12%; }
+.mrow .mini-tag { margin-left: 4px; padding: 0 5px; border-radius: 4px; background: var(--line); color: var(--muted); font-size: 11px; }

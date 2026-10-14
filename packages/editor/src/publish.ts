@@ -15,7 +15,7 @@ const jsonSafe = (v: unknown) => JSON.stringify(v).replace(/</g, '\\u003c');
 const attr = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
 
 export function storyTitle(p: Project): string {
-  return p.title?.trim() || p.rooms[0]?.name || 'Untitled story';
+  return p.title?.trim() || 'Untitled story';
 }
 
 export function slug(s: string): string {

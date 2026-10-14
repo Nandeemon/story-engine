@@ -14,13 +14,13 @@ const PAGE_CSS = `
 html, body { margin: 0; height: 100%; background: #0d0b14; }
 body { display: grid; place-items: center; overflow: hidden; }
 .frame { position: relative; width: min(100vw, calc(100dvh * 16 / 9)); }
-.titlescreen { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1.2em; font-family: var(--g-font); font-size: max(14px, calc(var(--g-size) * 1.2cqw)); color: var(--g-fg); text-align: center; }
+.titlescreen { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1.2em; font-family: var(--g-font); font-size: max(14px, calc(var(--g-size) * 1.2cqw)); color: #fff; text-align: center; }
 .titlescreen .bg { position: absolute; inset: 0; filter: brightness(.45) blur(2px); transform: scale(1.03); }
 .titlescreen h1 { position: relative; margin: 0 6%; font-size: 2.6em; font-weight: 600; line-height: 1.15; text-shadow: 0 2px 18px rgba(0, 0, 0, .5); }
 .titlescreen button { position: relative; padding: .55em 2.2em; border: 0; border-radius: var(--g-radius); background: var(--g-accent); color: var(--g-on); font: inherit; font-weight: 600; cursor: pointer; }
 .titlescreen button:hover { filter: brightness(1.1); }
 .titlescreen .row { position: relative; display: flex; flex-wrap: wrap; justify-content: center; gap: .7em; }
-.titlescreen button.quiet { background: transparent; color: var(--g-fg); box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--g-fg) 60%, transparent); }
+.titlescreen button.quiet { background: transparent; color: #fff; box-shadow: inset 0 0 0 2px rgba(255, 255, 255, .7); }
 .titlescreen button:focus-visible { outline: 3px solid var(--g-fg); outline-offset: 3px; }
 .turn { display: none; }
 @media (orientation: portrait) and (max-width: 640px) {

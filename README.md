@@ -18,7 +18,7 @@ npm run check    # type-check, tests and build
 
 ## Your work
 
-The editor opens on **Your stories**: every story kept in this browser, each saved on its own. Make a **New story**, open one, **Duplicate** it to try something out, or **Delete** it. Click Story Engine at the top left (or Your stories in the path) to get back. The editor warns you if the browser stops being able to save. **Save to file** on a story's Story map downloads it, images included, as one `.story.json` file, and **Open a file** on Your stories adds such a file as a new story. Undo and Redo (Ctrl+Z, Ctrl+Shift+Z) cover every change to the project. Renaming a room updates every `Go to` that points at it, and renaming a character updates their lines.
+The editor opens where you left off, or on **Your stories**: every story kept in this browser, each saved on its own. Make a **New story**, open one, **Duplicate** it to try something out, or **Delete** it. Click Story Engine at the top left (or Your stories in the path) to get back. The editor warns you if the browser stops being able to save. **Save to file** on a story's Story map downloads it, images included, as one `.story.json` file, and **Open a file** on Your stories adds such a file as a new story. Undo and Redo (Ctrl+Z, Ctrl+Shift+Z) cover every change to the project. Renaming a room updates every `Go to` that points at it, and renaming a character updates their lines.
 
 ## Sharing your game
 
@@ -44,6 +44,23 @@ In **Look**, under On-screen display, add a **Meter** (a bar, such as affection 
 - **Only if:** under More, anything in a room can be there only while a story fact says so, for example Jon only `if met_jon is yes`. A conversation brings him in with a Change.
 - **Once:** a conversation can happen every time, or once, after which the thing cannot be clicked or is gone.
 - **When the player enters:** a room can start a conversation straight away, on every visit or only the first.
+
+## Paths you draw
+
+Pick a line, open **Stage** and press **Draw a path**, then draw with the mouse in the scene: the character moves along that line while the conversation goes on. Set how long it takes, whether it runs once, loops or goes back and forth, and a smooth or steady tempo. Click a dot on the path to change things as the character passes it: size, turning around, an effect (shake, bounce, pop…), how visible, or the look. Drag dots to adjust the line, and play it in the scene. In the script: `Path Mara over 4s back and forth: 30 98, 50 90 size 60 bounce, 70 98 flip`.
+
+## In the game
+
+Every game has small buttons in the corner (Look can turn them off): **back** a line, **history** of what was said (the wheel up opens it too), **settings** for text speed, music and sound volume, auto, skipping lines already read and reading lines aloud, and in the game file three **save slots**. Endings (`Ending: A quiet goodbye`) show an ending card, and the title screen counts the endings a player has found.
+
+## More ways to tell it
+
+- **Ask the player** for an answer (`Ask "What is your name?" as name`) and use any story fact in a line: `Nice to meet you, {name}.`
+- **Answers** can be gone once picked, or show only when nothing else is left (`"Leave"  fallback`).
+- **Other ways to say a line**, at random or in turn: `Mara (in turn): Hi. || Back again? || You again.`
+- **Camera**: zoom in on a spot, shake, flash, or back to the whole picture. **Go to** a room with a fade, through black, or a slide.
+- **Look**: lines as speech bubbles over the speaker, narration over the whole picture.
+- **Voice**: record a line with the microphone in its Sound window. **Video backdrops**: Change the backdrop → Use a video.
 
 ## Marks and movement
 
@@ -79,7 +96,7 @@ Add a character with **Use your own picture**: that picture is the character's b
 
 ## Staging a conversation
 
-When a conversation starts, characters who take no part step aside until it ends (or choose "The room stays as it is"). Click a step in the map: the scene above the map shows the stage at that step. Drag anyone there to place them from that step on, or use the place buttons, size, and turn around; the place holds until it changes. Pick an effect for the line (shake, bounce, jump, flash), bring someone in or take someone out. Someone who speaks but is not on stage comes in by themselves.
+When a conversation starts, characters who take no part step aside until it ends (or choose "The room stays as it is"). Click a step in the map: the scene beside it shows the stage at that step. A line's panel shows who speaks, the text and the look; Effect, Marks, Sound, Stage, Variations and Story facts are chips that open their own small window. Drag anyone there to place them from that step on, or use the place buttons, size, and turn around; the place holds until it changes. Pick an effect for the line (shake, bounce, jump, flash), bring someone in or take someone out. Someone who speaks but is not on stage comes in by themselves.
 
 In the script these are plain lines:
 

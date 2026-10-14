@@ -151,7 +151,9 @@ function restore(json: string, message: string): void {
   if (!project.rooms.some(r => r.id === ui.roomId)) { ui.roomId = project.rooms[0].id; ui.sel = null; }
   if (ui.sel && !room().els.some(e => e.id === ui.sel)) ui.sel = null;
   if (ui.view === 'convo' && !ui.sel) ui.view = 'room';
-  mapSel = null;
+  // The marked step stays marked when it is still there, so you can see what changed.
+  const e = selected();
+  if (!e || !mapSel || mapSel.startsWith('add:') || !getStep(parseScript(e.script).steps, mapSel.split('#o')[0])) mapSel = null;
   save();
   render();
   toast(message);
@@ -257,7 +259,7 @@ function keepOpenDetails(draw: () => void): void {
   for (const id of open) { const d = document.getElementById(id) as HTMLDetailsElement | null; if (d) d.open = true; }
 }
 
-function render(): void { keepOpenDetails(renderView); }
+function render(): void { keepOpenDetails(renderView); rememberPlace(); }
 
 function renderView(): void {
   document.body.classList.toggle('compare-difference', lookCompare === 'difference');
@@ -476,6 +478,15 @@ function go(view: View): void {
   ui.lookEdit = null;
   ui.confirmReset = false;
   render();
+}
+
+/* Where the author was, so a reload opens the same story and view. */
+const PLACE_KEY = 'story-engine:place';
+function rememberPlace(): void {
+  try {
+    if (!storyId || ui.view === 'home' || ui.view === 'play') { if (ui.view === 'home') localStorage.removeItem(PLACE_KEY); return; }
+    localStorage.setItem(PLACE_KEY, JSON.stringify({ storyId, view: ui.view, roomId: ui.roomId, sel: ui.sel }));
+  } catch { /* not remembered */ }
 }
 
 function replaceProject(p: Project): void {
@@ -1436,7 +1447,7 @@ document.addEventListener('wheel', ev => {
   const t = markTarget(node.dataset.who ?? '', node.dataset.mark ?? '');
   if (!t) return;
   wheelBefore ??= snapshot();
-  const size = Math.round(Math.max(1, Math.min(100, t.size * (ev.deltaY < 0 ? 1.08 : 1 / 1.08))) * 10) / 10;
+  const size = Math.round(Math.max(1, Math.min(100, t.size * (ev.deltaY < 0 ? 1.15 : 1 / 1.15))) * 10) / 10;
   t.set({ size });
   node.style.height = `${size}%`;
   clearTimeout(wheelTimer);
@@ -2126,7 +2137,20 @@ document.addEventListener('pointercancel', drop);
 
 /* ---------- Start ---------- */
 
-void listStories().then(list => {
+void listStories().then(async list => {
   stories = list;
+  let place: { storyId: string; view: View; roomId: string; sel: string | null } | null = null;
+  try { place = JSON.parse(localStorage.getItem(PLACE_KEY) ?? 'null'); } catch { /* none */ }
+  if (place && list.some(x => x.id === place!.storyId)) {
+    const p = await loadStory(place.storyId);
+    if (p) {
+      enterProject(p, place.storyId, 'map');
+      if (project.rooms.some(r => r.id === place.roomId)) ui.roomId = place.roomId;
+      ui.sel = place.sel && room().els.some(e => e.id === place!.sel) ? place.sel : null;
+      const view = place.view === 'convo' && !ui.sel ? 'room' : place.view;
+      if (view !== 'map') { freshConvo = true; go(view); }
+      return;
+    }
+  }
   render();
 });

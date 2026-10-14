@@ -26,6 +26,7 @@ export interface Problem {
 
 export function findProblems(p: Project): Problem[] {
   const out: Problem[] = [];
+  const problemsOut: Problem[] = [];
   const doorsTo = new Set<string>();
   for (const room of p.rooms) {
     for (const el of room.els) {
@@ -79,6 +80,32 @@ export function findProblems(p: Project): Problem[] {
   for (const w of p.hud ?? []) {
     if (!used.has(w.fact)) out.push({ level: 'warning', roomId: p.rooms[0]?.id ?? '', hud: w.id, where: 'Look › On-screen display', text: `"${w.text || w.fact}" shows the story fact "${w.fact}", but no conversation changes or checks it.` });
   }
+  // Rooms with no way on: no Go to and no ending in anything there.
+  if (p.rooms.length > 1) for (const room of p.rooms) {
+    let out = false;
+    for (const el of room.els) walkSteps(parseScript(el.script).steps, st => { if ((st.t === 'door' && findRoomByName(p, st.room) !== room) || st.t === 'ending') out = true; });
+    if (!out) problemsOut.push({ level: 'warning', roomId: room.id, where: room.name, text: 'Nothing here leads to another room or to an ending, so a player who gets here is stuck.' });
+  }
+  // Facts that are changed but never tested or shown.
+  const changed = new Set<string>(), tested = new Set<string>();
+  for (const r of p.rooms) for (const el of r.els) {
+    if (el.cond) tested.add(el.cond.fact);
+    for (const m of el.script.matchAll(/\{([\w.]+)\}/g)) tested.add(m[1]);
+    walkSteps(parseScript(el.script).steps, st => {
+      if (st.t === 'change') st.effects.forEach(e => changed.add(e.fact));
+      if (st.t === 'choice') st.options.forEach(o => o.effects.forEach(e => changed.add(e.fact)));
+      if (st.t === 'ask') changed.add(st.fact);
+      if (st.t === 'if') tested.add(st.cond.fact);
+    });
+  }
+  for (const w of p.hud ?? []) tested.add(w.fact);
+  for (const f of changed) if (!tested.has(f)) problemsOut.push({ level: 'note', roomId: p.rooms[0]?.id ?? '', where: 'Story facts', text: `"${f}" is changed, but nothing checks it with Only if, shows it, or puts it in a line, so it makes no difference yet.` });
+  // A room that starts a conversation with something that may not be there.
+  for (const room of p.rooms) {
+    const auto = room.auto && room.autoEl ? room.els.find(e => e.id === room.autoEl) : undefined;
+    if (auto?.cond) problemsOut.push({ level: 'warning', roomId: room.id, elId: auto.id, inRoom: true, where: `${room.name} › ${auto.name}`, text: `The room starts ${auto.name}'s conversation, but ${auto.name} is only there when "${auto.cond.fact}" says so; otherwise nothing starts.` });
+  }
+  out.push(...problemsOut);
   const order = { error: 0, warning: 1, note: 2 };
   return out.sort((a, b) => order[a.level] - order[b.level]);
 }

@@ -141,7 +141,7 @@ export function mapHTML(ctx: MapCtx): string {
     if (s.t === 'say') {
       const text = s.text === '...' ? '<em>Empty line</em>' : esc(s.text);
       return s.who
-        ? `<button ${attrs}><span class="who${unknownSpeaker(ctx, s.who) ? ' voice" title="A voice without a picture: no character has this name' : ''}">${esc(s.who)}</span>${s.expr ? exprTag(s.who, s.expr) : ''}${s.marks?.length ? `<span class="expr">${esc(s.marks.join(', '))}</span>` : ''}<span class="txt">${text}</span></button>`
+        ? `<button ${attrs}><span class="who${unknownSpeaker(ctx, s.who) ? ' voice" title="A voice without a picture: no character has this name' : ''}">${esc(s.who)}</span>${s.expr ? exprTag(s.who, s.expr) : ''}${s.marks?.length ? `<span class="expr">${esc(s.marks.join(', '))}</span>` : ''}${s.fx ? `<span class="mini-tag">${esc(s.fx)}</span>` : ''}${s.sound ? '<span class="mini-tag">♪</span>' : ''}${s.voice ? '<span class="mini-tag">🎤</span>' : ''}${s.alts?.length ? `<span class="mini-tag">${s.alts.length + 1} ways</span>` : ''}<span class="txt">${text}</span></button>`
         : `<button ${attrs}><span class="txt narr">${text}</span></button>`;
     }
     if (s.t === 'ask') return `<button ${attrs}><span class="tag">Ask</span><span class="txt">${esc(s.prompt)} → <code>${esc(s.fact)}</code></span></button>`;

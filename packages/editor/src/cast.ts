@@ -45,7 +45,7 @@ export function castInfo(p: Project, name: string, characterId?: string): CastIn
       if ((s.t === 'show' || s.t === 'move' || s.t === 'hide') && lower(s.who) === key) present = true;
       if (s.t === 'say' && lower(s.who) === key) {
         lines++;
-        const look = lower(s.expr) || '(no change)';
+        const look = lower(s.expr) || 'default';
         info.lookUse.set(look, (info.lookUse.get(look) ?? 0) + 1);
       }
     });
@@ -184,7 +184,7 @@ function castDetail(p: Project, c: Character): string {
   }).join('');
   const once = c.looks.filter(l => l.once).length;
   const placed = info.placed.length
-    ? info.placed.map(x => `<li><span>${esc(x.room.name)}</span><button class="btn small quiet" data-act="cast-goto-room" data-k="${esc(x.room.id)}|${esc(x.el.id)}">Open</button></li>`).join('')
+    ? info.placed.map(x => `<li><span>${esc(x.room.name)}${x.el.idle ? ` <i>${x.el.idle.move === 'none' ? 'stands still' : esc(x.el.idle.move)} here, set in the room</i>` : ''}</span><button class="btn small quiet" data-act="cast-goto-room" data-k="${esc(x.room.id)}|${esc(x.el.id)}">Open</button></li>`).join('')
     : '<li class="hint">Not placed in any room yet. A conversation can still bring them in.</li>';
   const free = p.rooms.filter(r => !info.placed.some(x => x.room === r));
   const placeIn = free.length ? `<select id="cast-place" data-in="cast-place" aria-label="Place in a room"><option value="">Place in a room…</option>${free.map(r => `<option value="${esc(r.id)}">${esc(r.name)}</option>`).join('')}</select>` : '';

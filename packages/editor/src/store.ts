@@ -55,7 +55,7 @@ function idb<T>(mode: IDBTransactionMode, run: (s: IDBObjectStore) => IDBRequest
 }
 
 const keyOf = (id: string) => `p:${id}`;
-const titleOf = (p: Project) => p.title?.trim() || p.rooms[0]?.name || 'Untitled story';
+const titleOf = (p: Project) => p.title?.trim() || 'Untitled story';
 
 let index: StoryInfo[] = [];
 /** Whether IndexedDB works here; when not, only one story is kept, in localStorage. */

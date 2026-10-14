@@ -134,7 +134,7 @@ export function viewMap(p: Project, ui: UI, errors = 0): string {
     return `<button class="card roomcard" data-act="open-room" data-k="${esc(r.id)}"><span class="pic">${backdropHTML(r.bg)}${i === 0 ? '<span class="badge start">Start</span>' : ''}${stuck ? '<span class="badge stuck" title="No conversation or area leads out of this room">No way out</span>' : ''}</span><span class="meta"><b>${esc(r.name)}</b><span>${r.els.filter(e => !e.offstage).length} ${r.els.length === 1 ? 'thing' : 'things'} placed${r.auto ? ' · starts talking right away' : ''}</span>${names.length ? `<span class="leads">→ ${names.map(esc).join(', ')}</span>` : ''}</span></button>`;
   }).join('');
   const publish = `<div class="publish">
-      <label class="field"><span>Name of your story</span><input type="text" id="story-title" data-in="story-title" value="${esc(p.title ?? '')}" placeholder="${esc(p.rooms[0]?.name ?? 'Untitled story')}"></label>
+      <label class="field"><span>Name of your story</span><input type="text" id="story-title" data-in="story-title" value="${esc(p.title ?? '')}" placeholder="Untitled story"></label>
       <div class="publishgo"><button class="btn play" data-act="make-game"${errors ? ` data-confirm="Check found ${errors} ${errors === 1 ? 'error' : 'errors'}. Make it anyway?"` : ''}>Make a game file</button><p class="hint">One file with your whole game. Open it in any browser, or upload it to itch.io (as an HTML game) or any website so others can play. Its typeface loads from the internet; offline a similar one shows.</p></div></div>`;
   return `<div class="side"><div class="maphead"><div><h2>Story map</h2><p class="hint">Every room in this story. Click one to work in it. Save to file keeps a copy you can move or back up.</p></div><div class="row">${actions}</div></div>
     ${publish}
@@ -374,6 +374,9 @@ export function inserts(p: Project, r: Room, e: StoryElement): { label: string; 
     { label: 'Only if', text: 'Only if affection is at least 5\n  ' },
     { label: 'Change something', text: 'Change affection + 1' },
     { label: 'Go to another room', text: `Go to ${other.name}` },
+    { label: 'Music', text: 'Music: ' },
+    { label: 'Ask', text: 'Ask "What is your name?" as name' },
+    { label: 'Ending', text: 'Ending: ' },
     { label: 'End', text: 'End' }
   ];
 }
@@ -385,6 +388,16 @@ Mara (smiling): Hi again.
 Mara (sad, shake): With an effect.
 Mara (pulse strength 4 speed 2 x2): Settings 1-5.
 Mara (happy, sound laugh): With a sound.
+Mara (mark anger): With a mark.
+Mara (in turn): Hi. || Back again?
+Mark Mara with puff
+Unmark Mara
+Loop Mara with sway
+Path Mara over 3s: 30 98, 70 98
+Camera zoom 1.5 at 50% 40%
+Music: rain theme
+Ask "Your name?" as name
+Mara: Hello, {name}.
 A line with no name is narration.
 Narration: Move on, it said.
 Show Lin as happy at left with fade
@@ -399,7 +412,8 @@ Only if affection is at least 5
 Otherwise
   Mara: Shown when not.
 Change gold - 10
-Go to Street, night
+Go to Street, night with fade
+Ending: A quiet goodbye
 Part: Later
 Go to part Later
 # A note only you see`;
@@ -460,11 +474,12 @@ export function scriptStatus(p: Project, r: Room, script: string): { text: strin
 /** The look stage, with the on-screen display drawn from test values or examples. */
 export function lookStage(p: Project, r: Room, hudSel: string | null, facts: Record<string, unknown>): string {
   const L = p.look;
+  const who = r.els.find(e => e.kind === 'char')?.name ?? p.characters[0]?.name ?? p.rooms.flatMap(x => x.els).find(e => e.kind === 'char')?.name ?? 'Someone';
   const box = (L.choices ?? 'box') === 'box';
   const demo = box
-    ? choicesHTML([{ text: 'Answers look like this' }, { text: 'And another one' }], false, 'box', { who: 'Mara', text: 'This is how a question and its answers look in your game.' })
+    ? choicesHTML([{ text: 'Answers look like this' }, { text: 'And another one' }], false, 'box', { who, text: 'This is how a question and its answers look in your game.' })
     : choicesHTML([{ text: 'A choice looks like this' }, { text: 'And another one' }], false).replace('class="choices"', 'class="choices demo"')
-      + sayHTML('Mara', 'This is how a line of dialogue looks in your game.', false);
+      + sayHTML(who, 'This is how a line of dialogue looks in your game.', false);
   const sample: Record<string, FactValue> = {};
   for (const w of p.hud ?? []) sample[w.fact] = (facts[w.fact] as FactValue | undefined) ?? (w.kind === 'meter' ? Math.round(w.max * 0.6) : 12);
   return stageHTML(r, { mode: 'look', look: L, game: demo + hudHTML(p.hud, sample, { editable: true, selected: hudSel ?? undefined }), characters: p.characters });
