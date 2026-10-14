@@ -207,7 +207,16 @@ function renderBar(): void {
        ${checkButton()}<button class="btn${ui.view === 'cast' ? ' ink' : ''}" data-act="cast">Characters</button><button class="btn${ui.view === 'look' ? ' ink' : ''}" data-act="look">Look</button><button class="btn play" data-act="play">Play</button>`;
 }
 
-function render(): void {
+/** "More" sections that were open stay open when the view is drawn again. */
+function keepOpenDetails(draw: () => void): void {
+  const open = [...document.querySelectorAll<HTMLDetailsElement>('#main details[id]')].filter(d => d.open).map(d => d.id);
+  draw();
+  for (const id of open) { const d = document.getElementById(id) as HTMLDetailsElement | null; if (d) d.open = true; }
+}
+
+function render(): void { keepOpenDetails(renderView); }
+
+function renderView(): void {
   document.body.classList.toggle('compare-difference', lookCompare === 'difference');
   // The conversation view stretches to the whole window; other views keep a reading width.
   document.body.classList.toggle('wide', ui.view === 'convo');
@@ -383,6 +392,7 @@ function startPlay(fromElement?: StoryElement, startPath?: string): void {
     facts: testFacts(),
     onChange: updateStrip
   });
+  renderBar();
 }
 
 /* ---------- Actions ---------- */
@@ -953,7 +963,7 @@ $('#soundfile')!.addEventListener('change', ev => {
     done?.(name);
     save(); record(before);
     if (ui.view === 'convo') refreshMap(); else render();
-    toast(`Added the sound "${name}".`);
+    toast(music ? `Added the music "${name}".` : `Added the sound "${name}".`);
   };
   reader.onerror = () => toast('That sound could not be read.');
   reader.readAsDataURL(f);
@@ -1261,6 +1271,11 @@ document.addEventListener('click', ev => {
     applyMap(mapAction(ctx, m.dataset.mapAct!, m.dataset.k ?? ''));
     record(before);
     if (m.dataset.mapAct === 'quick-sound') previewSound(m.dataset.k ?? '');
+    // A new line is ready to type in.
+    if (['first-line', 'add-after'].includes(m.dataset.mapAct!) || (m.dataset.mapAct === 'insert' && m.dataset.k === 'say')) {
+      const t = $<HTMLTextAreaElement>('#m-text');
+      if (t) { t.focus(); t.select(); }
+    }
     return;
   }
   if (ctx && mapSel && !justPanned && target.closest('.mscroll') && !target.closest('.mnode, .madd')) { mapSel = null; refreshMap(); }

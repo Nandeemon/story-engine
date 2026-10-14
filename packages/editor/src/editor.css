@@ -45,7 +45,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
   .crumbs button { min-width: 2.5em; flex: 0 1 auto; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
   .crumbs button[aria-current] { flex-shrink: 0; max-width: 60%; }
 }
-.tools { display: flex; gap: 8px; }
+.tools { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+@media (max-width: 600px) { .tools .btn { padding-inline: 10px; font-size: 13px; } .tools { gap: 6px; } }
 
 /* Buttons */
 .btn { padding: 8px 16px; border: 2px solid var(--ink); border-radius: 999px; background: transparent; font-weight: 600; line-height: 1.2; cursor: pointer; }
@@ -418,7 +419,7 @@ button.chip { font: inherit; font-size: 13px; }
 /* Wide screens: the conversation view uses all the room there is. The scene sits
    beside the map, the map fills the height of the window. */
 body.wide .wrap { max-width: min(100%, 2200px); }
-body.wide .work { grid-template-columns: minmax(0, 1fr) 340px; }
+@media (min-width: 821px) { body.wide .work { grid-template-columns: minmax(0, 1fr) 340px; } }
 .mapmode .mscroll { height: calc(100dvh - 190px); max-height: none; }
 .mpreview.big { width: 100%; max-width: calc(40dvh * 16 / 9); min-width: min(100%, 320px); }
 @media (min-width: 1300px) {
@@ -447,5 +448,5 @@ body.wide .work { grid-template-columns: minmax(0, 1fr) 340px; }
 .mchip { display: inline-flex; align-items: center; gap: 5px; }
 .mthumb { display: inline-block; width: 22px; height: 16px; }
 .mthumb svg, .mthumb img { width: 100%; height: 100%; display: block; object-fit: contain; }
-.markpick { max-height: 128px; overflow-y: auto; }
+.markpick { flex-wrap: wrap; }
 .fxgrid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }

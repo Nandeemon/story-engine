@@ -514,7 +514,7 @@ export function viewCheck(p: Project, problems: Problem[], test: { use: boolean;
   return `<div class="work"><div class="side"><div class="maphead"><div><h2>Check your story</h2><p class="hint">Everything here would otherwise only show up while playing. Click Show to go to the step.</p></div></div>
       <div class="probs">${list}</div></div>
     <aside class="side"><h2>Test values</h2>
-      <p class="hint">Try the story with story facts already set, for example to test a line that needs affection 10. Players always start with every fact unset.</p>
+      <p class="hint">Try the story with story facts already set, for example to test a line that needs affection 10. Players start with the start values set on characters, and every other fact unset.</p>
       ${facts.length ? `<label class="check"><input type="checkbox" id="test-use" data-in="test-use"${test.use ? ' checked' : ''}><span>Use these values when I press Play</span></label>
       <div class="tfacts">${rows}</div>
       <button class="btn small quiet" data-act="test-clear">Clear test values</button>` : '<p class="hint">Your story has no story facts yet.</p>'}
