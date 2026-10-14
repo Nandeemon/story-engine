@@ -66,3 +66,26 @@ describe('stepsBefore', () => {
     expect(stepsBefore(steps, '4').map(s => s.t)).toEqual(['show', 'say', 'move', 'choice']);
   });
 });
+
+describe('drawn paths', async () => {
+  const { parseScript, writeScript, pathAt, simplifyPath } = await import('../src');
+  it('reads and writes a path with checkpoints', () => {
+    const src = 'Path Mara over 4s back and forth steady: 30 98, 50 90 size 60 shake, 70 98 flip fade 40 as happy';
+    const { steps, errors } = parseScript(src);
+    expect(errors).toEqual([]);
+    expect(steps[0]).toEqual({ t: 'path', who: 'Mara', secs: 4, repeat: 'pingpong', ease: 'steady', points: [{ x: 30, y: 98 }, { x: 50, y: 90, size: 60, fx: 'shake' }, { x: 70, y: 98, flip: true, fade: 40, look: 'happy' }] });
+    expect(writeScript(steps)).toBe(src);
+  });
+  it('moves along the path at the right time', () => {
+    const pts = [{ x: 0, y: 50 }, { x: 100, y: 50, size: 80 }];
+    const mid = pathAt(pts, 2, undefined, 'steady', 40, 1);
+    expect(mid.x).toBeCloseTo(50);
+    expect(mid.size).toBeCloseTo(60);
+    expect(pathAt(pts, 2, undefined, 'steady', 40, 5)).toMatchObject({ x: 100, done: true });
+    expect(pathAt(pts, 2, 'pingpong', 'steady', 40, 3).x).toBeCloseTo(50);
+  });
+  it('simplifies a drawn line', () => {
+    const line = Array.from({ length: 50 }, (_, i) => ({ x: i, y: 50 }));
+    expect(simplifyPath(line)).toEqual([{ x: 0, y: 50 }, { x: 49, y: 50 }]);
+  });
+});

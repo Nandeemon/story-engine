@@ -4,7 +4,7 @@
  * functions, so the preview shows what the player will see.
  */
 import { findLook, testCondition, walkSteps } from '@story-engine/engine-core';
-import type { Facts, FxOptions, Idle, Look, Placement, Project, Room, Step, StoryElement } from '@story-engine/engine-core';
+import type { Facts, FxOptions, Idle, Look, PathPoint, PathStep, Placement, Project, Room, Step, StoryElement } from '@story-engine/engine-core';
 import { findMark, markHTML } from './marks';
 import { backdropHTML, elementArt, lookStyle } from './stage';
 import { esc } from './art';
@@ -35,6 +35,10 @@ export interface StagedChar {
   lineMarks: string[];
   /** How they move while standing; the character's own setting when not set. */
   idle?: Idle;
+  /** A drawn path they are moving along, and their size as it began. */
+  path?: { step: PathStep; startSize: number };
+  /** How visible, 0 to 100, when a path fades them. */
+  fade?: number;
 }
 
 /** Where the player is in the story beyond facts: conversations had and rooms visited. */
@@ -146,6 +150,7 @@ export function applyToScene(scene: Scene, step: Step, project: Project): void {
     case 'show': {
       const c = cast(scene, project, step.who);
       if (!c) return;
+      c.path = undefined;
       if (step.look) c.look = step.look;
       place(c, step.at);
       if (c.visible) c.fx = ENTER[step.fx] ?? 'in-fade';
@@ -155,7 +160,17 @@ export function applyToScene(scene: Scene, step: Step, project: Project): void {
     case 'move': {
       const c = cast(scene, project, step.who);
       if (!c) return;
+      c.path = undefined;
       place(c, step.at);
+      enter(c);
+      return;
+    }
+    case 'path': {
+      const c = cast(scene, project, step.who);
+      if (!c || step.points.length < 2) return;
+      c.x = step.points[0].x;
+      c.y = step.points[0].y;
+      c.path = { step, startSize: c.size };
       enter(c);
       return;
     }
@@ -175,6 +190,7 @@ export function applyToScene(scene: Scene, step: Step, project: Project): void {
     case 'hide': {
       const c = scene.chars.find(x => lower(x.name) === lower(step.who));
       if (!c || !c.visible) return;
+      c.path = undefined;
       c.visible = false;
       c.fx = EXIT[step.fx] ?? 'out-fade';
       return;
@@ -228,12 +244,12 @@ export function fxVars(o: FxOptions = {}): string {
 
 /** Classes and style for one staged character. */
 export function stagedAttrs(c: StagedChar): { cls: string; style: string } {
-  const cls = ['el', 'staged', c.flip ? 'flip' : '', c.visible ? '' : 'gone'].filter(Boolean).join(' ');
-  return { cls, style: `left:${c.x}%;top:${c.y}%;height:${c.size}%${c.fx ? `;${fxVars(c.fxOpts)}` : ''}` };
+  const cls = ['el', 'staged', c.flip ? 'flip' : '', c.visible ? '' : 'gone', c.path ? 'onpath' : ''].filter(Boolean).join(' ');
+  return { cls, style: `left:${c.x}%;top:${c.y}%;height:${c.size}%${c.fade !== undefined && c.fade < 100 ? `;opacity:${c.fade / 100}` : ''}${c.fx ? `;${fxVars(c.fxOpts)}` : ''}` };
 }
 
 /** Draws the room with a scene, for still pictures such as the editor's line preview. */
-export function sceneHTML(project: Project, room: Room, scene: Scene, look: Look, game = '', opts: { draggable?: boolean; focus?: string } = {}): string {
+export function sceneHTML(project: Project, room: Room, scene: Scene, look: Look, game = '', opts: { draggable?: boolean; focus?: string; path?: { points: PathPoint[]; sel?: number }; pen?: boolean } = {}): string {
   const objects = room.els.filter(e => e.kind === 'object').map(e =>
     `<span class="el" style="left:${e.x}%;top:${e.y}%;height:${e.size}%">${elementArt(e, undefined, project.characters)}</span>`).join('');
   const chars = scene.chars.filter(c => c.visible).map(c => {
@@ -241,6 +257,10 @@ export function sceneHTML(project: Project, room: Room, scene: Scene, look: Look
     const focus = opts.focus && lower(opts.focus) === lower(c.name) ? ' focus' : '';
     return `<span class="${a.cls}${focus}${opts.draggable ? ' drag' : ''}" data-who="${esc(c.name)}" style="${a.style}"><span class="art">${staged(c, project, { editable: opts.draggable })}</span></span>`;
   }).join('');
-  return `<div class="stage look" data-stage style="${lookStyle(look)}"><div class="bg">${backdropHTML(room.bg)}</div>${objects}${chars}<div class="game">${game}</div></div>`;
+  // A drawn path, with its points as handles: only in the editor.
+  const path = opts.path ? `<svg class="pathline" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><polyline points="${opts.path.points.map(p => `${p.x},${p.y}`).join(' ')}" vector-effect="non-scaling-stroke"/></svg>${opts.path.points.map((p, i) =>
+    `<span class="pdot${i === opts.path!.sel ? ' on' : ''}${p.size !== undefined || p.flip !== undefined || p.fx || p.fade !== undefined || p.look ? ' has' : ''}" data-pt="${i}" style="left:${p.x}%;top:${p.y}%" title="Point ${i + 1}"></span>`).join('')}` : '';
+  const pen = opts.pen ? '<div class="pendraw" data-pen><span>Draw the path: hold the mouse down and move</span></div>' : '';
+  return `<div class="stage look" data-stage style="${lookStyle(look)}"><div class="bg">${backdropHTML(room.bg)}</div>${objects}${chars}<div class="game">${game}</div>${path}${pen}</div>`;
 }
 

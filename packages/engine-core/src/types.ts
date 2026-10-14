@@ -44,6 +44,23 @@ export interface HideStep { t: 'hide'; who: string; fx: string }
 export interface MarkStep { t: 'mark'; who: string; mark: string; off?: boolean }
 /** How someone moves while standing, from here on: breathe, sway, bob, float, bounce, or none. */
 export interface LoopStep { t: 'loop'; who: string; move: Idle }
+/** A point on a drawn path, in percent of the stage. A point can change things as the character passes it. */
+export interface PathPoint {
+  x: number;
+  y: number;
+  /** Height in percent of the stage from here on (eased between points). */
+  size?: number;
+  /** Turn around (true) or face forward (false) here. */
+  flip?: boolean;
+  /** A line effect played here: shake, bounce, pop… */
+  fx?: string;
+  /** How visible, 0 to 100, from here on (eased between points). */
+  fade?: number;
+  /** A look the character switches to here. */
+  look?: string;
+}
+/** Move someone along a drawn path over a time, once, in a loop or back and forth. It goes on while lines are read. */
+export interface PathStep { t: 'path'; who: string; points: PathPoint[]; secs: number; repeat?: 'loop' | 'pingpong'; ease?: 'steady' }
 /** A movement a character repeats while standing. Strength and speed run from 1 to 5 (3 is normal). */
 export interface Idle { move: string; strength?: number; speed?: number }
 export interface ChoiceOption { text: string; effects: Effect[]; steps: Step[] }
@@ -62,8 +79,8 @@ export interface MusicStep { t: 'music'; track: string; once?: boolean }
 export interface NoteStep { t: 'note'; text: string }
 
 /** One step of a conversation. */
-export type Step = SayStep | ChoiceStep | IfStep | ChangeStep | DoorStep | EndStep | PartStep | JumpStep | NoteStep | ShowStep | MoveStep | HideStep | MusicStep | MarkStep | LoopStep;
-export type StageStep = ShowStep | MoveStep | HideStep | MarkStep | LoopStep;
+export type Step = SayStep | ChoiceStep | IfStep | ChangeStep | DoorStep | EndStep | PartStep | JumpStep | NoteStep | ShowStep | MoveStep | HideStep | MusicStep | MarkStep | LoopStep | PathStep;
+export type StageStep = ShowStep | MoveStep | HideStep | MarkStep | LoopStep | PathStep;
 
 export interface ScriptError {
   /** 1-based line number in the written script. */

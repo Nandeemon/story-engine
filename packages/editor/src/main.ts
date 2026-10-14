@@ -1,7 +1,7 @@
 import '@story-engine/runtime/game.css';
 import './editor.css';
-import { walkSteps, characterOf, cleanLookName, cleanMarkName, cleanSoundName, factName, renameMarkInScript, renameSoundInScript, toValue, createProject, createRoom, findLook, findRoomByName, newId, normalizeProject, parseScript, renameLookInScript, renameRoomInScript, renameSpeakerInScript, uniqueLookName, writeScript, getStep } from '@story-engine/engine-core';
-import type { Character, CharacterLook, FactDef, Facts, Idle, MarkDef, Project, Room, StoryElement } from '@story-engine/engine-core';
+import { pathAt, simplifyPath, walkSteps, characterOf, cleanLookName, cleanMarkName, cleanSoundName, factName, renameMarkInScript, renameSoundInScript, toValue, createProject, createRoom, findLook, findRoomByName, newId, normalizeProject, parseScript, renameLookInScript, renameRoomInScript, renameSpeakerInScript, uniqueLookName, writeScript, getStep } from '@story-engine/engine-core';
+import type { Character, CharacterLook, FactDef, Facts, Idle, MarkDef, PathStep, Step, Project, Room, StoryElement } from '@story-engine/engine-core';
 import { BACKDROPS, CHARACTERS, OBJECTS, STARTER_MARKS, findMark, backdropHTML, createPlayer, elementArt, esc, fxVars, lookStyle, sayHTML } from '@story-engine/runtime';
 import type { Player, PlayState } from '@story-engine/runtime';
 import { addStory, deleteStory, duplicateStory, listStories, loadStory, sampleProject, saveStory, whenSaved } from './store';
@@ -29,6 +29,9 @@ const MODE_KEY = 'story-engine:convo-mode';
 let convoMode: ConvoMode = 'map';
 try { if (localStorage.getItem(MODE_KEY) === 'script') convoMode = 'script'; } catch { /* default to the map */ }
 let mapSel: string | null = null;
+/** Drawing a path in the scene, and the selected point of the path being edited. */
+let pathPen = false;
+let pathPt: number | null = null;
 const SCENE_KEY = 'story-engine:scene-open';
 let sceneOpen = true;
 try { sceneOpen = localStorage.getItem(SCENE_KEY) !== 'no'; } catch { /* shown */ }
@@ -249,7 +252,7 @@ function renderView(): void {
 
 function mapCtx(): MapCtx | null {
   const e = selected();
-  return e ? { project, room: room(), el: e, sel: mapSel } : null;
+  return e ? { project, room: room(), el: e, sel: mapSel, pen: pathPen, pathPt } : null;
 }
 
 let observer: ResizeObserver | null = null;
@@ -532,7 +535,7 @@ let lookReturn: { elId: string | null; mapSel: string | null } | null = null;
 let lookCompare: 'see-through' | 'difference' = 'see-through';
 
 /** Actions that never change the project, so they are not recorded for Undo. */
-const NOT_RECORDED = new Set(['mark-add', 'music-add', 'cast-sound-add', 'sound-add', 'sound-play', 'cast', 'cast-open', 'cast-back', 'cast-new', 'cast-promote', 'cast-add-looks', 'cast-goto-room', 'cast-goto-convo', 'fx-try', 'scene-toggle', 'home', 'open-story', 'new-story', 'new-sample', 'import-story', 'duplicate-story', 'delete-story', 'test-off', 'look-tab', 'make-game', 'hud-sel', 'play-here', 'check', 'goto-problem', 'test-clear', 'once-lineup', 'look-compare', 'undo', 'redo', 'save-file', 'open-file', 'upload', 'play', 'play-convo', 'stop', 'convo-mode', 'look', 'crumb', 'add-looks', 'look-replace', 'once-picture', 'look-open', 'look-done']);
+const NOT_RECORDED = new Set(['path-draw', 'path-play', 'mark-add', 'music-add', 'cast-sound-add', 'sound-add', 'sound-play', 'cast', 'cast-open', 'cast-back', 'cast-new', 'cast-promote', 'cast-add-looks', 'cast-goto-room', 'cast-goto-convo', 'fx-try', 'scene-toggle', 'home', 'open-story', 'new-story', 'new-sample', 'import-story', 'duplicate-story', 'delete-story', 'test-off', 'look-tab', 'make-game', 'hud-sel', 'play-here', 'check', 'goto-problem', 'test-clear', 'once-lineup', 'look-compare', 'undo', 'redo', 'save-file', 'open-file', 'upload', 'play', 'play-convo', 'stop', 'convo-mode', 'look', 'crumb', 'add-looks', 'look-replace', 'once-picture', 'look-open', 'look-done']);
 
 const actions: Record<string, (k: string) => void> = {
   crumb(k) {
@@ -631,6 +634,8 @@ const actions: Record<string, (k: string) => void> = {
     refreshMap();
   },
   'fx-try'() { tryEffect(); },
+  'path-draw'() { pathPen = true; pathPt = null; refreshMap(); },
+  'path-play'() { playPathPreview(); },
   'mark-add'() { const input = $<HTMLInputElement>('#markfile')!; input.value = ''; input.click(); },
   'mark-reset'(k) { project.marks = project.marks?.filter(m => m.name !== k); if (!project.marks?.length) delete project.marks; for (const c of project.characters) if (c.markAt) delete c.markAt[k]; save(); render(); },
   'mark-delete'(k) {
@@ -1096,6 +1101,108 @@ document.addEventListener('pointerup', () => {
   setTimeout(() => { if (pendingRefresh) refreshMap(); }, 0);
 }, true);
 
+/* ---------- Drawing paths ---------- */
+
+/** The selected path step, read fresh from the script. */
+function selectedPath(): { steps: Step[]; step: PathStep } | null {
+  const ctx = mapCtx();
+  if (!ctx || !mapSel) return null;
+  const steps = parseScript(ctx.el.script).steps;
+  const step = getStep(steps, mapSel);
+  return step?.t === 'path' ? { steps, step } : null;
+}
+
+function writePath(change: (step: PathStep) => void): void {
+  const sp = selectedPath(), ctx = mapCtx();
+  if (!sp || !ctx) return;
+  const before = snapshot();
+  change(sp.step);
+  ctx.el.script = writeScript(sp.steps);
+  save(); record(before); refreshMap();
+}
+
+let pen: { box: DOMRect; pts: { x: number; y: number }[]; svg: SVGPolylineElement } | null = null;
+let dotDrag: { node: HTMLElement; box: DOMRect; i: number; x: number; y: number; moved: boolean } | null = null;
+const toStage = (box: DOMRect, ev: PointerEvent) => ({ x: Math.round((ev.clientX - box.left) / box.width * 1000) / 10, y: Math.round((ev.clientY - box.top) / box.height * 1000) / 10 });
+document.addEventListener('pointerdown', ev => {
+  const t = ev.target as HTMLElement;
+  const surface = t.closest<HTMLElement>('[data-pen]');
+  if (surface && ev.button === 0) {
+    const stage = surface.closest<HTMLElement>('[data-stage]')!;
+    const box = stage.getBoundingClientRect();
+    surface.innerHTML = '<svg class="pathline live" viewBox="0 0 100 100" preserveAspectRatio="none"><polyline vector-effect="non-scaling-stroke"/></svg>';
+    pen = { box, pts: [toStage(box, ev)], svg: surface.querySelector('polyline')! };
+    try { surface.setPointerCapture(ev.pointerId); } catch { /* not supported */ }
+    ev.preventDefault();
+    return;
+  }
+  const dot = t.closest<HTMLElement>('.mpreview .pdot');
+  if (dot && ev.button === 0) {
+    const box = dot.closest<HTMLElement>('[data-stage]')!.getBoundingClientRect();
+    dotDrag = { node: dot, box, i: Number(dot.dataset.pt), x: 0, y: 0, moved: false };
+    try { dot.setPointerCapture(ev.pointerId); } catch { /* not supported */ }
+    ev.preventDefault();
+    ev.stopPropagation();
+  }
+}, true);
+document.addEventListener('pointermove', ev => {
+  if (pen) {
+    const p = toStage(pen.box, ev), last = pen.pts[pen.pts.length - 1];
+    if (Math.hypot(p.x - last.x, p.y - last.y) < 0.4) return;
+    pen.pts.push(p);
+    pen.svg.setAttribute('points', pen.pts.map(q => `${q.x},${q.y}`).join(' '));
+  } else if (dotDrag) {
+    const p = toStage(dotDrag.box, ev);
+    dotDrag.moved = true; dotDrag.x = p.x; dotDrag.y = p.y;
+    dotDrag.node.style.left = `${p.x}%`;
+    dotDrag.node.style.top = `${p.y}%`;
+  }
+});
+document.addEventListener('pointerup', () => {
+  if (pen) {
+    const pts = pen.pts;
+    pen = null;
+    pathPen = false;
+    if (pts.length < 2 || Math.hypot(pts[0].x - pts[pts.length - 1].x, pts[0].y - pts[pts.length - 1].y) < 1 && pts.length < 6) { refreshMap(); toast('Hold the mouse down and move it to draw the path.'); return; }
+    const simple = simplifyPath(pts);
+    writePath(step => { step.points = simple.map(p => ({ x: p.x, y: p.y })); });
+    toast('Path drawn. Click a dot to change size, turn or an effect there.');
+  } else if (dotDrag) {
+    const d = dotDrag;
+    dotDrag = null;
+    if (d.moved) writePath(step => { const pt = step.points[d.i]; if (pt) { pt.x = d.x; pt.y = d.y; } });
+    else { pathPt = d.i; refreshMap(); }
+  }
+});
+
+/** Plays the selected path in the scene picture: one lap, or two for a repeating path. */
+function playPathPreview(): void {
+  const sp = selectedPath();
+  if (!sp) return;
+  const { step } = sp;
+  const node = [...document.querySelectorAll<HTMLElement>('.mscene .el.staged')].find(n => (n.dataset.who ?? '').toLowerCase() === step.who.trim().toLowerCase());
+  if (!node) { toast(`${step.who} is not on stage here.`); return; }
+  const startSize = parseFloat(node.style.height) || 76;
+  const start = performance.now(), until = step.secs * (step.repeat ? 2 : 1);
+  let passed = 0, lap = 0;
+  const tick = () => {
+    const el = (performance.now() - start) / 1000;
+    const st = pathAt(step.points, step.secs, step.repeat, step.ease, startSize, Math.min(el, until));
+    if (st.lap !== lap) { lap = st.lap; passed = 0; }
+    node.style.left = `${st.x}%`; node.style.top = `${st.y}%`; node.style.height = `${st.size}%`;
+    node.style.opacity = String(st.fade / 100);
+    if (st.flip !== undefined) node.classList.toggle('flip', st.flip);
+    for (let i = passed; i < st.passed; i++) {
+      const fx = step.points[i].fx;
+      if (fx) { node.className = node.className.replace(/\bfx-[\w-]+/g, '').trim(); void node.offsetWidth; node.classList.add(`fx-${fx}`); }
+    }
+    passed = st.passed;
+    if (el < until) requestAnimationFrame(tick); else setTimeout(refreshMap, 600);
+  };
+  node.style.transition = 'none';
+  requestAnimationFrame(tick);
+}
+
 /* Dragging a mark in the scene moves it on that character (or for everyone, on a starter figure); the wheel resizes it. */
 let markDrag: { node: HTMLElement; box: DOMRect; name: string; who: string; before: string; x: number; y: number } | null = null;
 function markTarget(who: string, name: string): { set(at: { x?: number; y?: number; size?: number }): void; size: number } | null {
@@ -1267,8 +1374,14 @@ document.addEventListener('click', ev => {
   const ctx = mapCtx();
   if (m && ctx) {
     if ((m as HTMLButtonElement).disabled) return;
+    const act = m.dataset.mapAct!;
+    if (act === 'pt-done') { pathPt = null; refreshMap(); return; }
     const before = snapshot();
-    applyMap(mapAction(ctx, m.dataset.mapAct!, m.dataset.k ?? ''));
+    const prevSel = mapSel;
+    const res = mapAction(ctx, act, m.dataset.k ?? '');
+    const drawNow = act === 'stage-path' || (act === 'insert' && m.dataset.k === 'path');
+    if (res && ((res.sel ?? null) !== prevSel || drawNow)) { pathPt = null; pathPen = drawNow; }
+    applyMap(res);
     record(before);
     if (m.dataset.mapAct === 'quick-sound') previewSound(m.dataset.k ?? '');
     // A new line is ready to type in.

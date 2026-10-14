@@ -1,4 +1,5 @@
-import { createRunner, findLook, findRoomByName, parseScript, startFacts, stepsBefore, talkedFact } from '@story-engine/engine-core';
+import { createRunner, findLook, findRoomByName, parseScript, pathAt, startFacts, stepsBefore, talkedFact } from '@story-engine/engine-core';
+import type { PathStep } from '@story-engine/engine-core';
 import type { ChoiceEvent, Facts, Project, Room, Runner, SayStep, StoryElement } from '@story-engine/engine-core';
 import { applyToScene, fxVars, nextMoment, present, roomScene, staged, stagedAttrs, stagedKey, startScene } from './scene';
 import type { Scene } from './scene';
@@ -156,6 +157,7 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
         node.classList.add(`fx-${c.fx}`);
       }
     }
+    startPaths(stage);
     // Characters brought in for a conversation leave when it ends.
     stage.querySelectorAll<HTMLElement>('.el.staged').forEach(n => {
       if (keep.has(n.dataset.el ?? '')) return;
@@ -214,6 +216,48 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
     const key = ev.who.trim().toLowerCase();
     const c = project.characters.find(x => x.name.trim().toLowerCase() === key);
     return c ? findLook(c, ev.expr)?.sound : undefined;
+  }
+
+  /* Drawn paths run on their own clock, so characters keep moving while lines are read. */
+  const paths = new Map<string, { step: PathStep; start: number; startSize: number; passed: number; lap: number }>();
+  let pathFrame = 0;
+  function startPaths(stage: HTMLElement): void {
+    const scene = s.scene;
+    for (const key of [...paths.keys()]) if (!scene?.chars.some(c => c.key === key && c.path?.step === paths.get(key)!.step)) paths.delete(key);
+    for (const c of scene?.chars ?? []) {
+      if (!c.path || paths.get(c.key)?.step === c.path.step) continue;
+      paths.set(c.key, { step: c.path.step, start: performance.now(), startSize: c.path.startSize, passed: 0, lap: 0 });
+    }
+    if (paths.size && !pathFrame) pathFrame = requestAnimationFrame(() => tickPaths(stage));
+  }
+  function tickPaths(stage: HTMLElement): void {
+    pathFrame = 0;
+    const scene = s.scene;
+    if (!scene) { paths.clear(); return; }
+    const now = performance.now();
+    for (const [key, run] of paths) {
+      const c = scene.chars.find(x => x.key === key);
+      const node = stage.querySelector<HTMLElement>(`[data-el="${CSS.escape(key)}"]`);
+      if (!c || !node || c.path?.step !== run.step) { paths.delete(key); continue; }
+      const st = pathAt(run.step.points, run.step.secs, run.step.repeat, run.step.ease, run.startSize, (now - run.start) / 1000);
+      if (st.lap !== run.lap) { run.lap = st.lap; run.passed = 0; }
+      c.x = st.x; c.y = st.y; c.size = st.size; c.fade = st.fade;
+      if (st.flip !== undefined) c.flip = st.flip;
+      node.style.left = `${st.x}%`;
+      node.style.top = `${st.y}%`;
+      node.style.height = `${st.size}%`;
+      node.style.opacity = st.fade < 100 ? String(st.fade / 100) : '';
+      node.classList.toggle('flip', c.flip);
+      // Points passed since the last frame play their effect and switch the look.
+      for (let i = run.passed; i < st.passed; i++) {
+        const pt = run.step.points[i];
+        if (pt.look) { c.look = pt.look; node.innerHTML = `<span class="art">${staged(c, project)}</span>`; node.dataset.art = stagedKey(c); }
+        if (pt.fx) { FX_CLASSES.forEach(x => node.classList.remove(x)); void node.offsetWidth; node.classList.add(`fx-${pt.fx}`); }
+      }
+      run.passed = st.passed;
+      if (st.done) { c.path = undefined; node.classList.remove('onpath'); paths.delete(key); }
+    }
+    if (paths.size) pathFrame = requestAnimationFrame(() => tickPaths(stage));
   }
 
   function enter(r: Room): void {
@@ -335,6 +379,8 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
     state: () => s,
     destroy() {
       stopTyping();
+      cancelAnimationFrame(pathFrame);
+      paths.clear();
       stopMusic(true);
       sounds.forEach(a => a.pause());
       host.removeEventListener('click', onClick);

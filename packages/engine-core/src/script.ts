@@ -1,5 +1,5 @@
 import type { CompareOp, Condition, Effect, FactValue, ParseResult, Placement, ScriptError, Step } from './types';
-import { idleText, lineFxText, parseIdle, parseLineFx, parsePlace, placeText } from './staging';
+import { idleText, lineFxText, parseIdle, parseLineFx, parsePathPoints, parsePlace, pathPointsText, placeText } from './staging';
 
 /**
  * Writing mode: turns a conversation written like a script into steps, and back.
@@ -178,6 +178,12 @@ function parse(src: string, noteSources: boolean): ParseResult {
       } else if ((m = l.text.match(/^(un)?mark\s+(.+?)(?:\s+with\s+(.+?))?$/i)) && looksLikeName(m[2]) && (m[3] || m[1]) && !/[.!?]$/.test(l.text)) {
         pos++;
         steps.push(mark(m[1] ? { t: 'mark', who: m[2].trim(), mark: (m[3] ?? '').trim().toLowerCase(), off: true } : { t: 'mark', who: m[2].trim(), mark: m[3].trim().toLowerCase() }, l));
+      } else if ((m = l.text.match(/^path\s+(.+?)\s+over\s+(\d+(?:\.\d+)?)\s*s(?:econds?)?((?:\s+(?:once|loop|pingpong|back and forth|smooth|steady))*)\s*:\s*(.+)$/i)) && looksLikeName(m[1])) {
+        pos++;
+        const opts = m[3].toLowerCase();
+        const points = parsePathPoints(m[4]);
+        if (!points) errors.push({ n: l.n, msg: 'A path lists points as "x y", separated by commas, like: Path Mara over 3s: 30 98, 70 98' });
+        else steps.push(mark({ t: 'path', who: m[1].trim(), points, secs: Number(m[2]), ...(/loop/.test(opts) ? { repeat: 'loop' as const } : /pingpong|back and forth/.test(opts) ? { repeat: 'pingpong' as const } : {}), ...(/steady/.test(opts) ? { ease: 'steady' as const } : {}) }, l));
       } else if ((m = l.text.match(/^loop\s+(.+?)\s+with\s+(.+?)$/i)) && looksLikeName(m[1]) && parseIdle(m[2])) {
         pos++;
         steps.push(mark({ t: 'loop', who: m[1].trim(), move: parseIdle(m[2])! }, l));
@@ -320,6 +326,7 @@ function headerOf(s: Step): string | null {
     case 'hide': return `Hide ${cleanName(s.who)}${s.fx ? ` with ${s.fx}` : ''}`;
     case 'mark': return s.off ? `Unmark ${cleanName(s.who)}${s.mark ? ` with ${oneLine(s.mark)}` : ''}` : `Mark ${cleanName(s.who)} with ${oneLine(s.mark)}`;
     case 'loop': return `Loop ${cleanName(s.who)} with ${idleText(s.move)}`;
+    case 'path': return `Path ${cleanName(s.who)} over ${s.secs}s${s.repeat === 'loop' ? ' loop' : s.repeat === 'pingpong' ? ' back and forth' : ''}${s.ease === 'steady' ? ' steady' : ''}: ${pathPointsText(s.points)}`;
     case 'music': return s.track ? `Music${s.once ? ' once' : ''}: ${oneLine(s.track)}` : 'Music: off';
   }
 }

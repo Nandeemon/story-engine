@@ -133,3 +133,4 @@
 @keyframes mk-drip { 0% { translate: 0 -10%; opacity: 0; } 15% { opacity: 1; } 80% { opacity: 1; } 100% { translate: 0 120%; opacity: 0; } }
 @keyframes mk-fade { from { opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { .el .mv, .mk { animation: none !important; } }
+.stage.play .el.staged.onpath { transition: opacity .35s ease; }
