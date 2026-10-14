@@ -116,7 +116,7 @@ export function areaArt(el: StoryElement, editing: boolean): string {
 }
 
 export function stageHTML(room: Room, o: StageOptions): string {
-  const els = room.els.filter(el => o.mode !== 'look' || el.kind !== 'area').map(el => {
+  const els = room.els.filter(el => !el.offstage && (o.mode !== 'look' || el.kind !== 'area')).map(el => {
     if (el.kind === 'area') {
       const sel = o.mode === 'edit' && el.id === o.selected;
       return `<button class="el area${sel ? ' sel' : ''}" data-el="${esc(el.id)}" style="${elementStyle(el)}" aria-label="${esc(el.name)}">${areaArt(el, o.mode === 'edit')}${sel ? '<span class="rz" data-resize aria-hidden="true"></span>' : ''}</button>`;

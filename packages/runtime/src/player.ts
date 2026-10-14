@@ -114,7 +114,7 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
   /** Draws the room's backdrop and objects once per room; characters are kept up to date by render. */
   function build(): void {
     const r = room();
-    const objects = r.els.filter(e => e.kind !== 'char').map(e =>
+    const objects = r.els.filter(e => e.kind !== 'char' && !e.offstage).map(e =>
       `<button class="el${e.kind === 'area' ? ' area' : ''}" data-el="${esc(e.id)}" style="${elementStyle(e)}" aria-label="${esc(e.name)}">${e.kind === 'area' ? areaArt(e, false) : elementArt(e, undefined, project.characters)}</button>`).join('');
     host.innerHTML = `<div class="stage play" data-stage style="${lookStyle(project.look)}"><div class="bg">${backdropHTML(r.bg)}</div>${objects}<div class="hudlayer"></div><div class="game"></div></div>`;
     builtRoom = r.id;

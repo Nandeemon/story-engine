@@ -8,7 +8,7 @@ import type { Character, CompareOp, FactValue, Idle, Project, Room, Sound, Story
 import { BACKDROPS, CHARACTERS, EXPRESSIONS, FONTS, OBJECTS, THEMES, allMarks, markArt, backdropHTML, characterSVG, choicesHTML, esc, hudHTML, sayHTML, stageHTML } from '@story-engine/runtime';
 import type { Preset } from '@story-engine/runtime';
 
-export type View = 'home' | 'cast' | 'map' | 'room' | 'convo' | 'look' | 'play' | 'check';
+export type View = 'home' | 'cast' | 'library' | 'map' | 'room' | 'convo' | 'look' | 'play' | 'check';
 export type Adding = 'char' | 'object' | 'bg' | null;
 
 export interface UI {
@@ -21,6 +21,10 @@ export interface UI {
   back: View;
   /** The look being lined up, for the selected character. */
   lookEdit: string | null;
+  /** Asking for the name of a new room that the selected thing leads to. */
+  namingRoom?: boolean;
+  /** Drawing a clickable area: the next drag on the picture makes it. */
+  drawArea?: boolean;
 }
 
 const thumbs = <T>(set: Record<string, T & { name: string }>, act: string, cls: string, art: (v: T) => string): string =>
@@ -54,8 +58,19 @@ export function viewHome(stories: StoryInfo[], currentId: string | null): string
   return `<div class="side home"><div class="maphead"><div><h2>Your stories</h2><p class="hint">Every story you make is kept in this browser. Click one to work on it.</p></div>
       <div class="row"><button class="btn play" data-act="new-story">+ New story</button><button class="btn small" data-act="import-story">Open a file</button>${stories.length ? '<button class="btn small quiet" data-act="new-sample">Add the sample story</button>' : ''}</div></div>
     ${first}
-    <div class="map stories">${cards}<button class="card new" data-act="new-story">+ New story</button></div>
+    <div class="map stories">${cards}</div>
     <p class="hint">To keep a backup or move a story to another computer, open it and use Save to file on its Story map. Open a file adds it here as a new story.</p></div>`;
+}
+
+/** Which rooms each room leads to, through Go to in its conversations. */
+export function roomLinks(p: Project): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  for (const r of p.rooms) {
+    const to = new Set<string>();
+    for (const e of r.els) walkSteps(parseScript(e.script).steps, st => { if (st.t === 'door') { const t = findRoomByName(p, st.room); if (t && t !== r) to.add(t.id); } });
+    out.set(r.id, [...to]);
+  }
+  return out;
 }
 
 function soundUses(p: Project, name: string): number {
@@ -110,14 +125,26 @@ function marksSection(p: Project): string {
 export function viewMap(p: Project, ui: UI, errors = 0): string {
   const actions = ui.confirmReset
     ? `<span class="hint">Erase everything?</span><button class="btn small danger" data-act="reset">Yes, start over</button><button class="btn small quiet" data-act="cancel">Keep it</button>`
-    : `<button class="btn small" data-act="save-file">Save to file</button><button class="btn small quiet" data-act="ask-reset">Start over</button>`;
-  const cards = p.rooms.map(r => `<button class="card" data-act="open-room" data-k="${esc(r.id)}"><span class="pic">${backdropHTML(r.bg)}</span><span class="meta"><b>${esc(r.name)}</b><span>${r.els.length} ${r.els.length === 1 ? 'thing' : 'things'} placed${r.auto ? ' · starts talking right away' : ''}</span></span></button>`).join('');
+    : `<button class="btn small" data-act="library">Pictures &amp; sounds</button><button class="btn small" data-act="save-file">Save to file</button><button class="btn small quiet" data-act="ask-reset">Start over</button>`;
+  const links = roomLinks(p);
+  const cards = p.rooms.map((r, i) => {
+    const out = links.get(r.id) ?? [];
+    const names = out.map(id => p.rooms.find(x => x.id === id)?.name).filter(Boolean) as string[];
+    const stuck = p.rooms.length > 1 && !out.length;
+    return `<button class="card roomcard" data-act="open-room" data-k="${esc(r.id)}"><span class="pic">${backdropHTML(r.bg)}${i === 0 ? '<span class="badge start">Start</span>' : ''}${stuck ? '<span class="badge stuck" title="No conversation or area leads out of this room">No way out</span>' : ''}</span><span class="meta"><b>${esc(r.name)}</b><span>${r.els.filter(e => !e.offstage).length} ${r.els.length === 1 ? 'thing' : 'things'} placed${r.auto ? ' · starts talking right away' : ''}</span>${names.length ? `<span class="leads">→ ${names.map(esc).join(', ')}</span>` : ''}</span></button>`;
+  }).join('');
   const publish = `<div class="publish">
       <label class="field"><span>Name of your story</span><input type="text" id="story-title" data-in="story-title" value="${esc(p.title ?? '')}" placeholder="${esc(p.rooms[0]?.name ?? 'Untitled story')}"></label>
       <div class="publishgo"><button class="btn play" data-act="make-game"${errors ? ` data-confirm="Check found ${errors} ${errors === 1 ? 'error' : 'errors'}. Make it anyway?"` : ''}>Make a game file</button><p class="hint">One file with your whole game. Open it in any browser, or upload it to itch.io (as an HTML game) or any website so others can play. Its typeface loads from the internet; offline a similar one shows.</p></div></div>`;
   return `<div class="side"><div class="maphead"><div><h2>Story map</h2><p class="hint">Every room in this story. Click one to work in it. Save to file keeps a copy you can move or back up.</p></div><div class="row">${actions}</div></div>
     ${publish}
     <div class="map">${cards}<button class="card new" data-act="new-room">+ New room</button></div>
+    <svg class="roomlinks" id="roomlinks" aria-hidden="true"></svg></div>`;
+}
+
+/** Pictures and sounds the story uses: marks, sounds and music. */
+export function viewLibrary(p: Project): string {
+  return `<div class="side home"><div class="maphead"><div><h2>Pictures &amp; sounds</h2><p class="hint">Marks, sounds and music for the whole story. Pick them where you need them: in a line, on a thing in a room, or for a room.</p></div></div>
     ${marksSection(p)}
     ${soundsSection(p)}</div>`;
 }
@@ -215,14 +242,26 @@ function moreFields(p: Project, e: StoryElement): string {
   return cond + once + sound;
 }
 
-function areaPanel(p: Project, r: Room, e: StoryElement): string {
+/**
+ * "Clicking it goes to": for a thing whose whole conversation is a Go to (or empty),
+ * pick the room, make a new one with a name, and jump there.
+ */
+function doorField(p: Project, r: Room, e: StoryElement, naming: boolean): string {
   const door = e.script.trim().match(/^go to\s+(.+)$/i);
   const simple = !e.script.trim() || (door && !e.script.trim().includes('\n'));
+  if (!simple) return '';
   const target = door ? door[1].trim().toLowerCase() : '';
   const rooms = p.rooms.filter(x => x.id !== r.id);
-  const leads = simple
-    ? `<label class="field"><span>Clicking it goes to</span><select id="area-door" data-in="area-door"><option value="">Nowhere yet</option>${rooms.map(x => `<option${x.name.toLowerCase() === target ? ' selected' : ''}>${esc(x.name)}</option>`).join('')}<option value="__new">A new room…</option></select></label>`
-    : '';
+  const to = rooms.find(x => x.name.toLowerCase() === target);
+  if (naming) return `<div class="field"><span>Name of the new room</span><div class="row nowrap"><input type="text" id="new-room-name" placeholder="For example: Kitchen" autofocus><button class="btn small ink" data-act="door-new">Make it</button><button class="btn small quiet" data-act="door-cancel">Cancel</button></div></div>`;
+  return `<div class="field"><span>Clicking it goes to</span><select id="area-door" data-in="area-door"><option value="">Nowhere yet</option>${rooms.map(x => `<option${x === to ? ' selected' : ''}>${esc(x.name)}</option>`).join('')}<option value="__new">A new room…</option></select>
+    ${to ? `<button class="btn small quiet" data-act="open-room" data-k="${esc(to.id)}">Go to ${esc(to.name)} now →</button>` : ''}</div>`;
+}
+
+function areaPanel(p: Project, r: Room, e: StoryElement, naming = false): string {
+  const door = e.script.trim().match(/^go to\s+(.+)$/i);
+  const simple = !e.script.trim() || (door && !e.script.trim().includes('\n'));
+  const leads = doorField(p, r, e, naming);
   return `<h2>${esc(e.name)}</h2>
     <button class="btn${simple ? '' : ' play'} block" data-act="convo">${e.script.trim() ? 'Edit what happens on click' : 'Make it say or do something'}</button>
     ${leads}
@@ -236,8 +275,8 @@ function areaPanel(p: Project, r: Room, e: StoryElement): string {
     <p class="hint">Invisible in the game; players see a hand pointer over it. Drag it to move, drag its corner to change its size.</p>`;
 }
 
-function elementPanel(p: Project, e: StoryElement, r?: Room): string {
-  if (e.kind === 'area' && r) return areaPanel(p, r, e);
+function elementPanel(p: Project, e: StoryElement, r?: Room, naming = false): string {
+  if (e.kind === 'area' && r) return areaPanel(p, r, e, naming);
   const name = esc(e.name);
   const c = characterOf(p, e);
   const has = e.script.trim() !== '';
@@ -254,6 +293,7 @@ function elementPanel(p: Project, e: StoryElement, r?: Room): string {
     : '';
   return `<h2>${name}</h2>
     <button class="btn play block" data-act="convo">${label}</button>
+    ${e.kind === 'object' && r ? doorField(p, r, e, naming) : ''}
     <label class="field"><span>Name</span><input type="text" id="el-name" data-in="el-name" value="${name}"></label>
     <label class="field"><span>Size</span><input type="range" id="el-size" data-in="el-size" min="6" max="110" value="${e.size}"></label>
     ${c ? looksStrip(c, e) : ''}
@@ -283,12 +323,14 @@ function backdropField(r: Room): string {
 
 /** What happens when the player walks in: nothing, or a conversation, every visit or the first one. */
 function enterField(r: Room): string {
-  const talkers = r.els.filter(e => e.script.trim());
-  if (!talkers.length) return '';
-  const cur = r.auto ? (r.autoEl && talkers.some(e => e.id === r.autoEl) ? r.autoEl : talkers[0].id) : '';
+  const talkers = r.els.filter(e => e.script.trim() || e.offstage);
+  const own = r.els.find(e => e.offstage);
+  const cur = r.auto ? (r.autoEl && talkers.some(e => e.id === r.autoEl) ? r.autoEl : talkers[0]?.id ?? '') : '';
   return `<div class="field"><span>When the player enters</span><select id="room-auto" data-in="room-auto">
       <option value=""${cur ? '' : ' selected'}>Nothing starts: the player looks around</option>
-      ${talkers.map(e => `<option value="${esc(e.id)}"${cur === e.id ? ' selected' : ''}>${e.kind === 'char' ? `${esc(e.name)} starts talking` : `${esc(e.name)}'s conversation starts`}</option>`).join('')}</select>
+      ${talkers.map(e => `<option value="${esc(e.id)}"${cur === e.id ? ' selected' : ''}>${e.offstage ? 'What I write for entering' : e.kind === 'char' ? `${esc(e.name)} starts talking` : `${esc(e.name)}'s conversation starts`}</option>`).join('')}
+      ${own ? '' : '<option value="__write">Write what happens…</option>'}</select>
+    ${own && cur === own.id ? `<button class="btn small" data-act="edit-enter" data-k="${esc(own.id)}">Edit what happens on entering</button>` : ''}
     ${cur ? `<div class="row"><button class="btn small${r.autoOnce ? ' quiet' : ' ink'}" data-act="room-auto-once" data-k="" aria-pressed="${!r.autoOnce}">Every visit</button><button class="btn small${r.autoOnce ? ' ink' : ' quiet'}" data-act="room-auto-once" data-k="1" aria-pressed="${!!r.autoOnce}">First visit only</button></div>` : ''}</div>`;
 }
 
@@ -318,7 +360,7 @@ export function viewRoom(p: Project, ui: UI, r: Room, e: StoryElement | undefine
   if (!r.bg && !r.els.length) return emptyRoom();
   const c = e ? characterOf(p, e) : undefined;
   const lining = e && c && ui.lookEdit && c.looks.some(l => l.id === ui.lookEdit) ? { elId: e.id, lookId: ui.lookEdit } : undefined;
-  const side = ui.adding ? addingPanel(p, ui.adding) : lining && c ? lookPanel(p, c, lining.lookId) : e ? elementPanel(p, e, r) : roomPanel(p, r);
+  const side = ui.adding ? addingPanel(p, ui.adding) : lining && c ? lookPanel(p, c, lining.lookId) : e ? elementPanel(p, e, r, ui.namingRoom) : roomPanel(p, r);
   return `<div class="work"><div>${stageHTML(r, { mode: 'edit', look: p.look, selected: lining ? null : ui.sel, characters: p.characters, lineup: lining })}</div><aside class="side">${side}</aside></div>`;
 }
 

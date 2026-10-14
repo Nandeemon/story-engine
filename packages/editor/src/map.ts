@@ -6,7 +6,7 @@
  * where the paths continue together. Edits made here rewrite the script, so the
  * script and the map always show the same conversation.
  */
-import { CONDITION_WORDS, FX_NORMAL, IDLE_MOVES, pathAt, ENTER_EFFECTS, EXIT_EFFECTS, LINE_EFFECTS, SPOTS, placeText, snapToSpot, stepsBefore, conditionText, effectText, findRoomByName, getList, getStep, parseScript, splitPath, stepPathOf, summarize, toValue, valueText, walkSteps, writeScript } from '@story-engine/engine-core';
+import { CONDITION_WORDS, FX_NORMAL, IDLE_MOVES, pathAt, placeText as spotText, ENTER_EFFECTS, EXIT_EFFECTS, LINE_EFFECTS, SPOTS, placeText, snapToSpot, stepsBefore, conditionText, effectText, findRoomByName, getList, getStep, parseScript, splitPath, stepPathOf, summarize, toValue, valueText, walkSteps, writeScript } from '@story-engine/engine-core';
 import { characterOf, findLook, hasLook, storyFactNames } from '@story-engine/engine-core';
 import type { Character, ChoiceStep, CompareOp, Effect, Placement, Project, Room, SayStep, Step, StoryElement } from '@story-engine/engine-core';
 import { EXPRESSIONS, allMarks, markArt, applyToScene, esc, nextMoment, sayHTML, sceneHTML, startScene } from '@story-engine/runtime';
@@ -14,6 +14,8 @@ import type { Scene } from '@story-engine/runtime';
 import { musicSelect, soundSelect } from './widgets';
 
 export interface MapCtx {
+  /** The line tool window that is open. */
+  win?: LineWin | null;
   /** Drawing a path for the selected step, and the selected point of it. */
   pen?: boolean;
   pathPt?: number | null;
@@ -425,23 +427,58 @@ const FX_HELP: Record<string, string> = {
 };
 
 /** The line's effect on the speaker, with how strong, fast and often it plays, and the line's sound. */
-function fxField(ctx: MapCtx, step: SayStep): string {
+/** The effect on the speaker, with how strong, fast and often it plays. */
+function effectPart(step: SayStep): string {
   const fx = step.fx ?? '';
   const o = step.fxOpts ?? {};
-  const slider = (key: 'strength' | 'speed' | 'times', label: string, lo: string, hi: string, max: number) => `<label class="field fxs"><span>${label}</span>
-      <input type="range" id="m-fx-${key}" data-map-in="say-fx-${key}" min="1" max="${max}" step="1" value="${o[key] ?? FX_NORMAL[key]}"><span class="fxends"><i>${lo}</i><i>${hi}</i></span></label>`;
-  const effect = step.who ? `<label class="field"><span>Effect on ${esc(step.who)}</span><select id="m-sfx" data-map-in="say-fx"><option value="">None</option>${LINE_EFFECTS.map(f => `<option value="${f}"${f === fx ? ' selected' : ''}>${f} · ${FX_HELP[f] ?? ''}</option>`).join('')}</select></label>
-    ${fx ? `<div class="fxgrid">${slider('strength', 'Strength', 'gentle', 'strong', 5)}${slider('speed', 'Speed', 'slow', 'fast', 5)}${slider('times', 'Times', '1', '5', 5)}</div>
-      <button class="btn small quiet" data-act="fx-try">Play it again</button>` : ''}` : '';
+  const slider = (key: 'strength' | 'speed' | 'times', label: string, lo: string, hi: string) => `<label class="field fxs"><span>${label}</span>
+      <input type="range" id="m-fx-${key}" data-map-in="say-fx-${key}" min="1" max="5" step="1" value="${o[key] ?? FX_NORMAL[key]}"><span class="fxends"><i>${lo}</i><i>${hi}</i></span></label>`;
+  return `<div class="fxpick">${['', ...LINE_EFFECTS].map(f => `<button class="fxopt${f === fx ? ' on' : ''}" data-map-act="say-fx-pick" data-k="${f}" aria-pressed="${f === fx}"><b>${f || 'None'}</b>${f ? `<span>${FX_HELP[f] ?? ''}</span>` : ''}</button>`).join('')}</div>
+    ${fx ? `<div class="fxgrid">${slider('strength', 'Strength', 'gentle', 'strong')}${slider('speed', 'Speed', 'slow', 'fast')}${slider('times', 'Times', '1', '5')}</div>
+      <button class="btn small quiet" data-act="fx-try">▶ Play it again</button>` : ''}`;
+}
+
+function marksPart(ctx: MapCtx, step: SayStep): string {
+  const on = new Set((step.marks ?? []).map(lower));
+  return `<div class="quick markpick">${allMarks(ctx.project).map(m =>
+    `<button class="chip mchip${on.has(m.name) ? ' on' : ''}" data-map-act="line-mark" data-k="${esc(m.name)}" title="${esc(m.name)}" aria-pressed="${on.has(m.name)}"><span class="mthumb">${markArt(m)}</span>${esc(m.name)}</button>`).join('')}</div>
+    <p class="hint">${on.size ? 'Drag a mark in the scene to move it on this character; the wheel over it changes its size.' : 'Marks show on the speaker for this line only. To keep one on, add the step "Put a mark on someone".'}</p>`;
+}
+
+function soundPart(ctx: MapCtx, step: SayStep): string {
   const who = speakerOf(ctx.project, ctx.room, step.who).character;
   const mine = who ? (ctx.project.sounds ?? []).filter(x => x.owner === who.id) : [];
   const quick = mine.length ? `<div class="quick">${mine.map(x => `<button class="chip${lower(x.name) === lower(step.sound ?? '') ? ' on' : ''}" data-map-act="quick-sound" data-k="${esc(x.name)}" title="Play ${esc(x.name)} with this line">♪ ${esc(soundLabel(x.name, who!.name))}</button>`).join('')}</div>` : '';
-  const on = new Set((step.marks ?? []).map(lower));
-  const marks = step.who ? `<div class="field"><span>Marks on ${esc(step.who)} for this line</span><div class="quick markpick">${allMarks(ctx.project).map(m =>
-    `<button class="chip mchip${on.has(m.name) ? ' on' : ''}" data-map-act="line-mark" data-k="${esc(m.name)}" title="${esc(m.name)}" aria-pressed="${on.has(m.name)}"><span class="mthumb">${markArt(m)}</span>${esc(m.name)}</button>`).join('')}</div>
-    ${on.size ? '<p class="hint">Drag a mark in the scene to move it on this character; the wheel over it changes its size.</p>' : ''}</div>` : '';
-  return `<div class="stagebox"><div class="label">Effect, marks and sound</div>${effect}${marks}
-    <label class="field"><span>Sound with this line</span>${soundSelect(ctx.project, 'm-sound', 'data-map-in="say-sound"', step.sound, 'No sound', who)}</label>${quick}</div>`;
+  return `<label class="field"><span>Sound with this line</span>${soundSelect(ctx.project, 'm-sound', 'data-map-in="say-sound"', step.sound, 'No sound', who)}</label>${quick}`;
+}
+
+export type LineWin = 'fx' | 'marks' | 'sound' | 'stage' | 'facts';
+
+/**
+ * The line's extras as a row of chips that say what is set; each opens its own
+ * small window, so the panel itself stays short.
+ */
+function lineTools(ctx: MapCtx, step: SayStep, scene: Scene): string {
+  const who = speakerOf(ctx.project, ctx.room, step.who).character;
+  const facts = !!who?.facts?.some(d => d.kind !== 'word');
+  const me = scene.chars.find(c => c.visible && lower(c.name) === lower(step.who));
+  const chip = (k: LineWin, label: string, value: string, show = true) => show ? `<button class="tool${ctx.win === k ? ' open' : ''}${value ? ' set' : ''}" data-act="win" data-k="${k}" aria-expanded="${ctx.win === k}"><b>${label}</b><span>${value ? esc(value) : '—'}</span></button>` : '';
+  return `<div class="tools4">
+    ${chip('fx', 'Effect', step.fx ?? '', !!step.who)}
+    ${chip('marks', 'Marks', (step.marks ?? []).join(', '), !!step.who)}
+    ${chip('sound', 'Sound', step.sound ?? '')}
+    ${chip('stage', 'Stage', me ? `${spotText({ x: Math.round(me.x) }) || `${Math.round(me.x)}%`}${me.flip ? ', turned' : ''}` : step.who ? 'not on stage' : '')}
+    ${chip('facts', 'Story facts', '', facts)}
+  </div>`;
+}
+
+/** The window a line tool opens. */
+function lineWindow(ctx: MapCtx, step: SayStep, scene: Scene): string {
+  const titles: Record<LineWin, string> = { fx: `Effect on ${step.who}`, marks: `Marks on ${step.who}`, sound: 'Sound', stage: 'On stage', facts: 'After this line' };
+  const w = ctx.win!;
+  const body = w === 'fx' ? effectPart(step) : w === 'marks' ? marksPart(ctx, step) : w === 'sound' ? soundPart(ctx, step)
+    : w === 'stage' ? stageField(ctx, scene, step.who) : quickFacts(ctx, step);
+  return `<div class="win" role="dialog" aria-label="${esc(titles[w])}"><div class="winh"><b>${esc(titles[w])}</b><button class="btn small quiet" data-act="win" data-k="" aria-label="Close">✕</button></div><div class="winb">${body || '<p class="hint">Nothing to set here.</p>'}</div></div>`;
 }
 
 /** A character's sound without their name in front: "lin laugh" shows as "laugh". */
@@ -459,7 +496,7 @@ function quickFacts(ctx: MapCtx, step: SayStep): string {
   const buttons = defs.map(d => d.kind === 'number'
     ? `<button class="chip" data-map-act="quick-change" data-k="${esc(d.fact)}|+|1">+1 ${esc(short(d.fact))}</button><button class="chip" data-map-act="quick-change" data-k="${esc(d.fact)}|-|1">−1 ${esc(short(d.fact))}</button>`
     : d.kind === 'word' ? '' : `<button class="chip" data-map-act="quick-change" data-k="${esc(d.fact)}|=|yes">✓ ${esc(short(d.fact))}</button>`).join('');
-  return buttons ? `<div class="stagebox"><div class="label">After this line</div><div class="quick">${buttons}</div><p class="hint">Adds a Change for ${esc(who.name)}'s story facts right after this line.</p></div>` : '';
+  return buttons ? `<div class="quick">${buttons}</div><p class="hint">Adds a Change for ${esc(who.name)}'s story facts right after this line.</p>` : '';
 }
 
 function stageField(ctx: MapCtx, scene: Scene, who: string): string {
@@ -475,7 +512,7 @@ function stageField(ctx: MapCtx, scene: Scene, who: string): string {
   const people = others.length ? `<div class="label">Also on stage</div><div class="cast">${others.map(c =>
     `<span class="chip">${esc(c.name)} <button class="linkbtn" data-map-act="stage-hide" data-k="${esc(c.name)}">take out</button></span>`).join('')}</div>` : '';
   const bring = who.trim() || out.length ? `<label class="field"><span>Bring someone in for this line</span><select id="m-sshow" data-map-in="stage-show"><option value="">Choose…</option>${out.map(n => `<option>${esc(n)}</option>`).join('')}<option value="__new">+ New character from a picture…</option></select></label>` : '';
-  return mine || people || bring ? `<div class="stagebox"><div class="label">On stage</div>${mine}${people}${bring}</div>` : '';
+  return mine || people || bring ? `${mine}${people}${bring}` : '';
 }
 
 /** The look picker for a line: the speaker's own looks, or the starter figure's expressions. */
@@ -573,9 +610,8 @@ export function mapSide(ctx: MapCtx): string {
         ${unknownSpeaker(ctx, step.who) ? `<p class="hint">No character is called "${esc(step.who)}", so this line is a voice without a picture. If it is narration, clear Who speaks.</p>` : ''}
         <label class="field"><span>${step.who ? 'What they say' : 'Narration'}</span><textarea id="m-text" data-map-in="say-text" rows="3" placeholder="Type the line here">${step.text === '...' ? '' : esc(step.text)}</textarea></label>
         ${lookField(ctx, step.who, step.expr)}
-        ${fxField(ctx, step)}
-        ${quickFacts(ctx, step)}
-        ${stageField(ctx, scene, step.who)}
+        ${lineTools(ctx, step, scene)}
+        ${ctx.win ? lineWindow(ctx, step, scene) : ''}
         <div class="row"><button class="btn small" data-map-act="add-after">+ Line after this</button><button class="btn small play" data-act="play-here" title="Play the conversation from this line, with the scene as it stands here">Play from here</button>${del()}</div>`;
     }
     case 'show':
@@ -838,6 +874,13 @@ export function mapAction(ctx: MapCtx, act: string, k: string): MapResult | unde
       const list = (step.marks ?? []).filter(x => lower(x) !== lower(k));
       if (list.length === (step.marks ?? []).length) list.push(lower(k));
       step.marks = list.length ? list : undefined;
+      return commit(ctx.sel);
+    }
+    case 'say-fx-pick': {
+      const step = getStep(steps, path);
+      if (step?.t !== 'say') return undefined;
+      step.fx = k || undefined;
+      if (!k) delete step.fxOpts;
       return commit(ctx.sel);
     }
     case 'quick-sound': {

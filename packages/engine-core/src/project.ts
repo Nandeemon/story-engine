@@ -125,6 +125,7 @@ export function normalizeProject(raw: unknown): Project | null {
       size: num(e.size, 50),
       ...(e.kind === 'area' ? { w: clamp(num(e.w, 20), 1, 100) } : {}),
       ...(e.kind === 'char' && normalizeIdle(e.idle) ? { idle: normalizeIdle(e.idle) } : {}),
+      ...(e.offstage === true ? { offstage: true } : {}),
       ...(normalizeCondition(e.cond) ? { cond: normalizeCondition(e.cond) } : {}),
       ...(e.once === 'stay' || e.once === 'hide' ? { once: e.once } : {}),
       ...(typeof e.sound === 'string' && e.sound ? { sound: e.sound } : {}),

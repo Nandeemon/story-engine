@@ -187,6 +187,8 @@ export interface StoryElement {
   once?: 'stay' | 'hide';
   /** A sound from the story's sounds, by name, played when the player clicks it. */
   sound?: string;
+  /** Not drawn in the room: holds the conversation a room starts with when the player enters. */
+  offstage?: boolean;
   /** For characters: how they move while standing; the character's own setting when left out. */
   idle?: Idle;
   /** Starting expression or look for characters. */

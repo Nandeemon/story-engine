@@ -6,12 +6,12 @@ import { BACKDROPS, CHARACTERS, OBJECTS, STARTER_MARKS, findMark, backdropHTML, 
 import type { Player, PlayState } from '@story-engine/runtime';
 import { addStory, deleteStory, duplicateStory, listStories, loadStory, sampleProject, saveStory, whenSaved } from './store';
 import type { StoryInfo } from './store';
-import { inserts, lookStage, scriptStatus, viewCheck, viewConvo, viewHome, viewLook, viewMap, viewPlay, viewRoom } from './views';
+import { inserts, lookStage, roomLinks, scriptStatus, viewCheck, viewConvo, viewHome, viewLibrary, viewLook, viewMap, viewPlay, viewRoom } from './views';
 import { factKind, findProblems, storyFacts } from './problems';
 import type { Problem } from './problems';
 import type { Adding, ConvoMode, LookTab, UI, View } from './views';
 import { applyZoom, drawEdges, mapAction, mapHTML, mapInput, mapScene, mapSide, mapView, openView, setZoom } from './map';
-import type { MapCtx, MapResult } from './map';
+import type { LineWin, MapCtx, MapResult } from './map';
 import { readProjectFile, saveToFile } from './files';
 import { viewCast } from './cast';
 
@@ -32,6 +32,8 @@ let mapSel: string | null = null;
 /** Drawing a path in the scene, and the selected point of the path being edited. */
 let pathPen = false;
 let pathPt: number | null = null;
+/** The line tool window open in the map's side panel. */
+let lineWin: LineWin | null = null;
 const SCENE_KEY = 'story-engine:scene-open';
 let sceneOpen = true;
 try { sceneOpen = localStorage.getItem(SCENE_KEY) !== 'no'; } catch { /* shown */ }
@@ -184,6 +186,7 @@ function crumbs(): [string, string][] {
   if (ui.view !== 'map') list.push(['room', r.name]);
   if (ui.view === 'convo' && e) list.push(['el', e.name], ['convo', 'Conversation']);
   if (ui.view === 'look') list.push(['look', 'Look']);
+  if (ui.view === 'library') { list.splice(2); list.push(['library', 'Pictures & sounds']); }
   if (ui.view === 'cast') { list.splice(2); list.push(['cast', 'Characters']); const c = project.characters.find(x => x.id === castSel); if (c) list.push(['cast-one', c.name]); }
   if (ui.view === 'check') list.push(['check', 'Check']);
   return list;
@@ -210,6 +213,43 @@ function renderBar(): void {
        ${checkButton()}<button class="btn${ui.view === 'cast' ? ' ink' : ''}" data-act="cast">Characters</button><button class="btn${ui.view === 'look' ? ' ink' : ''}" data-act="look">Look</button><button class="btn play" data-act="play">Play</button>`;
 }
 
+/** Arrows between room cards on the Story map, for every Go to from one room to another. */
+function drawRoomLinks(): void {
+  const svg = document.getElementById('roomlinks') as SVGSVGElement | null;
+  const host = svg?.parentElement;
+  if (!svg || !host) return;
+  const box = host.getBoundingClientRect();
+  svg.setAttribute('width', String(host.scrollWidth));
+  svg.setAttribute('height', String(host.scrollHeight));
+  const rect = (id: string) => host.querySelector<HTMLElement>(`.roomcard[data-k="${CSS.escape(id)}"]`)?.getBoundingClientRect();
+  const paths: string[] = [];
+  for (const [from, tos] of roomLinks(project)) {
+    const a = rect(from);
+    if (!a) continue;
+    for (const to of tos) {
+      const b = rect(to);
+      if (!b) continue;
+      // Two-way links run side by side; each leaves from the edge facing the other card.
+      const two = roomLinks(project).get(to)?.includes(from) ? (from < to ? -9 : 9) : 0;
+      const acx = a.left + a.width / 2, acy = a.top + a.height / 2, bcx = b.left + b.width / 2, bcy = b.top + b.height / 2;
+      let sx: number, sy: number, ex: number, ey: number;
+      if (Math.abs(bcx - acx) >= Math.abs(bcy - acy)) {
+        const right = bcx > acx;
+        sx = (right ? a.right : a.left) - box.left; ex = (right ? b.left : b.right) - box.left;
+        sy = acy - box.top + two; ey = bcy - box.top + two;
+      } else {
+        const down = bcy > acy;
+        sy = (down ? a.bottom : a.top) - box.top; ey = (down ? b.top : b.bottom) - box.top;
+        sx = acx - box.left + two; ex = bcx - box.left + two;
+      }
+      const cx = (sx + ex) / 2 + (ey - sy) * 0.12, cy = (sy + ey) / 2 - (ex - sx) * 0.12;
+      paths.push(`<path d="M${sx},${sy} Q${cx},${cy} ${ex},${ey}" marker-end="url(#rl-arrow)"/>`);
+    }
+  }
+  svg.innerHTML = `<defs><marker id="rl-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>${paths.join('')}`;
+}
+window.addEventListener('resize', () => { if (ui.view === 'map') drawRoomLinks(); });
+
 /** "More" sections that were open stay open when the view is drawn again. */
 function keepOpenDetails(draw: () => void): void {
   const open = [...document.querySelectorAll<HTMLDetailsElement>('#main details[id]')].filter(d => d.open).map(d => d.id);
@@ -231,8 +271,16 @@ function renderView(): void {
   switch (ui.view) {
     case 'home': main.innerHTML = viewHome(stories, storyId); break;
     case 'cast': main.innerHTML = viewCast(project, castSel); break;
-    case 'map': main.innerHTML = viewMap(project, ui, problems.filter(x => x.level === 'error').length); break;
-    case 'room': main.innerHTML = viewRoom(project, ui, r, e); break;
+    case 'library': main.innerHTML = viewLibrary(project); break;
+    case 'map': main.innerHTML = viewMap(project, ui, problems.filter(x => x.level === 'error').length); requestAnimationFrame(drawRoomLinks); break;
+    case 'room':
+      main.innerHTML = viewRoom(project, ui, r, e);
+      if (ui.drawArea) {
+        $('.stage.edit')?.insertAdjacentHTML('beforeend', '<div class="pendraw areadraw" data-areadraw><span>Drag a box over the door, window or sign</span><i class="abox"></i></div>');
+        const side = $('aside.side');
+        if (side) side.innerHTML = '<h2>Draw a clickable area</h2><p class="hint">Hold the mouse down at one corner and drag to the other, over the part of the picture players should click.</p><button class="btn small quiet" data-act="area-cancel">Cancel</button>';
+      }
+      break;
     case 'convo': {
       const ctx = mapCtx()!;
       main.innerHTML = viewConvo(project, r, e!, convoMode, { canvas: convoMode === 'map' ? mapHTML(ctx) : '', side: convoMode === 'map' ? mapSide(ctx) : '', scene: convoMode === 'map' ? mapScene(ctx, sceneOpen) : '', sceneOpen });
@@ -252,7 +300,7 @@ function renderView(): void {
 
 function mapCtx(): MapCtx | null {
   const e = selected();
-  return e ? { project, room: room(), el: e, sel: mapSel, pen: pathPen, pathPt } : null;
+  return e ? { project, room: room(), el: e, sel: mapSel, pen: pathPen, pathPt, win: lineWin } : null;
 }
 
 let observer: ResizeObserver | null = null;
@@ -409,6 +457,8 @@ function place(el: StoryElement): void {
 }
 
 function go(view: View): void {
+  ui.namingRoom = false;
+  ui.drawArea = false;
   if (view !== 'room' && view !== 'convo') lookReturn = null;
   ui.view = view;
   ui.adding = null;
@@ -535,7 +585,7 @@ let lookReturn: { elId: string | null; mapSel: string | null } | null = null;
 let lookCompare: 'see-through' | 'difference' = 'see-through';
 
 /** Actions that never change the project, so they are not recorded for Undo. */
-const NOT_RECORDED = new Set(['path-draw', 'path-play', 'mark-add', 'music-add', 'cast-sound-add', 'sound-add', 'sound-play', 'cast', 'cast-open', 'cast-back', 'cast-new', 'cast-promote', 'cast-add-looks', 'cast-goto-room', 'cast-goto-convo', 'fx-try', 'scene-toggle', 'home', 'open-story', 'new-story', 'new-sample', 'import-story', 'duplicate-story', 'delete-story', 'test-off', 'look-tab', 'make-game', 'hud-sel', 'play-here', 'check', 'goto-problem', 'test-clear', 'once-lineup', 'look-compare', 'undo', 'redo', 'save-file', 'open-file', 'upload', 'play', 'play-convo', 'stop', 'convo-mode', 'look', 'crumb', 'add-looks', 'look-replace', 'once-picture', 'look-open', 'look-done']);
+const NOT_RECORDED = new Set(['area-cancel', 'door-cancel', 'edit-enter', 'library', 'win', 'path-draw', 'path-play', 'mark-add', 'music-add', 'cast-sound-add', 'sound-add', 'sound-play', 'cast', 'cast-open', 'cast-back', 'cast-new', 'cast-promote', 'cast-add-looks', 'cast-goto-room', 'cast-goto-convo', 'fx-try', 'scene-toggle', 'home', 'open-story', 'new-story', 'new-sample', 'import-story', 'duplicate-story', 'delete-story', 'test-off', 'look-tab', 'make-game', 'hud-sel', 'play-here', 'check', 'goto-problem', 'test-clear', 'once-lineup', 'look-compare', 'undo', 'redo', 'save-file', 'open-file', 'upload', 'play', 'play-convo', 'stop', 'convo-mode', 'look', 'crumb', 'add-looks', 'look-replace', 'once-picture', 'look-open', 'look-done']);
 
 const actions: Record<string, (k: string) => void> = {
   crumb(k) {
@@ -634,6 +684,8 @@ const actions: Record<string, (k: string) => void> = {
     refreshMap();
   },
   'fx-try'() { tryEffect(); },
+  library() { go('library'); },
+  win(k) { lineWin = !k || lineWin === k ? null : k as LineWin; refreshMap(); },
   'path-draw'() { pathPen = true; pathPt = null; refreshMap(); },
   'path-play'() { playPathPreview(); },
   'mark-add'() { const input = $<HTMLInputElement>('#markfile')!; input.value = ''; input.click(); },
@@ -725,10 +777,22 @@ const actions: Record<string, (k: string) => void> = {
     toast(`Deleted ${c.name}. Their lines stay, as a voice without a picture. Undo brings ${c.name} back.`);
   },
   'scene-toggle'() { sceneOpen = !sceneOpen; try { localStorage.setItem(SCENE_KEY, sceneOpen ? 'yes' : 'no'); } catch { /* this session */ } refreshMap(); },
-  'add-area'() {
-    const n = room().els.filter(x => x.kind === 'area').length + 1;
-    place({ id: newId(), kind: 'area', name: n === 1 ? 'Clickable area' : `Clickable area ${n}`, x: 50, y: 72, size: 44, w: 14, script: '' });
+  'add-area'() { ui.adding = null; ui.sel = null; ui.drawArea = true; render(); },
+  'area-cancel'() { ui.drawArea = false; render(); },
+  'door-new'() {
+    const e = selected(), input = $<HTMLInputElement>('#new-room-name');
+    if (!e || !input) return;
+    const name = input.value.replace(/[\n:]/g, ' ').trim();
+    if (!name) { input.focus(); toast('Give the new room a name.'); return; }
+    const r = createRoom(uniqueRoomName(name));
+    project.rooms.push(r);
+    e.script = `Go to ${r.name}`;
+    ui.namingRoom = false;
+    save(); render();
+    toast(`Made the room "${r.name}". Use "Go to ${r.name} now" to set it up.`);
   },
+  'door-cancel'() { ui.namingRoom = false; render(); },
+  'edit-enter'(k) { ui.sel = k; mapSel = null; freshConvo = true; go('convo'); },
   'room-auto-once'(k) { room().autoOnce = k === '1' || undefined; save(); render(); },
   'add-object'(k) {
     place({ id: newId(), kind: 'object', preset: k, name: OBJECTS[k].name, x: 60, y: 78, size: 16, script: '' });
@@ -862,8 +926,15 @@ function tryEffect(): void {
 }
 
 document.addEventListener('keydown', ev => {
+  if ((ev.target as HTMLElement).id === 'new-room-name' && ev.key === 'Enter') { ev.preventDefault(); const before = snapshot(); actions['door-new'](''); record(before); return; }
+  if (ev.key === 'Escape' && ui.drawArea) { ui.drawArea = false; render(); return; }
   if ((ev.target as HTMLElement).id === 'cast-fact-name' && ev.key === 'Enter') { ev.preventDefault(); const before = snapshot(); actions['cast-fact-add'](''); record(before); }
 });
+
+// Escape closes an open line window first, before it would deselect the step.
+document.addEventListener('keydown', ev => {
+  if (ev.key === 'Escape' && lineWin) { ev.stopImmediatePropagation(); lineWin = null; refreshMap(); }
+}, true);
 
 /* ---------- New characters from a picture ---------- */
 
@@ -1100,6 +1171,42 @@ document.addEventListener('pointerup', () => {
   pointerDown = false;
   setTimeout(() => { if (pendingRefresh) refreshMap(); }, 0);
 }, true);
+
+/* ---------- Drawing a clickable area ---------- */
+
+let areaDrag: { box: DOMRect; x0: number; y0: number; x1: number; y1: number; el: HTMLElement } | null = null;
+document.addEventListener('pointerdown', ev => {
+  const host = (ev.target as HTMLElement).closest<HTMLElement>('[data-areadraw]');
+  if (!host || ev.button !== 0) return;
+  const box = host.getBoundingClientRect();
+  const p = toStage(box, ev);
+  areaDrag = { box, x0: p.x, y0: p.y, x1: p.x, y1: p.y, el: host.querySelector<HTMLElement>('.abox')! };
+  try { host.setPointerCapture(ev.pointerId); } catch { /* not supported */ }
+  ev.preventDefault();
+  ev.stopPropagation();
+}, true);
+document.addEventListener('pointermove', ev => {
+  const d = areaDrag;
+  if (!d) return;
+  const p = toStage(d.box, ev);
+  d.x1 = p.x; d.y1 = p.y;
+  const l = Math.min(d.x0, d.x1), t = Math.min(d.y0, d.y1);
+  d.el.style.cssText = `display:block;left:${l}%;top:${t}%;width:${Math.abs(d.x1 - d.x0)}%;height:${Math.abs(d.y1 - d.y0)}%`;
+});
+document.addEventListener('pointerup', () => {
+  const d = areaDrag;
+  areaDrag = null;
+  if (!d) return;
+  const w = Math.abs(d.x1 - d.x0), h = Math.abs(d.y1 - d.y0);
+  if (w < 2 || h < 2) { toast('Drag a little further to make the box.'); return; }
+  const r1 = (n: number) => Math.round(n * 10) / 10;
+  const left = Math.min(d.x0, d.x1), bottom = Math.max(d.y0, d.y1);
+  const n = room().els.filter(x => x.kind === 'area' && !x.offstage).length + 1;
+  ui.drawArea = false;
+  const before = snapshot();
+  place({ id: newId(), kind: 'area', name: n === 1 ? 'Clickable area' : `Clickable area ${n}`, x: r1(left + w / 2), y: r1(bottom), size: r1(h), w: r1(w), script: '' });
+  record(before);
+});
 
 /* ---------- Drawing paths ---------- */
 
@@ -1380,7 +1487,9 @@ document.addEventListener('click', ev => {
     const prevSel = mapSel;
     const res = mapAction(ctx, act, m.dataset.k ?? '');
     const drawNow = act === 'stage-path' || (act === 'insert' && m.dataset.k === 'path');
-    if (res && ((res.sel ?? null) !== prevSel || drawNow)) { pathPt = null; pathPen = drawNow; }
+    if (res && ((res.sel ?? null) !== prevSel || drawNow)) { pathPt = null; pathPen = drawNow; if (act !== 'stage-path') lineWin = null; }
+    if (act === 'stage-path') lineWin = null;
+    if (act === 'say-fx-pick') setTimeout(tryEffect, 60);
     applyMap(res);
     record(before);
     if (m.dataset.mapAct === 'quick-sound') previewSound(m.dataset.k ?? '');
@@ -1507,7 +1616,19 @@ document.addEventListener('input', ev => {
     case 'el-expr': if (e) { e.expr = t.value; if (node) node.innerHTML = elementArt(e, undefined, project.characters); } break;
     case 'look-scale': { const l = editedLook(); if (l && e) { l.scale = Number(t.value); if (node) node.innerHTML = elementArt(e, undefined, project.characters, l.id); } break; }
     case 'room-name': { room().name = t.value; const c = $('#crumbs [aria-current]'); if (c) c.textContent = t.value; break; }
-    case 'room-auto': { const r = room(); r.auto = !!t.value; if (t.value) r.autoEl = t.value; else { delete r.autoEl; delete r.autoOnce; } save(); render(); return; }
+    case 'room-auto': {
+      const r = room();
+      if (t.value === '__write') {
+        const el: StoryElement = { id: newId(), kind: 'area', offstage: true, name: `Entering ${r.name}`, x: 0, y: 0, size: 1, w: 1, script: '' };
+        r.els.push(el);
+        r.auto = true; r.autoEl = el.id;
+        save();
+        ui.sel = el.id; mapSel = null; freshConvo = true; go('convo');
+        return;
+      }
+      r.auto = !!t.value; if (t.value) r.autoEl = t.value; else { delete r.autoEl; delete r.autoOnce; }
+      save(); render(); return;
+    }
     case 'mark-anim': { const m = ownMark(t.dataset.k ?? ''); if (m) { m.anim = t.value as MarkDef['anim']; save(); render(); } return; }
     case 'mark-speed': { const m = ownMark(t.dataset.k ?? ''); if (m) { const n = Number(t.value); if (n === 3) delete m.speed; else m.speed = n; } break; }
     case 'mark-size': { const m = ownMark(t.dataset.k ?? ''); if (m) m.size = Number(t.value); break; }
@@ -1580,14 +1701,7 @@ document.addEventListener('input', ev => {
     }
     case 'area-door': {
       if (!e) break;
-      if (t.value === '__new') {
-        const r = createRoom(uniqueRoomName('New room'));
-        project.rooms.push(r);
-        e.script = `Go to ${r.name}`;
-        save(); render();
-        toast(`Added the room "${r.name}". Open it from the Story map to set it up.`);
-        return;
-      }
+      if (t.value === '__new') { ui.namingRoom = true; render(); $<HTMLInputElement>('#new-room-name')?.focus(); return; }
       e.script = t.value ? `Go to ${t.value}` : '';
       save(); render(); return;
     }
