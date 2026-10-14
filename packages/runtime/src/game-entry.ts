@@ -23,12 +23,14 @@ body { display: grid; place-items: center; overflow: hidden; }
 .titlescreen button.quiet { background: transparent; color: var(--g-fg); box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--g-fg) 60%, transparent); }
 .titlescreen button:focus-visible { outline: 3px solid var(--g-fg); outline-offset: 3px; }
 .turn { display: none; }
-@media (orientation: portrait) and (max-width: 760px) {
-  .turn { display: block; position: fixed; left: 0; right: 0; bottom: 8vh; color: #cfc8dc; font: 15px/1.4 system-ui, sans-serif; text-align: center; opacity: .8; }
+@media (orientation: portrait) and (max-width: 640px) {
+  body { place-items: start center; overflow-y: auto; padding-top: 6vh; }
+  .frame { width: 100vw; }
 }
+.titlescreen .found { position: relative; margin: 0; opacity: .75; font-size: .8em; letter-spacing: .05em; }
 `;
 
-interface Saved { roomId: string; facts: Facts; seen?: string[] }
+interface Saved { roomId: string; facts: Facts; seen?: string[]; memory?: { picked: string[]; turns: Record<string, number> } }
 
 /** Progress is kept in this browser, so a player can close the game and continue later. */
 function saveStore(p: Project) {
@@ -65,30 +67,52 @@ function start(): void {
   frame.className = 'frame';
   document.body.replaceChildren(frame);
   const store = saveStore(story);
-  const saved = store.load();
-  const buttons = saved
+  const buttons = store.load()
     ? '<button type="button" data-go="continue">Continue</button><button type="button" class="quiet" data-go="new">New game</button>'
     : '<button type="button" data-go="new">Start</button>';
-  frame.innerHTML = `<div class="stage" style="${lookStyle(story.look)}"><div class="titlescreen"><div class="bg">${backdropHTML(story.rooms[0]?.bg ?? null)}</div><h1>${esc(title)}</h1><div class="row">${buttons}</div></div></div>`;
-  document.body.insertAdjacentHTML('beforeend', '<p class="turn">Turn your phone sideways for a bigger picture.</p>');
-  frame.querySelector<HTMLButtonElement>('[data-go]')!.focus();
+  const key = `story-engine-save:${story.rooms[0]?.id ?? ''}`;
+  // Endings: how many there are in the story, and which this player has found.
+  const all = new Set<string>();
+  for (const r of story.rooms) for (const e of r.els) for (const m of e.script.matchAll(/^\s*ending\s*:\s*(.+?)\s*$/gim)) all.add(m[1].toLowerCase());
+  const found = (): string[] => { try { return JSON.parse(localStorage.getItem(`${key}:endings`) ?? '[]'); } catch { return []; } };
+  const title_ = () => {
+    const f = found().filter(x => all.has(x.toLowerCase()));
+    const saved2 = store.load();
+    const btns = saved2
+      ? '<button type="button" data-go="continue">Continue</button><button type="button" class="quiet" data-go="new">New game</button>'
+      : '<button type="button" data-go="new">Start</button>';
+    frame.innerHTML = `<div class="stage" style="${lookStyle(story.look)}"><div class="titlescreen"><div class="bg">${backdropHTML(story.rooms[0]?.bg ?? null)}</div><h1>${esc(title)}</h1><div class="row">${btns}</div>${all.size ? `<p class="found">Endings found: ${f.length} of ${all.size}</p>` : ''}</div></div>`;
+    frame.querySelector<HTMLButtonElement>('[data-go]')!.focus();
+  };
+  void buttons;
+  title_();
 
   frame.addEventListener('click', function begin(e) {
     const go = (e.target as HTMLElement).closest<HTMLElement>('[data-go]')?.dataset.go;
     if (!go) return;
-    frame.removeEventListener('click', begin);
+    if (!frame.querySelector('.titlescreen')) return;
     frame.replaceChildren();
-    const from = go === 'continue' ? saved : null;
+    const from = go === 'continue' ? store.load() : null;
     if (!from) store.clear();
     let lastRoom = '';
-    createPlayer(frame, story, {
+    const player = createPlayer(frame, story, {
       roomId: from?.roomId,
       facts: from?.facts,
       seen: from?.seen,
+      memory: from?.memory,
+      storageKey: key,
+      saveKey: key,
       hint: from ? undefined : 'Click someone or something to begin',
+      onEnding(name) {
+        const f = found();
+        if (!f.some(x => x.toLowerCase() === name.toLowerCase())) { f.push(name); try { localStorage.setItem(`${key}:endings`, JSON.stringify(f)); } catch { /* not kept */ } }
+        store.clear();
+        player.destroy();
+        title_();
+      },
       // Saved on entering a room and whenever no conversation is running.
       onChange(st) {
-        if (st.roomId !== lastRoom || !st.scene) { lastRoom = st.roomId; store.save({ roomId: st.roomId, facts: st.facts, seen: st.seen }); }
+        if (st.roomId !== lastRoom || !st.scene) { lastRoom = st.roomId; store.save({ roomId: st.roomId, facts: st.facts, seen: st.seen, memory: st.memory }); }
       }
     });
   });

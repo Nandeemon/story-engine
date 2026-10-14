@@ -1,6 +1,6 @@
 import '@story-engine/runtime/game.css';
 import './editor.css';
-import { pathAt, simplifyPath, walkSteps, characterOf, cleanLookName, cleanMarkName, cleanSoundName, factName, renameMarkInScript, renameSoundInScript, toValue, createProject, createRoom, findLook, findRoomByName, newId, normalizeProject, parseScript, renameLookInScript, renameRoomInScript, renameSpeakerInScript, uniqueLookName, writeScript, getStep } from '@story-engine/engine-core';
+import { factsToReach, startFacts, pathAt, simplifyPath, walkSteps, characterOf, cleanLookName, cleanMarkName, cleanSoundName, factName, renameMarkInScript, renameSoundInScript, toValue, createProject, createRoom, findLook, findRoomByName, newId, normalizeProject, parseScript, renameLookInScript, renameRoomInScript, renameSpeakerInScript, uniqueLookName, writeScript, getStep } from '@story-engine/engine-core';
 import type { Character, CharacterLook, FactDef, Facts, Idle, MarkDef, PathStep, Step, Project, Room, StoryElement } from '@story-engine/engine-core';
 import { BACKDROPS, CHARACTERS, OBJECTS, STARTER_MARKS, findMark, backdropHTML, createPlayer, elementArt, esc, fxVars, lookStyle, sayHTML } from '@story-engine/runtime';
 import type { Player, PlayState } from '@story-engine/runtime';
@@ -436,11 +436,22 @@ function startPlay(fromElement?: StoryElement, startPath?: string): void {
   ui.back = ui.view === 'play' ? ui.back : ui.view;
   ui.view = 'play';
   render();
+  // Starting inside an "Only if": the facts are set so the marked step is reached.
+  let facts = testFacts();
+  if (fromElement && startPath) {
+    const need = factsToReach(parseScript(fromElement.script).steps, startPath, { ...startFacts(project), ...(facts ?? {}) });
+    if (Object.keys(need).length) {
+      facts = { ...(facts ?? {}), ...need };
+      toast(`Playing with ${Object.entries(need).map(([k, v]) => `${k} = ${v === true ? 'yes' : v === false ? 'no' : v}`).join(', ')}, so this step is reached.`);
+    }
+  }
   player = createPlayer($('#player')!, project, {
     roomId: fromElement ? room().id : undefined,
     elementId: fromElement?.id,
     startPath,
-    facts: testFacts(),
+    facts,
+    storageKey: `story-engine-editor-play:${storyId ?? ''}`,
+    onEnding: name => toast(`The story reached the ending "${name}".`),
     onChange: updateStrip
   });
   renderBar();
@@ -585,7 +596,7 @@ let lookReturn: { elId: string | null; mapSel: string | null } | null = null;
 let lookCompare: 'see-through' | 'difference' = 'see-through';
 
 /** Actions that never change the project, so they are not recorded for Undo. */
-const NOT_RECORDED = new Set(['area-cancel', 'door-cancel', 'edit-enter', 'library', 'win', 'path-draw', 'path-play', 'mark-add', 'music-add', 'cast-sound-add', 'sound-add', 'sound-play', 'cast', 'cast-open', 'cast-back', 'cast-new', 'cast-promote', 'cast-add-looks', 'cast-goto-room', 'cast-goto-convo', 'fx-try', 'scene-toggle', 'home', 'open-story', 'new-story', 'new-sample', 'import-story', 'duplicate-story', 'delete-story', 'test-off', 'look-tab', 'make-game', 'hud-sel', 'play-here', 'check', 'goto-problem', 'test-clear', 'once-lineup', 'look-compare', 'undo', 'redo', 'save-file', 'open-file', 'upload', 'play', 'play-convo', 'stop', 'convo-mode', 'look', 'crumb', 'add-looks', 'look-replace', 'once-picture', 'look-open', 'look-done']);
+const NOT_RECORDED = new Set(['voice-play', 'voice-upload', 'voice-rec', 'upload-video', 'area-cancel', 'door-cancel', 'edit-enter', 'library', 'win', 'path-draw', 'path-play', 'mark-add', 'music-add', 'cast-sound-add', 'sound-add', 'sound-play', 'cast', 'cast-open', 'cast-back', 'cast-new', 'cast-promote', 'cast-add-looks', 'cast-goto-room', 'cast-goto-convo', 'fx-try', 'scene-toggle', 'home', 'open-story', 'new-story', 'new-sample', 'import-story', 'duplicate-story', 'delete-story', 'test-off', 'look-tab', 'make-game', 'hud-sel', 'play-here', 'check', 'goto-problem', 'test-clear', 'once-lineup', 'look-compare', 'undo', 'redo', 'save-file', 'open-file', 'upload', 'play', 'play-convo', 'stop', 'convo-mode', 'look', 'crumb', 'add-looks', 'look-replace', 'once-picture', 'look-open', 'look-done']);
 
 const actions: Record<string, (k: string) => void> = {
   crumb(k) {
@@ -856,6 +867,13 @@ const actions: Record<string, (k: string) => void> = {
   },
   'open-file'() { const input = $<HTMLInputElement>('#projectfile')!; input.value = ''; input.click(); },
   theme(k) { project.look.theme = k; save(); render(); },
+  'look-bubbles'(k) { if (k === 'on') project.look.bubbles = true; else delete project.look.bubbles; save(); render(); },
+  'look-narration'(k) { if (k === 'screen') project.look.narration = 'screen'; else delete project.look.narration; save(); render(); },
+  'look-menu'(k) { if (k === 'off') project.look.gameMenu = false; else delete project.look.gameMenu; save(); render(); },
+  'upload-video'() { const i = $<HTMLInputElement>('#videofile')!; i.value = ''; i.click(); },
+  'voice-play'() { const ctx = mapCtx(); const st = ctx && mapSel ? getStep(parseScript(ctx.el.script).steps, mapSel) : null; if (st?.t === 'say' && st.voice) previewSound(st.voice); },
+  'voice-upload'() { const at = mapSel; pickSound(name => { setLineVoice(at, name); }); },
+  'voice-rec'() { void recordVoice(); },
   'look-box'(k) { const L = project.look; if (k === 'glass' || k === 'outline' || k === 'band') L.box = k; else delete L.box; save(); render(); },
   'look-names'(k) { const L = project.look; if (k === 'inside' || k === 'plain') L.names = k; else delete L.names; save(); render(); },
   'look-width'(k) { const L = project.look; if (k === 'full') L.width = 'full'; else delete L.width; save(); render(); },
@@ -1006,6 +1024,64 @@ function idleFrom(prefix: string, cur: Idle | undefined, field: string, value: s
   if (Number(value) === 3) delete next[key]; else next[key] = Number(value);
   return next;
 }
+
+/* ---------- Voices ---------- */
+
+function setLineVoice(at: string | null, name: string): void {
+  const ctx = mapCtx();
+  if (!ctx || !at) return;
+  const steps = parseScript(ctx.el.script).steps, st = getStep(steps, at);
+  if (st?.t !== 'say') return;
+  st.voice = name;
+  ctx.el.script = writeScript(steps);
+  save();
+  refreshMap();
+}
+
+let recorder: MediaRecorder | null = null;
+/** Records the selected line's voice with the microphone: the first click starts, the second stops. */
+async function recordVoice(): Promise<void> {
+  if (recorder) { recorder.stop(); return; }
+  if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') { toast('This browser cannot record. Upload a file instead.'); return; }
+  const at = mapSel, ctx = mapCtx();
+  const st = ctx && at ? getStep(parseScript(ctx.el.script).steps, at) : null;
+  if (st?.t !== 'say') return;
+  let stream: MediaStream;
+  try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); } catch { toast('The microphone is not available. Allow it in the browser, or upload a file.'); return; }
+  const chunks: Blob[] = [];
+  const rec = new MediaRecorder(stream);
+  recorder = rec;
+  rec.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
+  rec.onstop = () => {
+    recorder = null;
+    stream.getTracks().forEach(t => t.stop());
+    const blob = new Blob(chunks, { type: rec.mimeType || 'audio/webm' });
+    const reader = new FileReader();
+    reader.onload = () => {
+      const before = snapshot();
+      const who = st.who.trim() || 'narrator';
+      const name = addSound(`voice ${who} ${(project.sounds ?? []).filter(x => x.name.startsWith(`voice ${who.toLowerCase()}`)).length + 1}`, String(reader.result), project.characters.find(c => c.name.toLowerCase() === who.toLowerCase()) ?? null);
+      setLineVoice(at, name);
+      record(before);
+      toast('Voice recorded.');
+    };
+    reader.readAsDataURL(blob);
+  };
+  rec.start();
+  const b = $<HTMLButtonElement>('#voice-rec');
+  if (b) { b.textContent = '■ Stop recording'; b.classList.add('rec'); }
+  // Recordings stop by themselves after 30 seconds.
+  setTimeout(() => { if (recorder === rec) rec.stop(); }, 30000);
+}
+
+$('#videofile')!.addEventListener('change', ev => {
+  const f = (ev.target as HTMLInputElement).files?.[0];
+  if (!f) return;
+  if (f.size > 20 * 1024 * 1024) { toast('That video is larger than 20 MB. A short loop of a few seconds works best.'); return; }
+  const reader = new FileReader();
+  reader.onload = () => { const before = snapshot(); room().bg = { video: String(reader.result) }; ui.adding = null; save(); record(before); render(); };
+  reader.readAsDataURL(f);
+});
 
 /* ---------- Sounds ---------- */
 

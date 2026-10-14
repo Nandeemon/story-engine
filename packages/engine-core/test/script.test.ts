@@ -28,7 +28,7 @@ function trace(src: string, picks: number[], facts: Facts = {}): string[] {
     const ev: RunEvent = runner.next();
     if (ev.t === 'choice') { const k = queue.shift() ?? 0; out.push(`pick ${k}`); ev.pick(k); }
     else if (ev.t === 'say') out.push(`${ev.who || '-'}: ${ev.text}`);
-    else { out.push(ev.t === 'door' ? `door ${ev.room}` : ev.problem ? `end! ${ev.problem}` : 'end'); break; }
+    else { out.push(ev.t === 'door' ? `door ${ev.room}` : ev.t === 'end' && ev.problem ? `end! ${ev.problem}` : 'end'); break; }
   }
   return out;
 }

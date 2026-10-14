@@ -30,6 +30,11 @@ export interface SayStep {
   sound?: string;
   /** Marks (an anger sign, a sweat drop, a puff) on the speaker for this line only. */
   marks?: string[];
+  /** Other ways to say it: one is picked at random each time, or they come in turn (the last one stays). */
+  alts?: string[];
+  altMode?: 'random' | 'turn';
+  /** A recorded voice for the line, by sound name. */
+  voice?: string;
 }
 
 /** Where a character stands on stage: x and y are the bottom centre in percent of the stage, size is height in percent. */
@@ -63,11 +68,25 @@ export interface PathPoint {
 export interface PathStep { t: 'path'; who: string; points: PathPoint[]; secs: number; repeat?: 'loop' | 'pingpong'; ease?: 'steady' }
 /** A movement a character repeats while standing. Strength and speed run from 1 to 5 (3 is normal). */
 export interface Idle { move: string; strength?: number; speed?: number }
-export interface ChoiceOption { text: string; effects: Effect[]; steps: Step[] }
+export interface ChoiceOption {
+  text: string;
+  effects: Effect[];
+  steps: Step[];
+  /** Gone once it has been picked. */
+  once?: boolean;
+  /** Only shown when no other answer is left. */
+  fallback?: boolean;
+}
 export interface ChoiceStep { t: 'choice'; options: ChoiceOption[] }
 export interface IfStep { t: 'if'; cond: Condition; then: Step[]; else: Step[] }
 export interface ChangeStep { t: 'change'; effects: Effect[] }
-export interface DoorStep { t: 'door'; room: string }
+export interface DoorStep { t: 'door'; room: string; /** How the picture changes to the next room. */ fx?: 'fade' | 'black' | 'slide left' | 'slide right' }
+/** Ask the player to type an answer, kept as a story fact (a name, say). */
+export interface AskStep { t: 'ask'; prompt: string; fact: string }
+/** One of the story's endings: the conversation closes and the ending is shown and remembered. */
+export interface EndingStep { t: 'ending'; name: string }
+/** Move the camera: zoom in on a point, shake, flash, or back to the whole picture. */
+export interface CameraStep { t: 'camera'; action: 'zoom' | 'shake' | 'flash' | 'reset'; scale?: number; x?: number; y?: number }
 export interface EndStep { t: 'end' }
 /** A named point in a conversation that "Go to part" can jump to. Only at the top level. */
 export interface PartStep { t: 'part'; name: string }
@@ -79,8 +98,8 @@ export interface MusicStep { t: 'music'; track: string; once?: boolean }
 export interface NoteStep { t: 'note'; text: string }
 
 /** One step of a conversation. */
-export type Step = SayStep | ChoiceStep | IfStep | ChangeStep | DoorStep | EndStep | PartStep | JumpStep | NoteStep | ShowStep | MoveStep | HideStep | MusicStep | MarkStep | LoopStep | PathStep;
-export type StageStep = ShowStep | MoveStep | HideStep | MarkStep | LoopStep | PathStep;
+export type Step = SayStep | ChoiceStep | IfStep | ChangeStep | DoorStep | EndStep | PartStep | JumpStep | NoteStep | ShowStep | MoveStep | HideStep | MusicStep | MarkStep | LoopStep | PathStep | AskStep | EndingStep | CameraStep;
+export type StageStep = ShowStep | MoveStep | HideStep | MarkStep | LoopStep | PathStep | CameraStep;
 
 export interface ScriptError {
   /** 1-based line number in the written script. */
@@ -100,6 +119,8 @@ export interface Backdrop {
   preset?: string;
   /** An imported image as a data URL. */
   img?: string;
+  /** A video backdrop (MP4 or WebM) as a data URL; it loops without sound. */
+  video?: string;
   /** How the picture fills the stage: cover and crop (default), show whole, or stretch. */
   fit?: 'fill' | 'fit' | 'stretch';
   /** With fill: which point of the picture stays in view, in percent (50, 50 is the middle). */
@@ -239,6 +260,12 @@ export interface Look {
   accentColor?: string;
   /** Letters per second when text appears letter by letter; 0 or unset shows it at once. */
   typing?: number;
+  /** Lines as speech bubbles over the speaker instead of the box. */
+  bubbles?: boolean;
+  /** Narration over the whole picture instead of the box. */
+  narration?: 'screen';
+  /** The buttons players get in the game (history, back, settings); shown unless turned off. */
+  gameMenu?: false;
 }
 
 /** Something shown over the game all the time: a story fact as a label or a meter. */

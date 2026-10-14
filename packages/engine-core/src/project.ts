@@ -92,7 +92,8 @@ function normalizeBackdrop(raw: unknown): Backdrop | null {
   const out: Backdrop = {};
   if (typeof b.preset === 'string') out.preset = b.preset;
   if (typeof b.img === 'string') out.img = b.img;
-  if (!out.preset && !out.img) return null;
+  if (typeof b.video === 'string' && b.video.startsWith('data:video/')) out.video = b.video;
+  if (!out.preset && !out.img && !out.video) return null;
   if (b.fit === 'fit' || b.fit === 'stretch') out.fit = b.fit;
   if (typeof b.fx === 'number') out.fx = clamp(b.fx, 0, 100);
   if (typeof b.fy === 'number') out.fy = clamp(b.fy, 0, 100);
@@ -220,7 +221,10 @@ export function normalizeProject(raw: unknown): Project | null {
       ...(hex(look.boxColor) ? { boxColor: look.boxColor as string } : {}),
       ...(hex(look.textColor) ? { textColor: look.textColor as string } : {}),
       ...(hex(look.accentColor) ? { accentColor: look.accentColor as string } : {}),
-      ...(typeof look.typing === 'number' && look.typing > 0 ? { typing: clamp(Math.round(look.typing), 5, 200) } : {})
+      ...(typeof look.typing === 'number' && look.typing > 0 ? { typing: clamp(Math.round(look.typing), 5, 200) } : {}),
+      ...(look.bubbles === true ? { bubbles: true } : {}),
+      ...(look.narration === 'screen' ? { narration: 'screen' as const } : {}),
+      ...(look.gameMenu === false ? { gameMenu: false as const } : {})
     }
   };
 }

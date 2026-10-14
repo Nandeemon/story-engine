@@ -1,10 +1,10 @@
 export * from './types';
 export { parseScript, writeScript, summarize, walkSteps, toValue, valueText, effectText, conditionText, CONDITION_WORDS } from './script';
 export type { ScriptSummary } from './script';
-export { createRunner, applyEffects, testCondition, getFact } from './runner';
-export type { Runner, RunEvent, ChoiceEvent, EndEvent } from './runner';
+export { createRunner, applyEffects, testCondition, getFact, fillText, lineText } from './runner';
+export type { Runner, RunEvent, ChoiceEvent, EndEvent, AskEvent, RunMemory, RunnerPlace } from './runner';
 export { createProject, createRoom, newId, normalizeProject, findRoomByName, DEFAULT_LOOK, DEFAULT_LOOK_NAME, cleanLookName, cleanSoundName, cleanMarkName, factName, talkedFact, startFacts, characterOf, findLook, hasLook, uniqueLookName } from './project';
-export { getList, getStep, splitPath, stepPathOf, stepsBefore, walkWithPaths, unreachableSteps } from './paths';
+export { getList, getStep, splitPath, stepPathOf, stepsBefore, walkWithPaths, unreachableSteps, factsToReach } from './paths';
 export { SPOTS, ENTER_EFFECTS, EXIT_EFFECTS, LINE_EFFECTS, FX_NORMAL, IDLE_MOVES, parseIdle, idleText, parsePathPoints, pathPointsText, pathAt, simplifyPath, isLineEffect, parseLineFx, lineFxText, parsePlace, placeText, snapToSpot } from './staging';
 export type { FxOptions, PathState } from './staging';
 export type { StepPath, ListPath } from './paths';

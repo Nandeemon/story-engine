@@ -1,6 +1,5 @@
 import { createRunner, findLook, findRoomByName, parseScript, pathAt, startFacts, stepsBefore, talkedFact } from '@story-engine/engine-core';
-import type { PathStep } from '@story-engine/engine-core';
-import type { ChoiceEvent, Facts, Project, Room, Runner, SayStep, StoryElement } from '@story-engine/engine-core';
+import type { AskEvent, ChoiceEvent, DoorStep, Facts, PathStep, Project, Room, RunMemory, Runner, RunnerPlace, SayStep, Step, StoryElement } from '@story-engine/engine-core';
 import { applyToScene, fxVars, nextMoment, present, roomScene, staged, stagedAttrs, stagedKey, startScene } from './scene';
 import type { Scene } from './scene';
 import { areaArt, backdropHTML, choicesHTML, elementArt, elementStyle, lookStyle, sayHTML } from './stage';
@@ -10,15 +9,20 @@ import { hudHTML } from './hud';
 export interface PlayState {
   roomId: string;
   facts: Facts;
-  /** What is on screen: a line, a choice, or nothing (the room is explorable). */
-  event: SayStep | ChoiceEvent | null;
+  /** What is on screen: a line, a choice, a question, or nothing (the room is explorable). */
+  event: SayStep | ChoiceEvent | AskEvent | null;
   /** A problem in the story itself, such as a door to a missing room. Shown to the author only. */
   problem: string;
   /** The scene while a conversation runs; null while the player explores the room. */
   scene: Scene | null;
   /** Conversations finished (element ids) and rooms visited ("room:<id>"), for one-time conversations and first visits. */
   seen: string[];
+  /** Answers picked that were "once", and how far "in turn" lines have come. */
+  memory: RunMemory;
 }
+
+/** What a saved game holds. */
+export interface SavedGame { roomId: string; facts: Facts; seen: string[]; memory?: RunMemory; when?: number; label?: string }
 
 export interface PlayerOptions {
   /** Start in this room instead of the first one. */
@@ -27,12 +31,19 @@ export interface PlayerOptions {
   elementId?: string;
   /** Start the element's conversation at this step instead of its first line (for testing). */
   startPath?: string;
-  /** Story facts to start with (for testing, or a saved game); otherwise every fact starts unset. */
+  /** Story facts to start with (for testing, or a saved game); otherwise every fact starts at its start value or unset. */
   facts?: Facts;
   /** Conversations had and rooms visited, from a saved game. */
   seen?: string[];
+  memory?: RunMemory;
   /** A short line shown over the first room until the player starts a conversation, for published games. */
   hint?: string;
+  /** Where the player's settings and lines read are kept in this browser. */
+  storageKey?: string;
+  /** Save slots in the game menu, kept under this key; left out, the menu has no Save and Load. */
+  saveKey?: string;
+  /** Called when the story reaches an ending, after the player closes the ending card. */
+  onEnding?: (name: string) => void;
   /** Called after every change, so the editor can show story facts beside the game. */
   onChange?: (state: Readonly<PlayState>) => void;
 }
@@ -42,7 +53,29 @@ export interface Player {
   destroy(): void;
 }
 
+/** What the player can change in the game's settings. */
+interface Settings { speed: 'story' | 'off' | 'slow' | 'normal' | 'fast'; music: number; sound: number; auto: boolean; skip: boolean; read: boolean }
+const DEFAULT_SETTINGS: Settings = { speed: 'story', music: 80, sound: 90, auto: false, skip: false, read: false };
+const SPEEDS: Record<Settings['speed'], number | null> = { story: null, off: 0, slow: 20, normal: 40, fast: 90 };
+
 const FX_CLASSES = ['in-fade', 'in-left', 'in-right', 'in-pop', 'out-fade', 'out-left', 'out-right', 'shake', 'tremble', 'pulse', 'pop', 'bounce', 'jump', 'flash'].map(f => `fx-${f}`);
+
+/** One moment the player can go back to: everything needed to show it again exactly. */
+interface Moment {
+  event: SayStep | ChoiceEvent | AskEvent;
+  runner: Runner;
+  place: RunnerPlace;
+  facts: Facts;
+  seen: string[];
+  memory: RunMemory;
+  scene: Scene | null;
+  roomId: string;
+  talking: StoryElement | null;
+  lastLine: SayStep | null;
+  history: number;
+}
+
+const clone = <T>(v: T): T => (typeof structuredClone === 'function' ? structuredClone(v) : JSON.parse(JSON.stringify(v)));
 
 /**
  * Runs a project inside a host element. The same player runs the editor's Play
@@ -51,23 +84,47 @@ const FX_CLASSES = ['in-fade', 'in-left', 'in-right', 'in-pop', 'out-fade', 'out
  */
 export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOptions = {}): Player {
   const first = project.rooms.find(r => r.id === opts.roomId) ?? project.rooms[0];
-  const s: PlayState = { roomId: first.id, facts: { ...startFacts(project), ...(opts.facts ?? {}) }, event: null, problem: '', scene: null, seen: [...(opts.seen ?? [])] };
+  const s: PlayState = {
+    roomId: first.id, facts: { ...startFacts(project), ...(opts.facts ?? {}) }, event: null, problem: '', scene: null,
+    seen: [...(opts.seen ?? [])], memory: opts.memory ? clone(opts.memory) : { picked: [], turns: {} }
+  };
+  const storeKey = opts.storageKey ?? 'story-engine-game';
+  const load = <T>(key: string, fallback: T): T => { try { const v = localStorage.getItem(key); return v ? { ...fallback, ...JSON.parse(v) } : fallback; } catch { return fallback; } };
+  const keep = (key: string, v: unknown) => { try { localStorage.setItem(key, JSON.stringify(v)); } catch { /* storage unavailable */ } };
+  const settings: Settings = load(`${storeKey}:settings`, { ...DEFAULT_SETTINGS });
+  /** Lines the player has read before, for skipping. */
+  const read = new Set<string>((() => { try { return JSON.parse(localStorage.getItem(`${storeKey}:read`) ?? '[]') as string[]; } catch { return []; } })());
+  const markRead = (key: string) => { if (read.has(key)) return; read.add(key); if (read.size % 10 === 0) keep(`${storeKey}:read`, [...read]); };
+
   /** The element whose conversation is running. */
   let talking: StoryElement | null = null;
+  /** Conversations are read once, so going back can return to the very same steps. */
+  const parsed = new Map<string, Step[]>();
+  const stepsOf = (el: StoryElement) => { let st = parsed.get(el.id); if (!st) { st = parseScript(el.script).steps; parsed.set(el.id, st); } return st; };
+
+  /* ---------- Sound, voices and music ---------- */
   const sounds = new Map<string, HTMLAudioElement>();
+  const findSound = (name: string | undefined) => { const key = (name ?? '').trim().toLowerCase(); return key ? project.sounds?.find(x => x.name.toLowerCase() === key) : undefined; };
   function playSound(name: string | undefined): void {
-    const key = (name ?? '').trim().toLowerCase();
-    const snd = key ? project.sounds?.find(x => x.name.toLowerCase() === key) : undefined;
+    const snd = findSound(name);
     if (!snd) return;
     let a = sounds.get(snd.id);
     if (!a) { a = new Audio(snd.data); sounds.set(snd.id, a); }
-    a.volume = (snd.volume ?? 100) / 100;
+    a.volume = (snd.volume ?? 100) / 100 * settings.sound / 100;
     a.currentTime = 0;
     void a.play().catch(() => { /* the browser may block sound until the player interacts */ });
   }
-
-  /* Background music: one track at a time, faded in and out. */
-  let music: { key: string; el: HTMLAudioElement; target: number } | null = null;
+  let voice: HTMLAudioElement | null = null;
+  function playVoice(name: string | undefined): void {
+    voice?.pause();
+    voice = null;
+    const snd = findSound(name);
+    if (!snd) return;
+    voice = new Audio(snd.data);
+    voice.volume = (snd.volume ?? 100) / 100 * settings.sound / 100;
+    void voice.play().catch(() => undefined);
+  }
+  let music: { key: string; el: HTMLAudioElement; base: number } | null = null;
   function fade(el: HTMLAudioElement, to: number, ms: number, then?: () => void): void {
     const from = el.volume, start = performance.now();
     const tick = () => {
@@ -93,10 +150,16 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
     const el = new Audio(snd.data);
     el.loop = !once;
     el.volume = 0;
-    const target = (snd.volume ?? 100) / 100;
-    music = { key, el, target };
-    void el.play().then(() => fade(el, target, 800)).catch(() => { /* blocked until the player interacts */ });
+    const base = (snd.volume ?? 100) / 100;
+    music = { key, el, base };
+    void el.play().then(() => fade(el, base * settings.music / 100, 800)).catch(() => { /* blocked until the player interacts */ });
   }
+  function speak(ev: SayStep): void {
+    if (!settings.read || !('speechSynthesis' in window)) return;
+    speechSynthesis.cancel();
+    speechSynthesis.speak(new SpeechSynthesisUtterance(ev.who ? `${ev.who}. ${ev.text}` : ev.text));
+  }
+
   let runner: Runner | null = null;
   let builtRoom = '';
   /** The last line shown, so a choice can keep the question in the dialogue box. */
@@ -106,35 +169,46 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
   /** Whether the player has started a conversation yet; the hint shows until then. */
   let talked = false;
   const tooSoon = () => performance.now() - choiceShownAt < 400;
+  /** Lines read and answers picked, for the history. */
+  const history: { who: string; text: string; answer?: boolean }[] = [];
+  /** Moments to go back to. */
+  const moments: Moment[] = [];
+  /** An overlay the player opened: history, settings, saves, an ending card. */
+  let overlay: 'history' | 'settings' | 'saves' | null = null;
+  let ending: string | null = null;
 
   const room = (): Room => project.rooms.find(r => r.id === s.roomId) ?? project.rooms[0];
   const here = (el: StoryElement) => present(el, s);
-  const canTalk = (el: StoryElement) => !s.event && !s.scene && el.script.trim() !== '' && here(el) && !(el.once && s.seen.includes(el.id));
+  const canTalk = (el: StoryElement) => !s.event && !s.scene && !ending && el.script.trim() !== '' && here(el) && !(el.once && s.seen.includes(el.id));
+  const menuOn = project.look.gameMenu !== false;
 
   /** Draws the room's backdrop and objects once per room; characters are kept up to date by render. */
   function build(): void {
     const r = room();
     const objects = r.els.filter(e => e.kind !== 'char' && !e.offstage).map(e =>
       `<button class="el${e.kind === 'area' ? ' area' : ''}" data-el="${esc(e.id)}" style="${elementStyle(e)}" aria-label="${esc(e.name)}">${e.kind === 'area' ? areaArt(e, false) : elementArt(e, undefined, project.characters)}</button>`).join('');
-    host.innerHTML = `<div class="stage play" data-stage style="${lookStyle(project.look)}"><div class="bg">${backdropHTML(r.bg)}</div>${objects}<div class="hudlayer"></div><div class="game"></div></div>`;
+    const menu = menuOn ? `<div class="gamemenu" role="toolbar" aria-label="Game menu">
+        <button data-menu="back" title="Back a line" aria-label="Back a line">↶</button><button data-menu="history" title="History" aria-label="History">☰</button>${opts.saveKey ? '<button data-menu="saves" title="Save and load" aria-label="Save and load">⤓</button>' : ''}<button data-menu="settings" title="Settings" aria-label="Settings">⚙</button></div>` : '';
+    host.innerHTML = `<div class="stage play" data-stage style="${lookStyle(project.look)}"><div class="cam"><div class="bg">${backdropHTML(r.bg)}</div>${objects}</div><div class="hudlayer"></div><div class="game"></div>${menu}<div class="gameover"></div></div>`;
     builtRoom = r.id;
   }
 
   function render(): void {
     if (builtRoom !== s.roomId) build();
     const stage = host.querySelector<HTMLElement>('[data-stage]')!;
+    const cam = stage.querySelector<HTMLElement>('.cam')!;
     const game = stage.querySelector<HTMLElement>('.game')!;
     const r = room();
     const scene = s.scene ?? roomScene(r, s);
-    const keep = new Set<string>();
+    const kept = new Set<string>();
 
     for (const c of scene.chars) {
-      keep.add(c.key);
+      kept.add(c.key);
       let node = stage.querySelector<HTMLElement>(`[data-el="${CSS.escape(c.key)}"]`);
       if (!node) {
         node = document.createElement('button');
         node.dataset.el = c.key;
-        stage.insertBefore(node, stage.querySelector('.hudlayer') ?? game);
+        cam.append(node);
       }
       const el = r.els.find(e => e.id === c.elId);
       const clickable = !!el && canTalk(el) && c.visible;
@@ -160,7 +234,7 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
     startPaths(stage);
     // Characters brought in for a conversation leave when it ends.
     stage.querySelectorAll<HTMLElement>('.el.staged').forEach(n => {
-      if (keep.has(n.dataset.el ?? '')) return;
+      if (kept.has(n.dataset.el ?? '')) return;
       n.classList.add('gone');
       setTimeout(() => n.remove(), 450);
     });
@@ -171,25 +245,56 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
       n.tabIndex = el && canTalk(el) ? 0 : -1;
     });
 
+    // The camera: zoomed on a point, and a shake or flash for this moment.
+    const cv = s.scene?.cam;
+    cam.style.transformOrigin = cv ? `${cv.x}% ${cv.y}%` : '';
+    cam.style.transform = cv ? `scale(${cv.scale})` : '';
+    if (s.scene?.camFx) {
+      const k = `camfx-${s.scene.camFx}`;
+      stage.classList.remove('camfx-shake', 'camfx-flash');
+      void stage.offsetWidth;
+      stage.classList.add(k);
+    }
+
     const hud = stage.querySelector<HTMLElement>('.hudlayer');
     if (hud) hud.innerHTML = hudHTML(project.hud, s.facts);
     const ev = s.event;
-    const showHint = !ev && !s.scene && !talked && !!opts.hint && r.els.some(canTalk);
-    game.innerHTML = !ev ? (showHint ? `<div class="gamehint">${esc(opts.hint!)}</div>` : '') : ev.t === 'say' ? sayHTML(ev.who, ev.text)
+    const showHint = !ev && !s.scene && !talked && !ending && !!opts.hint && r.els.some(canTalk);
+    game.innerHTML = !ev ? (showHint ? `<div class="gamehint">${esc(opts.hint!)}</div>` : '')
+      : ev.t === 'say' ? sayHTML(ev.who, ev.text, true, boxPlace(ev, scene))
+      : ev.t === 'ask' ? askHTML(ev)
       : choicesHTML(ev.options, true, project.look.choices ?? 'box', lastLine ?? undefined);
     if (ev?.t === 'choice') choiceShownAt = performance.now();
+    if (ev?.t === 'ask') requestAnimationFrame(() => game.querySelector<HTMLInputElement>('input')?.focus());
     if (ev?.t === 'say') startTyping(game); else stopTyping();
+    const back = stage.querySelector<HTMLButtonElement>('[data-menu="back"]');
+    if (back) back.disabled = moments.length < 2;
+    drawOverlay(stage);
     opts.onChange?.(s);
+    if (ev?.t === 'say') afterLine(ev);
   }
 
-  /* Letter by letter: the whole line is laid out at once (the rest hidden), so the box keeps its size while it fills. */
+  /** Bubbles sit over the speaker; narration can cover the picture. */
+  function boxPlace(ev: SayStep, scene: Scene): { bubble?: { x: number; y: number }; screen?: boolean } | undefined {
+    if (!ev.who) return project.look.narration === 'screen' ? { screen: true } : undefined;
+    if (!project.look.bubbles) return undefined;
+    const c = scene.chars.find(x => x.visible && x.name.trim().toLowerCase() === ev.who.trim().toLowerCase());
+    return c ? { bubble: { x: c.x, y: c.y - c.size * 0.92 } } : undefined;
+  }
+
+  function askHTML(ev: AskEvent): string {
+    return `<form class="say choicebox ask" data-ask><p class="q">${esc(ev.prompt)}</p><div class="askrow"><input type="text" maxlength="40" aria-label="${esc(ev.prompt)}" autocomplete="off"><button type="submit">OK</button></div></form>`;
+  }
+
+  /* ---------- Letter by letter, auto and skip ---------- */
   let typing: { timer: number; done: () => void } | null = null;
+  let autoTimer = 0;
   function stopTyping(): void {
     if (typing) { clearInterval(typing.timer); typing = null; }
   }
   function startTyping(game: HTMLElement): void {
     stopTyping();
-    const cps = project.look.typing ?? 0;
+    const cps = SPEEDS[settings.speed] ?? project.look.typing ?? 0;
     const span = game.querySelector<HTMLElement>('.say .txt');
     if (!cps || !span || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
     const text = span.textContent ?? '';
@@ -209,6 +314,19 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
     typing.done();
     return true;
   }
+  /** After a line shows: read aloud, then go on by itself when Auto is on, or quickly past lines read before when Skip is on. */
+  function afterLine(ev: SayStep): void {
+    clearTimeout(autoTimer);
+    const key = `${talking?.id ?? ''}|${ev.text}`;
+    const seenBefore = read.has(key);
+    markRead(key);
+    if (overlay || ending) return;
+    if (settings.skip && seenBefore) { autoTimer = window.setTimeout(() => { if (s.event === ev) { skipTyping(); advance(); } }, 90); return; }
+    if (settings.auto) {
+      const wait = () => { if (s.event !== ev || overlay) return; if (typing || (voice && !voice.ended)) { autoTimer = window.setTimeout(wait, 250); return; } advance(); };
+      autoTimer = window.setTimeout(wait, 1100 + ev.text.length * 45);
+    }
+  }
 
   /** A look's own sound, when a line switches the speaker to it. */
   function lookSound(ev: SayStep): string | undefined {
@@ -218,7 +336,7 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
     return c ? findLook(c, ev.expr)?.sound : undefined;
   }
 
-  /* Drawn paths run on their own clock, so characters keep moving while lines are read. */
+  /* ---------- Drawn paths: they run on their own clock, so characters keep moving while lines are read ---------- */
   const paths = new Map<string, { step: PathStep; start: number; startSize: number; passed: number; lap: number }>();
   let pathFrame = 0;
   function startPaths(stage: HTMLElement): void {
@@ -248,7 +366,6 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
       node.style.height = `${st.size}%`;
       node.style.opacity = st.fade < 100 ? String(st.fade / 100) : '';
       node.classList.toggle('flip', c.flip);
-      // Points passed since the last frame play their effect and switch the look.
       for (let i = run.passed; i < st.passed; i++) {
         const pt = run.step.points[i];
         if (pt.look) { c.look = pt.look; node.innerHTML = `<span class="art">${staged(c, project)}</span>`; node.dataset.art = stagedKey(c); }
@@ -260,6 +377,7 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
     if (paths.size) pathFrame = requestAnimationFrame(() => tickPaths(stage));
   }
 
+  /* ---------- Rooms and conversations ---------- */
   function enter(r: Room): void {
     s.roomId = r.id;
     s.event = null;
@@ -272,6 +390,30 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
     const chosen = r.autoEl ? r.els.find(el => el.id === r.autoEl) : r.els.find(el => el.script.trim() && canTalk(el));
     const auto = r.auto && (firstVisit || !r.autoOnce) && chosen && canTalk(chosen) ? chosen : undefined;
     if (auto) talk(auto); else render();
+  }
+
+  /** Changes room with the door's transition: a fade, a moment of black, or a slide. */
+  function goThrough(target: Room, fx: DoorStep['fx']): void {
+    const stage = host.querySelector<HTMLElement>('[data-stage]');
+    if (!fx || !stage || matchMedia('(prefers-reduced-motion: reduce)').matches) return enter(target);
+    if (fx === 'slide left' || fx === 'slide right') {
+      enter(target);
+      const cam = host.querySelector<HTMLElement>('.cam');
+      cam?.classList.add(fx === 'slide left' ? 'cam-in-right' : 'cam-in-left');
+      return;
+    }
+    const wipe = document.createElement('div');
+    wipe.className = 'wipe';
+    stage.append(wipe);
+    requestAnimationFrame(() => wipe.classList.add('on'));
+    setTimeout(() => {
+      enter(target);
+      const st = host.querySelector<HTMLElement>('[data-stage]')!;
+      const w2 = document.createElement('div');
+      w2.className = 'wipe on';
+      st.append(w2);
+      requestAnimationFrame(() => { w2.classList.remove('on'); setTimeout(() => w2.remove(), 500); });
+    }, fx === 'black' ? 900 : 420);
   }
 
   /** A conversation has run to its end (or out through a door): one-time conversations are now used up. */
@@ -290,7 +432,7 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
     // The clicked character keeps focus otherwise, and keys on a button would not reach the dialogue.
     const focused = document.activeElement as HTMLElement | null;
     if (focused && host.contains(focused)) focused.blur();
-    const steps = parseScript(el.script).steps;
+    const steps = stepsOf(el);
     const scene = startScene(room(), el, steps, s);
     // Starting partway: the scene is set as it would stand by then.
     if (startAt) {
@@ -299,7 +441,7 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
       if (track) playMusic(track.track, track.once);
     }
     s.scene = scene;
-    runner = createRunner(steps, s.facts, step => { if (step.t === 'music') playMusic(step.track, step.once); else applyToScene(scene, step, project); }, startAt);
+    runner = createRunner(steps, s.facts, step => { if (step.t === 'music') playMusic(step.track, step.once); else if (s.scene) applyToScene(s.scene, step, project); }, startAt, s.memory, el.id);
     advance();
   }
 
@@ -312,8 +454,42 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
     render();
   }
 
+  /** Keeps the moment just shown, so the player can come back to it. */
+  function remember(): void {
+    if (!runner || !s.event) return;
+    moments.push({ event: s.event, runner, place: runner.place(), facts: clone(s.facts), seen: [...s.seen], memory: clone(s.memory), scene: s.scene ? clone(s.scene) : null, roomId: s.roomId, talking, lastLine, history: history.length });
+    if (moments.length > 150) moments.shift();
+  }
+
+  /** Back to the moment before this one. */
+  function goBack(): void {
+    if (moments.length < 2) return;
+    moments.pop();
+    const m = moments[moments.length - 1];
+    clearTimeout(autoTimer);
+    voice?.pause();
+    // The runner holds the very same facts object, so it is changed in place.
+    for (const k of Object.keys(s.facts)) delete s.facts[k];
+    Object.assign(s.facts, clone(m.facts));
+    s.seen = [...m.seen];
+    s.memory.picked = [...m.memory.picked];
+    s.memory.turns = { ...m.memory.turns };
+    s.roomId = m.roomId;
+    s.scene = m.scene ? clone(m.scene) : null;
+    talking = m.talking;
+    lastLine = m.lastLine;
+    runner = m.runner;
+    runner.restore(m.place);
+    history.length = m.history;
+    s.event = m.event;
+    s.problem = '';
+    render();
+  }
+
   function advance(): void {
     if (!runner) return;
+    clearTimeout(autoTimer);
+    voice?.pause();
     if (s.scene) nextMoment(s.scene);
     const ev = runner.next();
     s.problem = '';
@@ -321,30 +497,128 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
       if (s.scene) applyToScene(s.scene, ev, project);
       s.event = ev;
       lastLine = ev;
+      history.push({ who: ev.who, text: ev.text });
       playSound(ev.sound || lookSound(ev));
-    } else if (ev.t === 'choice') {
+      playVoice(ev.voice);
+      speak(ev);
+    } else if (ev.t === 'choice' || ev.t === 'ask') {
       s.event = ev;
     } else if (ev.t === 'door') {
       const target = findRoomByName(project, ev.room);
       done();
-      if (target) return enter(target);
+      if (target) return goThrough(target, ev.fx);
       return finish(`There is no room called "${ev.room}".`);
     } else {
+      if (ev.ending) { ending = ev.ending; }
       return finish(ev.problem ?? '');
     }
+    remember();
     render();
+  }
+
+  function pick(k: number): void {
+    if (s.event?.t !== 'choice') return;
+    const o = s.event.options[k];
+    if (!o) return;
+    history.push({ who: '', text: o.text, answer: true });
+    s.event.pick(k);
+    s.event = null;
+    advance();
+  }
+
+  /* ---------- Overlays: history, settings, saves, endings ---------- */
+  function drawOverlay(stage: HTMLElement): void {
+    const box = stage.querySelector<HTMLElement>('.gameover')!;
+    if (ending) {
+      box.innerHTML = `<div class="ovl endcard"><p>The end</p><h2>${esc(ending)}</h2><button data-ov="ending-ok">Continue</button></div>`;
+      box.classList.add('on');
+      return;
+    }
+    if (!overlay) { box.innerHTML = ''; box.classList.remove('on'); return; }
+    box.classList.add('on');
+    const close = '<button class="ovx" data-ov="close" aria-label="Close">✕</button>';
+    if (overlay === 'history') {
+      box.innerHTML = `<div class="ovl" role="dialog" aria-label="History"><div class="ovh"><b>History</b>${close}</div><div class="ovb hist">${history.length ? history.map(h => h.answer ? `<p class="ans">→ ${esc(h.text)}</p>` : `<p>${h.who ? `<b>${esc(h.who)}</b> ` : ''}${esc(h.text)}</p>`).join('') : '<p class="dim">Nothing yet.</p>'}</div></div>`;
+      requestAnimationFrame(() => { const b = box.querySelector('.hist'); if (b) b.scrollTop = b.scrollHeight; });
+    } else if (overlay === 'settings') {
+      const speed = (['story', 'off', 'slow', 'normal', 'fast'] as const).map(k => `<option value="${k}"${settings.speed === k ? ' selected' : ''}>${({ story: 'As the story sets it', off: 'All at once', slow: 'Slow', normal: 'Normal', fast: 'Fast' })[k]}</option>`).join('');
+      box.innerHTML = `<div class="ovl" role="dialog" aria-label="Settings"><div class="ovh"><b>Settings</b>${close}</div><div class="ovb">
+        <label><span>Text speed</span><select data-set="speed">${speed}</select></label>
+        <label><span>Music</span><input type="range" min="0" max="100" value="${settings.music}" data-set="music"></label>
+        <label><span>Sounds and voices</span><input type="range" min="0" max="100" value="${settings.sound}" data-set="sound"></label>
+        <label class="tick"><input type="checkbox" data-set="auto"${settings.auto ? ' checked' : ''}><span>Go on by itself (auto)</span></label>
+        <label class="tick"><input type="checkbox" data-set="skip"${settings.skip ? ' checked' : ''}><span>Skip lines I have read</span></label>
+        ${'speechSynthesis' in window ? `<label class="tick"><input type="checkbox" data-set="read"${settings.read ? ' checked' : ''}><span>Read lines aloud</span></label>` : ''}
+      </div></div>`;
+    } else if (overlay === 'saves') {
+      const slots = [0, 1, 2].map(i => load<SavedGame | null>(`${opts.saveKey}:slot${i}`, null as unknown as SavedGame));
+      box.innerHTML = `<div class="ovl" role="dialog" aria-label="Save and load"><div class="ovh"><b>Save and load</b>${close}</div><div class="ovb">${slots.map((sl, i) => `<div class="slot"><div><b>Slot ${i + 1}</b><span>${sl && sl.roomId ? `${esc(sl.label ?? '')} · ${new Date(sl.when ?? 0).toLocaleString()}` : 'Empty'}</span></div>
+        <button data-ov="save" data-k="${i}">Save</button><button data-ov="load" data-k="${i}"${sl && sl.roomId ? '' : ' disabled'}>Load</button></div>`).join('')}
+        <p class="dim">A game is saved in this browser. Loading starts in the room you saved in.</p></div></div>`;
+    }
+  }
+  function openOverlay(o: typeof overlay): void { overlay = overlay === o ? null : o; clearTimeout(autoTimer); render(); }
+
+  function onOverlay(t: HTMLElement): boolean {
+    const m = t.closest<HTMLElement>('[data-menu]');
+    if (m) {
+      const k = m.dataset.menu!;
+      if (k === 'back') { overlay = null; goBack(); } else openOverlay(k as typeof overlay);
+      return true;
+    }
+    const b = t.closest<HTMLElement>('[data-ov]');
+    if (!b) return !!t.closest('.gameover.on');
+    const k = b.dataset.ov!;
+    if (k === 'close') { overlay = null; render(); }
+    if (k === 'ending-ok') { const e = ending!; ending = null; render(); opts.onEnding?.(e); }
+    if (k === 'save' && opts.saveKey) {
+      keep(`${opts.saveKey}:slot${b.dataset.k}`, { roomId: s.roomId, facts: s.facts, seen: s.seen, memory: s.memory, when: Date.now(), label: room().name } satisfies SavedGame);
+      render();
+    }
+    if (k === 'load' && opts.saveKey) {
+      const sl = load<SavedGame | null>(`${opts.saveKey}:slot${b.dataset.k}`, null as unknown as SavedGame);
+      const r = sl && project.rooms.find(x => x.id === sl.roomId);
+      if (sl && r) {
+        for (const f of Object.keys(s.facts)) delete s.facts[f];
+        Object.assign(s.facts, sl.facts);
+        s.seen = [...(sl.seen ?? [])];
+        s.memory = sl.memory ? clone(sl.memory) : { picked: [], turns: {} };
+        moments.length = 0; history.length = 0; overlay = null; talking = null;
+        enter(r);
+      }
+    }
+    return true;
+  }
+
+  function onInput(e: Event): void {
+    const t = e.target as HTMLInputElement;
+    const k = t.dataset.set as keyof Settings | undefined;
+    if (!k) return;
+    if (k === 'speed') settings.speed = t.value as Settings['speed'];
+    else if (k === 'music' || k === 'sound') { settings[k] = Number(t.value); if (k === 'music' && music) music.el.volume = music.base * settings.music / 100; }
+    else settings[k] = t.checked;
+    if (k === 'read' && !t.checked && 'speechSynthesis' in window) speechSynthesis.cancel();
+    keep(`${storeKey}:settings`, settings);
+  }
+
+  function onSubmit(e: Event): void {
+    const form = (e.target as HTMLElement).closest<HTMLFormElement>('[data-ask]');
+    if (!form || s.event?.t !== 'ask') return;
+    e.preventDefault();
+    const v = form.querySelector('input')?.value ?? '';
+    if (!v.trim()) { form.querySelector('input')?.focus(); return; }
+    history.push({ who: '', text: v, answer: true });
+    s.event.answer(v);
+    s.event = null;
+    advance();
   }
 
   function onClick(e: MouseEvent): void {
     const t = e.target as HTMLElement;
+    if (onOverlay(t)) return;
     if (t.closest('[data-next]')) { if (skipTyping()) return; return advance(); }
-    const pick = t.closest<HTMLElement>('[data-pick]');
-    if (pick && s.event?.t === 'choice') {
-      if (tooSoon()) return;
-      s.event.pick(Number(pick.dataset.pick));
-      s.event = null;
-      return advance();
-    }
+    const p = t.closest<HTMLElement>('[data-pick]');
+    if (p && s.event?.t === 'choice') { if (tooSoon()) return; return pick(Number(p.dataset.pick)); }
     const elNode = t.closest<HTMLElement>('[data-el]');
     if (elNode) {
       const el = room().els.find(x => x.id === elNode.dataset.el);
@@ -352,24 +626,38 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
     }
   }
 
+  function onWheel(e: WheelEvent): void {
+    // Wheel up over the game opens the history, as in classic visual novels.
+    if (e.deltaY < 0 && !overlay && history.length && menuOn) { e.preventDefault(); openOverlay('history'); }
+  }
+
   function onKey(e: KeyboardEvent): void {
+    const inField = !!(e.target as HTMLElement).closest('input, textarea, select');
+    if (e.key === 'Escape' && (overlay || ending)) { if (ending) return; overlay = null; render(); return; }
+    if (overlay || ending || inField) return;
+    if (!host.isConnected) return;
     // Number keys pick an answer.
-    if (s.event?.t === 'choice' && /^[1-9]$/.test(e.key) && !(e.target as HTMLElement).closest('input, textarea, select')) {
+    if (s.event?.t === 'choice' && /^[1-9]$/.test(e.key)) {
       const k = Number(e.key) - 1;
-      if (k < s.event.options.length && !tooSoon()) { e.preventDefault(); s.event.pick(k); s.event = null; advance(); }
+      if (k < s.event.options.length && !tooSoon()) { e.preventDefault(); pick(k); }
       return;
     }
+    if (menuOn && e.key === 'ArrowLeft' && moments.length > 1) { e.preventDefault(); goBack(); return; }
     // Space or Enter left over from reading must not choose an answer.
     if (s.event?.t === 'choice' && (e.key === ' ' || e.key === 'Enter') && tooSoon()) { e.preventDefault(); return; }
     if (s.event?.t !== 'say' || (e.key !== ' ' && e.key !== 'Enter')) return;
     const t = e.target as HTMLElement;
-    if (t.closest('input, textarea, select') || (t.closest('button') && !t.closest('[data-el]'))) return;
+    if (t.closest('button') && !t.closest('[data-el]')) return;
     e.preventDefault();
     if (skipTyping()) return;
     advance();
   }
 
   host.addEventListener('click', onClick);
+  host.addEventListener('input', onInput);
+  host.addEventListener('change', onInput);
+  host.addEventListener('submit', onSubmit);
+  host.addEventListener('wheel', onWheel, { passive: false });
   document.addEventListener('keydown', onKey);
 
   const startEl = opts.elementId ? first.els.find(el => el.id === opts.elementId) : undefined;
@@ -379,11 +667,19 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
     state: () => s,
     destroy() {
       stopTyping();
+      clearTimeout(autoTimer);
       cancelAnimationFrame(pathFrame);
       paths.clear();
       stopMusic(true);
+      voice?.pause();
       sounds.forEach(a => a.pause());
+      if ('speechSynthesis' in window) speechSynthesis.cancel();
+      keep(`${storeKey}:read`, [...read]);
       host.removeEventListener('click', onClick);
+      host.removeEventListener('input', onInput);
+      host.removeEventListener('change', onInput);
+      host.removeEventListener('submit', onSubmit);
+      host.removeEventListener('wheel', onWheel);
       document.removeEventListener('keydown', onKey);
     }
   };

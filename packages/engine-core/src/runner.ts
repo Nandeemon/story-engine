@@ -1,4 +1,4 @@
-import type { ChoiceOption, Condition, DoorStep, Effect, Facts, FactValue, MusicStep, SayStep, StageStep, Step } from './types';
+import type { AskStep, ChoiceOption, Condition, DoorStep, Effect, Facts, FactValue, MusicStep, SayStep, StageStep, Step } from './types';
 
 export interface ChoiceEvent {
   t: 'choice';
@@ -10,13 +10,52 @@ export interface EndEvent {
   t: 'end';
   /** Set when the conversation stopped because of a mistake in the story, for the author to see. */
   problem?: string;
+  /** Set when the story reached one of its endings. */
+  ending?: string;
+}
+/** The player is asked to type an answer. */
+export interface AskEvent {
+  t: 'ask';
+  prompt: string;
+  fact: string;
+  answer(value: string): void;
 }
 
 /** What the player sees next. */
-export type RunEvent = SayStep | ChoiceEvent | DoorStep | EndEvent;
+export type RunEvent = SayStep | ChoiceEvent | DoorStep | EndEvent | AskEvent;
+
+/**
+ * What the runner remembers across conversations: answers picked that are "once",
+ * and how far "in turn" lines have come. Keys are prefixed by the caller (the element).
+ */
+export interface RunMemory { picked: string[]; turns: Record<string, number> }
+
+/** Where a runner is, so the player can go back a line. */
+export type RunnerPlace = { steps: Step[]; i: number }[];
 
 export interface Runner {
   next(): RunEvent;
+  /** Where the runner is now, to come back to with restore. */
+  place(): RunnerPlace;
+  restore(place: RunnerPlace): void;
+}
+
+/** Puts story facts into a line: "You have {gold} coins". An unset fact shows as nothing. */
+export function fillText(text: string, facts: Facts): string {
+  return text.replace(/\{([\w.]+)\}/g, (_, f: string) => (f in facts ? (facts[f] === true ? 'yes' : facts[f] === false ? 'no' : String(facts[f])) : ''));
+}
+
+/** The text of a line this time: its own, or one of its other ways to say it. */
+export function lineText(s: SayStep, memory: RunMemory | undefined, key: string): string {
+  if (!s.alts?.length) return s.text;
+  const all = [s.text, ...s.alts];
+  if (s.altMode === 'turn') {
+    const turns = memory?.turns ?? {};
+    const n = turns[key] ?? 0;
+    turns[key] = n + 1;
+    return all[Math.min(n, all.length - 1)];
+  }
+  return all[Math.floor(Math.random() * all.length)];
 }
 
 export function getFact(facts: Facts, fact: string): FactValue {
@@ -58,9 +97,12 @@ const LOOP_LIMIT = 10_000;
  * Runs a conversation step by step. Facts are changed in place, so every
  * conversation in a playthrough shares the same story facts.
  */
-export function createRunner(steps: Step[], facts: Facts, onStage?: (step: StageStep | MusicStep) => void, startAt?: string): Runner {
+export function createRunner(steps: Step[], facts: Facts, onStage?: (step: StageStep | MusicStep) => void, startAt?: string, memory?: RunMemory, prefix = ''): Runner {
   const stack: { steps: Step[]; i: number }[] = startAt ? framesFor(steps, startAt) : [{ steps, i: 0 }];
+  const optKey = (o: ChoiceOption) => `${prefix}|${o.text}`;
   return {
+    place: () => stack.map(f => ({ ...f })),
+    restore(place) { stack.length = 0; place.forEach(f => stack.push({ ...f })); },
     next(): RunEvent {
       let quiet = 0;
       while (stack.length) {
@@ -72,18 +114,34 @@ export function createRunner(steps: Step[], facts: Facts, onStage?: (step: Stage
         if (frame.i >= frame.steps.length) { stack.pop(); continue; }
         const s = frame.steps[frame.i++];
         switch (s.t) {
-          case 'say': return s;
-          case 'choice':
+          case 'say': {
+            if (!s.alts?.length && !/\{[\w.]+\}/.test(s.text)) return s;
+            const text = fillText(lineText(s, memory, `${prefix}|${s.text}`), facts);
+            return { ...s, text };
+          }
+          case 'choice': {
+            // Answers picked before that were "once" are gone; fallbacks show only when nothing else is left.
+            const open = s.options.filter(o => !(o.once && memory?.picked.includes(optKey(o))));
+            const main = open.filter(o => !o.fallback);
+            const shown = main.length ? main : open;
+            if (!shown.length) continue;
             return {
               t: 'choice',
-              options: s.options,
+              options: shown.map(o => ({ ...o, text: fillText(o.text, facts) })),
               pick(k: number) {
-                const o = s.options[k];
+                const o = shown[k];
                 if (!o) return;
+                if (o.once && memory && !memory.picked.includes(optKey(o))) memory.picked.push(optKey(o));
                 applyEffects(facts, o.effects);
                 stack.push({ steps: o.steps, i: 0 });
               }
             };
+          }
+          case 'ask': {
+            const step: AskStep = s;
+            return { t: 'ask', prompt: fillText(step.prompt, facts), fact: step.fact, answer(v: string) { const t = v.trim(); facts[step.fact] = /^-?\d+(\.\d+)?$/.test(t) ? Number(t) : t; } };
+          }
+          case 'ending': stack.length = 0; return { t: 'end', ending: s.name };
           case 'if': stack.push({ steps: testCondition(facts, s.cond) ? s.then : s.else, i: 0 }); continue;
           case 'change': applyEffects(facts, s.effects); continue;
           case 'jump': {
@@ -100,6 +158,7 @@ export function createRunner(steps: Step[], facts: Facts, onStage?: (step: Stage
           case 'mark':
           case 'loop':
           case 'path':
+          case 'camera':
           case 'music': onStage?.(s); continue;
           case 'part':
           case 'note': continue;

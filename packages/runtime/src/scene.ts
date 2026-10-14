@@ -51,7 +51,13 @@ export function present(el: StoryElement, progress?: Progress): boolean {
   return !(el.once === 'hide' && progress.seen.includes(el.id));
 }
 
-export interface Scene { chars: StagedChar[] }
+export interface Scene {
+  chars: StagedChar[];
+  /** The camera: zoomed in on a point, or the whole picture when not set. */
+  cam?: { scale: number; x: number; y: number };
+  /** A camera shake or flash for this moment only. */
+  camFx?: 'shake' | 'flash';
+}
 
 const lower = (s: string) => s.trim().toLowerCase();
 const SPOT_ORDER = [50, 30, 70, 15, 85];
@@ -142,6 +148,7 @@ function enter(c: StagedChar, fx = 'in-fade'): void {
 /** Clears what belongs to one moment only: effects and pictures for a single line. */
 export function nextMoment(scene: Scene): void {
   for (const c of scene.chars) { c.fx = ''; c.fxOpts = undefined; c.lineLook = ''; c.lineMarks = []; }
+  scene.camFx = undefined;
 }
 
 /** Applies one step to the scene. Lines bring their speaker on stage if needed. */
@@ -163,6 +170,12 @@ export function applyToScene(scene: Scene, step: Step, project: Project): void {
       c.path = undefined;
       place(c, step.at);
       enter(c);
+      return;
+    }
+    case 'camera': {
+      if (step.action === 'zoom') scene.cam = { scale: step.scale ?? 1.5, x: step.x ?? 50, y: step.y ?? 50 };
+      else if (step.action === 'reset') scene.cam = undefined;
+      else scene.camFx = step.action;
       return;
     }
     case 'path': {

@@ -8,7 +8,7 @@
  */
 import { CONDITION_WORDS, FX_NORMAL, IDLE_MOVES, pathAt, placeText as spotText, ENTER_EFFECTS, EXIT_EFFECTS, LINE_EFFECTS, SPOTS, placeText, snapToSpot, stepsBefore, conditionText, effectText, findRoomByName, getList, getStep, parseScript, splitPath, stepPathOf, summarize, toValue, valueText, walkSteps, writeScript } from '@story-engine/engine-core';
 import { characterOf, findLook, hasLook, storyFactNames } from '@story-engine/engine-core';
-import type { Character, ChoiceStep, CompareOp, Effect, Placement, Project, Room, SayStep, Step, StoryElement } from '@story-engine/engine-core';
+import type { Character, ChoiceStep, CompareOp, DoorStep, Effect, Placement, Project, Room, SayStep, Step, StoryElement } from '@story-engine/engine-core';
 import { EXPRESSIONS, allMarks, markArt, applyToScene, esc, nextMoment, sayHTML, sceneHTML, startScene } from '@story-engine/runtime';
 import type { Scene } from '@story-engine/runtime';
 import { musicSelect, soundSelect } from './widgets';
@@ -100,8 +100,8 @@ let model: Model = { edges: [], jumps: [], parts: new Map() };
 let nextId = 0;
 
 const lower = (s: string) => s.trim().toLowerCase();
-const LINE_KINDS = new Set(['say', 'change', 'note', 'show', 'move', 'hide', 'music', 'mark', 'loop', 'path']);
-const TERMINAL = new Set(['door', 'end', 'jump']);
+const LINE_KINDS = new Set(['say', 'change', 'note', 'show', 'move', 'hide', 'music', 'mark', 'loop', 'path', 'ask', 'camera']);
+const TERMINAL = new Set(['door', 'end', 'jump', 'ending']);
 
 export function startLabel(room: Room, el: StoryElement): string {
   const first = room.auto && (room.autoEl ? room.els.find(x => x.id === room.autoEl) : room.els.find(x => x.script.trim()));
@@ -144,6 +144,8 @@ export function mapHTML(ctx: MapCtx): string {
         ? `<button ${attrs}><span class="who${unknownSpeaker(ctx, s.who) ? ' voice" title="A voice without a picture: no character has this name' : ''}">${esc(s.who)}</span>${s.expr ? exprTag(s.who, s.expr) : ''}${s.marks?.length ? `<span class="expr">${esc(s.marks.join(', '))}</span>` : ''}<span class="txt">${text}</span></button>`
         : `<button ${attrs}><span class="txt narr">${text}</span></button>`;
     }
+    if (s.t === 'ask') return `<button ${attrs}><span class="tag">Ask</span><span class="txt">${esc(s.prompt)} → <code>${esc(s.fact)}</code></span></button>`;
+    if (s.t === 'camera') return `<button ${attrs}><span class="tag">Camera</span><span class="txt">${s.action === 'zoom' ? `zoom ×${s.scale ?? 1.5}` : esc(s.action)}</span></button>`;
     if (s.t === 'music') return `<button ${attrs}><span class="tag">Music</span><span class="txt">${s.track ? `♫ ${esc(s.track)}${s.once ? ' (once)' : ''}` : 'Silence'}</span></button>`;
     if (s.t === 'change') return `<button ${attrs}><span class="tag">Change</span><span class="txt">${esc(s.effects.map(effectText).join(', '))}</span></button>`;
     if (s.t === 'note') return `<button ${attrs}><span class="tag">Note</span><span class="txt">${esc(s.text)}</span></button>`;
@@ -220,8 +222,9 @@ export function mapHTML(ctx: MapCtx): string {
         i++;
       } else {
         const broken = s.t === 'door' && !findRoomByName(ctx.project, s.room);
-        const label = s.t === 'door' ? `<span class="tag">Go to</span>${esc(s.room)}${broken ? '<span class="why">There is no room with this name</span>' : ''}`
+        const label = s.t === 'door' ? `<span class="tag">Go to</span>${esc(s.room)}${s.fx ? ` <i>(${esc(s.fx)})</i>` : ''}${broken ? '<span class="why">There is no room with this name</span>' : ''}`
           : s.t === 'jump' ? `<span class="tag">Go to part</span>${esc(s.part)}`
+          : s.t === 'ending' ? `<span class="tag">Ending</span>${esc(s.name)}`
           : 'End';
         html += `<button class="mnode cap ${s.t}${broken ? ' broken' : ''}${dim}${on(path)}" id="${nid}"${pick(path)}>${label}</button>`;
         if (s.t === 'jump') model.jumps.push([nid, lower(s.part)]);
@@ -386,6 +389,9 @@ function stepLabel(s: Step): string {
     case 'change': return `change ${s.effects.map(effectText).join(', ')}`;
     case 'music': return s.track ? `music ${s.track}` : 'the music stops';
     case 'door': return `go to ${s.room}`;
+    case 'ask': return `ask "${s.prompt}"`;
+    case 'ending': return `ending: ${s.name}`;
+    case 'camera': return `camera ${s.action}`;
     case 'end': return 'the end';
     case 'part': return `part ${s.name}`;
     case 'jump': return `go to part ${s.part}`;
@@ -452,7 +458,25 @@ function soundPart(ctx: MapCtx, step: SayStep): string {
   return `<label class="field"><span>Sound with this line</span>${soundSelect(ctx.project, 'm-sound', 'data-map-in="say-sound"', step.sound, 'No sound', who)}</label>${quick}`;
 }
 
-export type LineWin = 'fx' | 'marks' | 'sound' | 'stage' | 'facts';
+/** A recorded or uploaded voice for the line. */
+function voicePart(ctx: MapCtx, step: SayStep): string {
+  const has = step.voice && ctx.project.sounds?.some(x => x.name === step.voice);
+  return `<div class="field"><span>Voice</span>${has
+    ? `<div class="row"><button class="btn small" data-act="voice-play">▶ Play the voice</button><button class="btn small quiet" data-map-act="voice-off">Remove</button></div>`
+    : `<div class="row"><button class="btn small" data-act="voice-rec" id="voice-rec">🎤 Record</button><button class="btn small quiet" data-act="voice-upload">Upload a file</button></div><p class="hint">Record the line with your microphone. It plays as the line appears.</p>`}</div>`;
+}
+
+/** Other ways to say a line: picked at random, or in turn each time the line comes up. */
+function altsPart(step: SayStep): string {
+  const alts = step.alts ?? [];
+  return `<p class="hint">Each time this line comes up, one of these is said. Good for things the player can click again.</p>
+    <div class="altlist"><div class="altrow"><span>1</span><input type="text" value="${esc(step.text === '...' ? '' : step.text)}" disabled title="The line itself; change it in the panel"></div>
+    ${alts.map((a, i) => `<div class="altrow"><span>${i + 2}</span><input type="text" id="m-alt-${i}" data-map-in="alt-text" data-k="${i}" value="${esc(a)}" placeholder="Another way to say it"><button class="btn small quiet" data-map-act="alt-remove" data-k="${i}" aria-label="Remove">✕</button></div>`).join('')}</div>
+    <button class="btn small" data-map-act="alt-add">+ Another way to say it</button>
+    ${alts.length ? `<div class="field"><span>Which one</span><div class="row"><button class="btn small${step.altMode === 'turn' ? ' quiet' : ' ink'}" data-map-act="alt-mode" data-k="random">At random</button><button class="btn small${step.altMode === 'turn' ? ' ink' : ' quiet'}" data-map-act="alt-mode" data-k="turn">In turn, the last one stays</button></div></div>` : ''}`;
+}
+
+export type LineWin = 'fx' | 'marks' | 'sound' | 'stage' | 'facts' | 'alts';
 
 /**
  * The line's extras as a row of chips that say what is set; each opens its own
@@ -466,7 +490,8 @@ function lineTools(ctx: MapCtx, step: SayStep, scene: Scene): string {
   return `<div class="tools4">
     ${chip('fx', 'Effect', step.fx ?? '', !!step.who)}
     ${chip('marks', 'Marks', (step.marks ?? []).join(', '), !!step.who)}
-    ${chip('sound', 'Sound', step.sound ?? '')}
+    ${chip('sound', 'Sound', [step.sound ?? '', step.voice ? 'voice' : ''].filter(Boolean).join(' + '))}
+    ${chip('alts', 'Variations', step.alts?.length ? `${step.alts.length + 1} ways${step.altMode === 'turn' ? ', in turn' : ''}` : '')}
     ${chip('stage', 'Stage', me ? `${spotText({ x: Math.round(me.x) }) || `${Math.round(me.x)}%`}${me.flip ? ', turned' : ''}` : step.who ? 'not on stage' : '')}
     ${chip('facts', 'Story facts', '', facts)}
   </div>`;
@@ -474,9 +499,9 @@ function lineTools(ctx: MapCtx, step: SayStep, scene: Scene): string {
 
 /** The window a line tool opens. */
 function lineWindow(ctx: MapCtx, step: SayStep, scene: Scene): string {
-  const titles: Record<LineWin, string> = { fx: `Effect on ${step.who}`, marks: `Marks on ${step.who}`, sound: 'Sound', stage: 'On stage', facts: 'After this line' };
+  const titles: Record<LineWin, string> = { fx: `Effect on ${step.who}`, marks: `Marks on ${step.who}`, sound: 'Sound and voice', stage: 'On stage', facts: 'After this line', alts: 'Other ways to say it' };
   const w = ctx.win!;
-  const body = w === 'fx' ? effectPart(step) : w === 'marks' ? marksPart(ctx, step) : w === 'sound' ? soundPart(ctx, step)
+  const body = w === 'fx' ? effectPart(step) : w === 'marks' ? marksPart(ctx, step) : w === 'sound' ? soundPart(ctx, step) + voicePart(ctx, step) : w === 'alts' ? altsPart(step)
     : w === 'stage' ? stageField(ctx, scene, step.who) : quickFacts(ctx, step);
   return `<div class="win" role="dialog" aria-label="${esc(titles[w])}"><div class="winh"><b>${esc(titles[w])}</b><button class="btn small quiet" data-act="win" data-k="" aria-label="Close">✕</button></div><div class="winb">${body || '<p class="hint">Nothing to set here.</p>'}</div></div>`;
 }
@@ -545,6 +570,9 @@ const kinds = (top: boolean, hasParts: boolean) => [
   ['change', 'Change something', 'Change a story fact without saying anything'],
   ['music', 'Music', 'Start, change or stop the background music'],
   ['door', 'Go to another room', 'The player moves to another room'],
+  ['ask', 'Ask the player', 'The player types an answer, such as their name, kept as a story fact'],
+  ['camera', 'Camera', 'Zoom in on a spot, shake, flash, or back to the whole picture'],
+  ['ending', 'Ending', 'One of the story\'s endings: shown to the player and counted on the title screen'],
   ...(hasParts ? [['jump', 'Go to a part', 'Continue from a named part of this conversation']] : []),
   ['show', 'Bring someone in', 'A character comes on stage, with an effect'],
   ['move', 'Move someone', 'Change where someone stands, their size, or turn them'],
@@ -595,6 +623,8 @@ export function mapSide(ctx: MapCtx): string {
     return `${header('Answer')}${facts}
       <label class="field"><span>What the player can answer</span><input type="text" id="m-opt" data-map-in="opt-text" value="${o.text === '...' ? '' : esc(o.text)}" placeholder="An answer"></label>
       ${effectRows(o.effects)}
+      <div class="row"><label class="check"><input type="checkbox" data-map-act="opt-flag" data-k="once"${o.once ? ' checked' : ''}><span>Gone once it is picked</span></label></div>
+      <div class="row"><label class="check"><input type="checkbox" data-map-act="opt-flag" data-k="fallback"${o.fallback ? ' checked' : ''}><span>Only when no other answer is left</span></label></div>
       <div class="row"><button class="btn small quiet" data-map-act="opt-move" data-k="-1"${k === 0 ? ' disabled' : ''}>Move left</button><button class="btn small quiet" data-map-act="opt-move" data-k="1"${k === step.options.length - 1 ? ' disabled' : ''}>Move right</button></div>
       <button class="btn small danger" data-map-act="opt-remove"${step.options.length < 2 ? ' disabled title="A choice needs at least one answer"' : ''}>Remove this answer</button>`;
   }
@@ -701,7 +731,25 @@ export function mapSide(ctx: MapCtx): string {
     case 'door':
       return `${header('Go to another room')}
         <label class="field"><span>Room</span><select id="m-room" data-map-in="door-room">${ctx.project.rooms.map(r => `<option${lower(r.name) === lower(step.room) ? ' selected' : ''}>${esc(r.name)}</option>`).join('')}${ctx.project.rooms.some(r => lower(r.name) === lower(step.room)) ? '' : `<option selected>${esc(step.room)}</option>`}</select></label>
+        <label class="field"><span>How the picture changes</span><select id="m-doorfx" data-map-in="door-fx">${[['', 'Straight away'], ['fade', 'Fade'], ['black', 'Fade through black'], ['slide left', 'Slide to the left'], ['slide right', 'Slide to the right']].map(([v, l]) => `<option value="${v}"${(step.fx ?? '') === v ? ' selected' : ''}>${l}</option>`).join('')}</select></label>
         <p class="hint">The conversation stops and the player moves there.</p>${del()}`;
+    case 'ask':
+      return `${header('Ask the player')}
+        <label class="field"><span>Question</span><input type="text" id="m-askq" data-map-in="ask-prompt" value="${esc(step.prompt)}"></label>
+        <label class="field"><span>Keep the answer as</span><input type="text" id="m-askf" data-map-in="ask-fact" value="${esc(step.fact)}" placeholder="name"></label>
+        <p class="hint">Use the answer in any line as {${esc(step.fact)}}, for example "Nice to meet you, {${esc(step.fact)}}."</p>${del()}`;
+    case 'ending':
+      return `${header('Ending')}
+        <label class="field"><span>Name of this ending</span><input type="text" id="m-ending" data-map-in="ending-name" value="${esc(step.name)}"></label>
+        <p class="hint">The story stops here and shows the ending. The title screen of the game counts the endings a player has found.</p>${del()}`;
+    case 'camera': {
+      const pick = (cur: string, opts: [string, string][]) => `<div class="row">${opts.map(([k, n]) => `<button class="btn small${cur === k ? ' ink' : ' quiet'}" data-map-act="cam-action" data-k="${k}">${n}</button>`).join('')}</div>`;
+      return `${header('Camera')}${pick(step.action, [['zoom', 'Zoom in'], ['shake', 'Shake'], ['flash', 'Flash'], ['reset', 'Whole picture']])}
+        ${step.action === 'zoom' ? `<label class="field"><span>How close: ×${step.scale ?? 1.5}</span><input type="range" id="m-camz" data-map-in="cam-scale" min="1.1" max="3" step="0.1" value="${step.scale ?? 1.5}"></label>
+        <label class="field"><span>Toward, from left to right</span><input type="range" id="m-camx" data-map-in="cam-x" min="0" max="100" value="${step.x ?? 50}"></label>
+        <label class="field"><span>Toward, from top to bottom</span><input type="range" id="m-camy" data-map-in="cam-y" min="0" max="100" value="${step.y ?? 50}"></label>
+        <p class="hint">The zoom holds until a "Whole picture" step or the end of the conversation.</p>` : ''}${del()}`;
+    }
     case 'jump':
       return `${header('Go to a part')}
         <label class="field"><span>Part</span><select id="m-part" data-map-in="jump-part">${s.parts.map(n => `<option${lower(n) === lower(step.part) ? ' selected' : ''}>${esc(n)}</option>`).join('')}</select></label>
@@ -738,6 +786,9 @@ function newStep(kind: string, ctx: MapCtx, parts: string[]): Step {
     case 'change': return { t: 'change', effects: [{ fact: 'affection', op: '+', value: 1 }] };
     case 'music': return { t: 'music', track: (ctx.project.sounds ?? []).find(x => x.music)?.name ?? '' };
     case 'door': return { t: 'door', room: other.name };
+    case 'ask': return { t: 'ask', prompt: 'What is your name?', fact: 'name' };
+    case 'ending': return { t: 'ending', name: 'The end' };
+    case 'camera': return { t: 'camera', action: 'zoom', scale: 1.5, x: 50, y: 40 };
     case 'jump': return { t: 'jump', part: parts[0] ?? 'Start' };
     case 'end': return { t: 'end' };
     case 'part': {
@@ -842,6 +893,30 @@ export function mapAction(ctx: MapCtx, act: string, k: string): MapResult | unde
       const x = me?.x ?? 50, y = me?.y ?? 98;
       target.splice(index, 0, { t: 'path', who: cur.who, secs: 3, points: [{ x, y }, { x: Math.min(95, x + 20), y }] });
       return commit(stepPathOf(list, index));
+    }
+    case 'alt-add': case 'alt-remove': case 'alt-mode': case 'voice-off': {
+      const step = getStep(steps, path);
+      if (step?.t !== 'say') return undefined;
+      if (act === 'alt-add') { step.alts = [...(step.alts ?? []), '...']; step.altMode ??= 'random'; }
+      if (act === 'alt-remove') { step.alts = (step.alts ?? []).filter((_, i) => i !== Number(k)); if (!step.alts.length) { delete step.alts; delete step.altMode; } }
+      if (act === 'alt-mode') step.altMode = k === 'turn' ? 'turn' : 'random';
+      if (act === 'voice-off') delete step.voice;
+      return commit(ctx.sel);
+    }
+    case 'cam-action': {
+      const step = getStep(steps, path);
+      if (step?.t !== 'camera') return undefined;
+      step.action = k as 'zoom';
+      if (k === 'zoom') { step.scale ??= 1.5; step.x ??= 50; step.y ??= 40; } else { delete step.scale; delete step.x; delete step.y; }
+      return commit(ctx.sel);
+    }
+    case 'opt-flag': {
+      const step = getStep(steps, path) as ChoiceStep | null;
+      const o = step?.t === 'choice' ? step.options[Number(opt)] : undefined;
+      if (!o) return undefined;
+      if (k === 'once') { if (o.once) delete o.once; else o.once = true; }
+      if (k === 'fallback') { if (o.fallback) delete o.fallback; else o.fallback = true; }
+      return commit(ctx.sel);
     }
     case 'path-repeat': case 'path-ease': {
       const step = getStep(steps, path);
@@ -1005,6 +1080,7 @@ export function mapInput(ctx: MapCtx, field: string, k: string, value: string): 
       if (!Object.keys(step.fxOpts).length) delete step.fxOpts;
     }
     if (field === 'say-sound') step.sound = value || undefined;
+    if (field === 'alt-text' && step.alts) step.alts[Number(k)] = text.trim() || '...';
     if (field === 'say-who') { panel = !step.who !== !value.trim(); step.who = value; if (!value.trim()) step.expr = ''; }
     if (field === 'say-expr') step.expr = value;
     if (field === 'say-text') step.text = text.trim() ? text : '...';
@@ -1041,6 +1117,17 @@ export function mapInput(ctx: MapCtx, field: string, k: string, value: string): 
     if (field === 'music-once') { if (value === 'true') step.once = true; else delete step.once; }
   } else if (step.t === 'door' && field === 'door-room') {
     step.room = value;
+  } else if (step.t === 'door' && field === 'door-fx') {
+    if (value) step.fx = value as DoorStep['fx']; else delete step.fx;
+  } else if (step.t === 'ask') {
+    if (field === 'ask-prompt') step.prompt = text.trim() || 'What is your name?';
+    if (field === 'ask-fact') step.fact = factName(value) || 'answer';
+  } else if (step.t === 'ending' && field === 'ending-name') {
+    step.name = text.trim() || 'The end';
+  } else if (step.t === 'camera') {
+    if (field === 'cam-scale') step.scale = Number(value);
+    if (field === 'cam-x') step.x = Number(value);
+    if (field === 'cam-y') step.y = Number(value);
   } else if (step.t === 'jump' && field === 'jump-part') {
     step.part = value;
   } else if (step.t === 'part' && field === 'part-name') {

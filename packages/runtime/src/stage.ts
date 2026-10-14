@@ -34,6 +34,10 @@ export function backdropSrc(bg: Backdrop): string {
  */
 export function backdropHTML(bg: Backdrop | null): string {
   if (!bg) return '';
+  if (bg.video) {
+    const fit = bg.fit === 'fit' ? 'contain' : bg.fit === 'stretch' ? 'fill' : 'cover';
+    return `<video class="bgimg" src="${esc(bg.video)}" autoplay muted loop playsinline style="object-fit:${fit};object-position:${bg.fx ?? 50}% ${bg.fy ?? 50}%"></video>`;
+  }
   const src = esc(backdropSrc(bg));
   const fit = bg.fit ?? 'fill';
   if (fit === 'stretch') return `<img class="bgimg" src="${src}" alt="" style="object-fit:fill">`;
@@ -130,9 +134,16 @@ export function stageHTML(room: Room, o: StageOptions): string {
   return `<div class="stage ${o.mode}" data-stage style="${lookStyle(o.look)}"><div class="bg">${backdropHTML(room.bg)}</div>${els}<div class="game">${o.game ?? ''}</div></div>`;
 }
 
-export function sayHTML(who: string, text: string, interactive = true): string {
+/**
+ * The dialogue box for a line. As a bubble it sits over the speaker (at x, above
+ * the head at y, in percent of the stage); as "screen" narration it covers the picture.
+ */
+export function sayHTML(who: string, text: string, interactive = true, place?: { bubble?: { x: number; y: number }; screen?: boolean }): string {
   const attr = interactive ? 'data-next' : 'tabindex="-1"';
-  return `<button class="say" ${attr}>${who ? `<span class="who">${esc(who)}</span>` : ''}<span class="txt">${esc(text)}</span><span class="go">tap to continue</span></button>`;
+  const b = place?.bubble;
+  const cls = b ? 'say bubble' : place?.screen ? 'say screen' : 'say';
+  const style = b ? ` style="left:${Math.max(18, Math.min(82, b.x))}%;bottom:${Math.max(8, Math.min(88, 100 - b.y))}%"` : '';
+  return `<button class="${cls}" ${attr}${style}>${who ? `<span class="who">${esc(who)}</span>` : ''}<span class="txt">${esc(text)}</span><span class="go">tap to continue</span></button>`;
 }
 
 /**

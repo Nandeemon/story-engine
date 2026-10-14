@@ -1,4 +1,4 @@
-import type { CompareOp, Condition, Effect, FactValue, ParseResult, Placement, ScriptError, Step } from './types';
+import type { ChoiceOption, CompareOp, Condition, Effect, FactValue, ParseResult, Placement, ScriptError, Step } from './types';
 import { idleText, lineFxText, parseIdle, parseLineFx, parsePathPoints, parsePlace, pathPointsText, placeText } from './staging';
 
 /**
@@ -114,7 +114,10 @@ function parse(src: string, noteSources: boolean): ParseResult {
             continue;
           }
           const optSrc = take(o);
-          const option = { text: q[1], effects: q[2] ? parseEffects(q[2], o.n, errors) : [], steps: [] as Step[] };
+          let rest = q[2] ?? '';
+          let once = false, fallback = false;
+          rest = rest.replace(/(^|[\s,])(once|only once)(?=$|[\s,])/i, () => { once = true; return ' '; }).replace(/(^|[\s,])(fallback|if nothing else)(?=$|[\s,])/i, () => { fallback = true; return ' '; }).replace(/^[\s,]+|[\s,]+$/g, '');
+          const option: ChoiceOption = { text: q[1], effects: rest ? parseEffects(rest, o.n, errors) : [], steps: [] as Step[], ...(once ? { once: true } : {}), ...(fallback ? { fallback: true } : {}) };
           sources.set(option, optSrc);
           option.steps = block(o.indent);
           options.push(option);
@@ -147,12 +150,23 @@ function parse(src: string, noteSources: boolean): ParseResult {
       } else if (/^change\s+[\w.]+\s*[+\-=]/i.test(l.text)) {
         pos++;
         steps.push(mark({ t: 'change', effects: parseEffects(l.text.replace(/^change\s+/i, ''), l.n, errors) }, l));
+      } else if ((m = l.text.match(/^ask\s+["“](.+?)["”]\s+as\s+([\w.]+)$/i))) {
+        pos++;
+        steps.push(mark({ t: 'ask', prompt: m[1], fact: m[2] }, l));
+      } else if ((m = l.text.match(/^ending\s*:\s*(.+)$/i))) {
+        pos++;
+        steps.push(mark({ t: 'ending', name: m[1].trim() }, l));
+      } else if ((m = l.text.match(/^camera\s+(zoom|shake|flash|reset)(?:\s+(\d+(?:\.\d+)?))?(?:\s+at\s+(-?\d+(?:\.\d+)?)%?\s+(-?\d+(?:\.\d+)?)%?)?$/i))) {
+        pos++;
+        const action = m[1].toLowerCase() as 'zoom' | 'shake' | 'flash' | 'reset';
+        steps.push(mark({ t: 'camera', action, ...(action === 'zoom' ? { scale: Number(m[2] ?? 1.5), x: Number(m[3] ?? 50), y: Number(m[4] ?? 50) } : {}) }, l));
       } else if ((m = l.text.match(/^go to part\s+(.+)$/i))) {
         pos++;
         steps.push(mark({ t: 'jump', part: m[1].trim() }, l));
       } else if ((m = l.text.match(/^go to\s+(.+)$/i))) {
         pos++;
-        steps.push(mark({ t: 'door', room: m[1].trim() }, l));
+        const fx = m[1].match(/^(.+?)\s+with\s+(fade|black|slide left|slide right)$/i);
+        steps.push(mark(fx ? { t: 'door', room: fx[1].trim(), fx: fx[2].toLowerCase() as 'fade' } : { t: 'door', room: m[1].trim() }, l));
       } else if ((m = l.text.match(/^music(\s+once)?\s*:\s*(.+)$/i))) {
         pos++;
         const track = m[2].trim();
@@ -194,17 +208,25 @@ function parse(src: string, noteSources: boolean): ParseResult {
         const parts = (m[2] ?? '').split(',').map(x => x.trim()).filter(Boolean);
         let fx: ReturnType<typeof parseLineFx> = null, sound = '';
         const looks: string[] = [], marks: string[] = [];
+        let voice = '', altMode: 'random' | 'turn' | '' = '';
         for (const part of parts) {
           const f: ReturnType<typeof parseLineFx> = !fx ? parseLineFx(part) : null;
           const snd = part.match(/^sound\s+(.+)$/i);
           const mk = part.match(/^mark\s+(.+)$/i);
-          if (f) fx = f; else if (snd && !sound) sound = snd[1].trim(); else if (mk) marks.push(mk[1].trim().toLowerCase()); else looks.push(part);
+          const vc = part.match(/^voice\s+(.+)$/i);
+          if (f) fx = f; else if (snd && !sound) sound = snd[1].trim(); else if (vc && !voice) voice = vc[1].trim(); else if (mk) marks.push(mk[1].trim().toLowerCase());
+          else if (/^(one of|in turn)$/i.test(part)) altMode = /turn/i.test(part) ? 'turn' : 'random';
+          else looks.push(part);
         }
         const expr = looks.join(', ');
         const say: Step = /^narration$/i.test(who) ? { t: 'say', who: '', expr: '', text: m[3] } : { t: 'say', who, expr, text: m[3] };
         if (fx && say.who) { say.fx = fx.fx; if (Object.keys(fx.opts).length) say.fxOpts = fx.opts; }
         if (sound) say.sound = sound;
         if (marks.length && say.who) say.marks = marks;
+        if (voice) say.voice = voice;
+        // "First || Second || Third": other ways to say the line.
+        const texts = say.text.split(/\s*\|\|\s*/).filter(Boolean);
+        if (texts.length > 1) { say.text = texts[0]; say.alts = texts.slice(1); say.altMode = altMode === 'turn' ? 'turn' : 'random'; }
         steps.push(mark(say, l));
       } else {
         pos++;
@@ -300,15 +322,23 @@ function headerOf(s: Step): string | null {
       const who = cleanName(s.who);
       const sound = s.sound ? `sound ${cleanName(s.sound).replace(/,/g, ' ')}` : '';
       const marks = who ? (s.marks ?? []).map(x => `mark ${cleanName(x).replace(/,/g, ' ')}`) : [];
-      const paren = [cleanName(s.expr).replace(/,/g, ' '), s.fx && who ? lineFxText(s.fx, s.fxOpts) : '', ...marks, sound].filter(Boolean).join(', ');
-      if (who) return `${who}${paren ? ` (${paren})` : ''}: ${text}`;
-      if (sound) return `Narration (${sound}): ${text}`;
+      const alts = (s.alts ?? []).map(oneLine).filter(Boolean);
+      const voice = s.voice ? `voice ${cleanName(s.voice).replace(/,/g, ' ')}` : '';
+      const mode = alts.length ? (s.altMode === 'turn' ? 'in turn' : 'one of') : '';
+      const all = [text, ...alts].join(' || ');
+      const paren = [cleanName(s.expr).replace(/,/g, ' '), s.fx && who ? lineFxText(s.fx, s.fxOpts) : '', ...marks, sound, voice, mode].filter(Boolean).join(', ');
+      if (who) return `${who}${paren ? ` (${paren})` : ''}: ${all}`;
+      if (sound || voice || mode) return `Narration (${[sound, voice, mode].filter(Boolean).join(', ')}): ${all}`;
+      if (alts.length) return `Narration: ${all}`;
       return plainNarration(text) ? text : `Narration: ${text}`;
     }
     case 'choice': return 'Choice';
     case 'if': return `Only if ${conditionText(s.cond)}`;
     case 'change': return s.effects.length ? `Change ${s.effects.map(effectText).join(', ')}` : null;
-    case 'door': return `Go to ${oneLine(s.room)}`;
+    case 'door': return `Go to ${oneLine(s.room)}${s.fx ? ` with ${s.fx}` : ''}`;
+    case 'ask': return `Ask "${oneLine(s.prompt).replace(/"/g, "'")}" as ${s.fact}`;
+    case 'ending': return `Ending: ${oneLine(s.name)}`;
+    case 'camera': return s.action === 'zoom' ? `Camera zoom ${s.scale ?? 1.5} at ${s.x ?? 50}% ${s.y ?? 50}%` : `Camera ${s.action}`;
     case 'jump': return `Go to part ${oneLine(s.part)}`;
     case 'end': return 'End';
     case 'part': return `Part: ${oneLine(s.name)}`;
@@ -331,9 +361,9 @@ function headerOf(s: Step): string | null {
   }
 }
 
-function optionHeader(o: { text: string; effects: Effect[] }): string {
-  const effects = o.effects.length ? `  ${o.effects.map(effectText).join(', ')}` : '';
-  return `"${oneLine(o.text).replace(/["\u201c\u201d]/g, "'") || '...'}"${effects}`;
+function optionHeader(o: { text: string; effects: Effect[]; once?: boolean; fallback?: boolean }): string {
+  const tail = [o.once ? 'once' : '', o.fallback ? 'fallback' : '', ...o.effects.map(effectText)].filter(Boolean).join(', ');
+  return `"${oneLine(o.text).replace(/["\u201c\u201d]/g, "'") || '...'}"${tail ? `  ${tail}` : ''}`;
 }
 
 const indentOf = (raw: string) => (raw.match(/^[ \t]*/) ?? [''])[0];

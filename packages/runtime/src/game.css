@@ -134,3 +134,70 @@
 @keyframes mk-fade { from { opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { .el .mv, .mk { animation: none !important; } }
 .stage.play .el.staged.onpath { transition: opacity .35s ease; }
+
+/* The camera: everything in the picture sits on one layer that can zoom, shake and slide. */
+.stage .cam { position: absolute; inset: 0; transition: transform .8s ease; }
+.stage.camfx-shake .cam { animation: cam-shake .5s ease; }
+.stage.camfx-flash::after { content: ''; position: absolute; inset: 0; z-index: 30; background: #fff; pointer-events: none; animation: cam-flash .55s ease forwards; }
+@keyframes cam-shake { 0%, 100% { translate: 0 0; } 20% { translate: -1.5% .6%; } 40% { translate: 1.5% -.6%; } 60% { translate: -1% .4%; } 80% { translate: 1% 0; } }
+@keyframes cam-flash { from { opacity: .9; } to { opacity: 0; } }
+.cam.cam-in-left { animation: cam-in-left .6s ease-out; }
+.cam.cam-in-right { animation: cam-in-right .6s ease-out; }
+@keyframes cam-in-left { from { translate: -100% 0; } }
+@keyframes cam-in-right { from { translate: 100% 0; } }
+.stage .wipe { position: absolute; inset: 0; z-index: 35; background: #000; opacity: 0; pointer-events: none; transition: opacity .4s ease; }
+.stage .wipe.on { opacity: 1; }
+@media (prefers-reduced-motion: reduce) { .stage .cam { transition: none; } .stage.camfx-shake .cam, .cam.cam-in-left, .cam.cam-in-right { animation: none; } }
+
+/* Speech bubbles over the speaker, and narration over the whole picture */
+.say.bubble { translate: -50% 0; width: auto; min-width: 8em; max-width: min(42%, 22em); padding: .7em 1em .6em; border-radius: calc(var(--g-radius) + 8px); }
+.say.bubble::after { content: ''; position: absolute; left: 50%; bottom: -.6em; translate: -50% 0; border: .65em solid transparent; border-bottom: 0; border-top-color: var(--g-box); }
+.say.bubble .who { position: static; display: inline-block; margin-bottom: .3em; }
+.say.bubble .go { display: none; }
+.say.screen { inset: 0; translate: none; left: 0; bottom: 0; width: 100%; max-width: none; height: 100%; max-height: none; display: flex; flex-direction: column; justify-content: center; padding: 8% 14%; border-radius: 0; background: rgba(8, 6, 14, .78); font-size: 1.15em; line-height: 1.7; }
+.say.screen .txt { max-height: none; }
+
+/* Asking the player */
+.say.ask .askrow { display: flex; gap: .5em; }
+.say.ask input { flex: 1; min-width: 0; padding: .4em .6em; border: 1.5px solid var(--g-accent); border-radius: calc(var(--g-radius) * .6); background: transparent; color: var(--g-fg); font: inherit; }
+.say.ask button { padding: .4em 1em; border: 0; border-radius: calc(var(--g-radius) * .6); background: var(--g-accent); color: var(--g-on); font: inherit; font-weight: 700; cursor: pointer; }
+
+/* The game's own menu and its windows */
+.gamemenu { position: absolute; top: 2%; right: 1.5%; z-index: 20; display: flex; gap: .35em; font-family: var(--g-font); font-size: max(13px, calc(var(--g-size) * .75cqw)); opacity: .55; transition: opacity .2s; }
+.gamemenu:hover, .gamemenu:focus-within { opacity: 1; }
+.gamemenu button { width: 2em; height: 2em; display: grid; place-items: center; padding: 0; border: 0; border-radius: 50%; background: var(--g-box); color: var(--g-fg); font: inherit; font-size: 1.05em; cursor: pointer; }
+.gamemenu button:hover { background: var(--g-accent); color: var(--g-on); }
+.gamemenu button:disabled { opacity: .35; cursor: default; background: var(--g-box); color: var(--g-fg); }
+.gameover { position: absolute; inset: 0; z-index: 25; display: none; place-items: center; background: rgba(8, 6, 14, .55); font-family: var(--g-font); font-size: max(13px, calc(var(--g-size) * .85cqw)); }
+.gameover.on { display: grid; }
+.ovl { position: relative; width: min(80%, 34em); max-height: 84%; display: flex; flex-direction: column; border-radius: var(--g-radius); background: var(--g-box); color: var(--g-fg); box-shadow: 0 1em 3em rgba(0, 0, 0, .45); }
+.ovh { display: flex; align-items: center; justify-content: space-between; padding: .8em 1.1em; border-bottom: 1px solid color-mix(in srgb, var(--g-fg) 18%, transparent); }
+.ovh b { font-size: 1.15em; }
+.ovx { width: 1.9em; height: 1.9em; border: 0; border-radius: 50%; background: transparent; color: var(--g-fg); font: inherit; cursor: pointer; }
+.ovx:hover { background: var(--g-accent); color: var(--g-on); }
+.ovb { display: flex; flex-direction: column; gap: .8em; padding: 1em 1.1em; overflow-y: auto; }
+.ovb label { display: flex; flex-direction: column; gap: .25em; }
+.ovb label.tick { flex-direction: row; align-items: center; gap: .5em; }
+.ovb select { padding: .3em .5em; border-radius: .4em; border: 1px solid color-mix(in srgb, var(--g-fg) 30%, transparent); background: transparent; color: var(--g-fg); font: inherit; }
+.ovb select option { color: #111; }
+.ovb input[type=range] { accent-color: var(--g-accent); }
+.ovb .dim, .dim { opacity: .6; font-size: .88em; margin: 0; }
+.hist p { margin: 0; line-height: 1.45; }
+.hist p b { color: var(--g-accent); }
+.hist p.ans { opacity: .75; font-style: italic; }
+.slot { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: .5em; }
+.slot div { display: flex; flex-direction: column; }
+.slot span { opacity: .65; font-size: .85em; }
+.slot button, .endcard button { padding: .4em 1em; border: 0; border-radius: calc(var(--g-radius) * .6); background: var(--g-accent); color: var(--g-on); font: inherit; font-weight: 700; cursor: pointer; }
+.slot button:disabled { opacity: .4; cursor: default; }
+.endcard { align-items: center; padding: 2em 1.5em; text-align: center; animation: end-in .8s ease both; }
+.endcard p { margin: 0; opacity: .7; letter-spacing: .2em; text-transform: uppercase; font-size: .85em; }
+.endcard h2 { margin: .3em 0 1em; font-size: 2em; color: var(--g-accent); }
+@keyframes end-in { from { opacity: 0; scale: .96; } }
+
+/* Phones held upright: the dialogue sits under the picture instead of over it. */
+@media (orientation: portrait) and (max-width: 640px) {
+  .stage.play { overflow: visible; margin-bottom: 40vh; }
+  .stage.play .say:not(.bubble):not(.screen) { top: 100%; bottom: auto; margin-top: 2%; width: 94%; max-width: 94%; max-height: 38vh; }
+  .stage.play .say:not(.bubble):not(.screen) .who { top: -.95em; }
+}

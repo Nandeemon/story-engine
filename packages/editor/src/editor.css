@@ -500,3 +500,10 @@ body.wide .wrap { max-width: min(100%, 2200px); }
 .row.nowrap { flex-wrap: nowrap; }
 .row.nowrap input { flex: 1; min-width: 0; padding: 7px 9px; border: 1.5px solid var(--line); border-radius: 8px; background: var(--surface); }
 .side:has(> #roomlinks) > .map { column-gap: 56px; row-gap: 44px; }
+.altlist { display: flex; flex-direction: column; gap: 6px; }
+.altrow { display: grid; grid-template-columns: 18px 1fr auto; align-items: center; gap: 6px; }
+.altrow span { color: var(--muted); font-size: 12px; text-align: right; }
+.altrow input { padding: 6px 8px; border: 1.5px solid var(--line); border-radius: 8px; background: var(--surface); min-width: 0; }
+.altrow input:disabled { opacity: .7; }
+.btn.rec { border-color: var(--bad); background: var(--bad); color: #fff; animation: rec 1s ease-in-out infinite; }
+@keyframes rec { 50% { opacity: .7; } }

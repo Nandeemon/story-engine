@@ -168,10 +168,11 @@ function addingPanel(p: Project, a: Exclude<Adding, null>): string {
     : a === 'object' ? thumbs(OBJECTS, 'add-object', 'obj', svgOf)
     : thumbs(BACKDROPS, 'set-bg', '', svgOf);
   const upload = a === 'char' ? 'Use your own picture' : 'Use your own image';
+  const video = a === 'bg' ? '<button class="btn small quiet" data-act="upload-video">Use a video</button>' : '';
   const area = a === 'object' ? `<div class="thumbs"><button class="thumb" data-act="add-area"><span class="pic obj areapic"><span class="areabox"><b>Click</b></span></span><b>Clickable area</b></button></div>
     <p class="hint">A clickable area is invisible in the game. Put it over a door, a window or a sign in the backdrop.</p><div class="label">Objects</div>` : '';
   return `<h2>${title}</h2>${own}${area}${grid}
-    <div class="row"><button class="btn small" data-act="upload" data-k="${a}">${upload}</button><button class="btn small quiet" data-act="cancel">Cancel</button></div>`;
+    <div class="row"><button class="btn small" data-act="upload" data-k="${a}">${upload}</button>${video}<button class="btn small quiet" data-act="cancel">Cancel</button></div>`;
 }
 
 /** The character's looks as a row of small pictures, with a way to add more. */
@@ -524,6 +525,10 @@ export function viewLook(p: Project, r: Room, hudSel: string | null = null, fact
         <div class="field"><span>Colours</span><div class="colours">${colour('look-boxcolor', 'Box', L.boxColor, t.box)}${colour('look-textcolor', 'Text', L.textColor, t.fg)}${colour('look-accentcolor', 'Names and buttons', L.accentColor, t.accent)}</div>
           ${own ? '<button class="btn small quiet" data-act="look-colours-reset">Use the theme colours</button>' : ''}</div>
         <div class="field"><span>Choices</span>${pick('look-choices', box ? 'box' : 'center', [['box', 'In the dialogue box'], ['center', 'In the middle']])}</div>
+        <div class="field"><span>Lines</span>${pick('look-bubbles', L.bubbles ? 'on' : 'off', [['off', 'In the dialogue box'], ['on', 'As bubbles over the speaker']])}</div>
+        <div class="field"><span>Narration</span>${pick('look-narration', L.narration === 'screen' ? 'screen' : 'box', [['box', 'In the dialogue box'], ['screen', 'Over the whole picture']])}</div>
+        <div class="field"><span>Game menu</span>${pick('look-menu', L.gameMenu === false ? 'off' : 'on', [['on', 'Back, history, settings'], ['off', 'None']])}
+          <p class="hint">Small buttons in the corner of the game: go back a line, read earlier lines, change text speed and volume, and save.</p></div>
       </div></details>
       <p class="hint">Changes show in the picture as you make them, and apply to the whole game.</p>`;
   const count = p.hud?.length ? ` (${p.hud.length})` : '';

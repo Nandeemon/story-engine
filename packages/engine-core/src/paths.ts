@@ -1,4 +1,5 @@
-import type { Step } from './types';
+import { testCondition } from './runner';
+import type { FactValue, Step } from './types';
 
 /**
  * Addresses for steps inside a conversation, so an editor can point at "the second
@@ -116,5 +117,34 @@ export function unreachableSteps(root: Step[]): StepPath[] {
     });
   };
   scan(root, '');
+  return out;
+}
+
+/**
+ * Story facts that make a step reachable: for every "Only if" the step sits under,
+ * a value that takes the path it is on. Facts that already do so are left as they are.
+ */
+export function factsToReach(root: Step[], path: StepPath, facts: Record<string, FactValue>): Record<string, FactValue> {
+  const out: Record<string, FactValue> = {};
+  const parts = path.split('.');
+  let list: Step[] = root;
+  for (let i = 0; i + 1 < parts.length; i += 2) {
+    const step = list[Number(parts[i])];
+    const branch = parts[i + 1];
+    if (!step) break;
+    if (step.t === 'choice' && branch.startsWith('o')) { list = step.options[Number(branch.slice(1))]?.steps ?? []; continue; }
+    if (step.t !== 'if') break;
+    const want = branch === 't';
+    const now = { ...facts, ...out };
+    if (testCondition(now, step.cond) !== want) {
+      const c = step.cond, v = c.value, n = typeof v === 'number' ? v : Number(v);
+      const value: FactValue = c.op === 'truthy' ? want
+        : typeof v !== 'number' ? (want === (c.op !== '!=') ? v : (typeof v === 'boolean' ? !v : `not ${v}`))
+        : want ? ({ '>=': n, '<=': n, '>': n + 1, '<': n - 1, '=': n, '!=': n + 1 } as Record<string, number>)[c.op]
+        : ({ '>=': n - 1, '<=': n + 1, '>': n, '<': n, '=': n + 1, '!=': n } as Record<string, number>)[c.op];
+      out[c.fact] = value;
+    }
+    list = want ? step.then : step.else;
+  }
   return out;
 }
