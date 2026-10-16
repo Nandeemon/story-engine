@@ -105,15 +105,24 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
   /* ---------- Sound, voices and music ---------- */
   const sounds = new Map<string, HTMLAudioElement>();
   const findSound = (name: string | undefined) => { const key = (name ?? '').trim().toLowerCase(); return key ? project.sounds?.find(x => x.name.toLowerCase() === key) : undefined; };
-  function playSound(name: string | undefined): void {
+  function playSound(name: string | undefined, loop = false): void {
     const snd = findSound(name);
     if (!snd) return;
     let a = sounds.get(snd.id);
     if (!a) { a = new Audio(snd.data); sounds.set(snd.id, a); }
     a.volume = (snd.volume ?? 100) / 100 * settings.sound / 100;
+    a.loop = loop;
     a.currentTime = 0;
     void a.play().catch(() => { /* the browser may block sound until the player interacts */ });
   }
+  /** Stops one sound by name, or every sound (and the voice) when no name is given. */
+  function stopSound(name?: string): void {
+    if (name) { const snd = findSound(name); const a = snd && sounds.get(snd.id); if (a) { a.pause(); a.loop = false; } return; }
+    sounds.forEach(a => { a.pause(); a.loop = false; });
+    voice?.pause();
+  }
+  /** Sounds that loop are tied to the room they started in. */
+  const stopLoops = () => sounds.forEach(a => { if (a.loop) { a.pause(); a.loop = false; } });
   let voice: HTMLAudioElement | null = null;
   function playVoice(name: string | undefined): void {
     voice?.pause();
@@ -379,6 +388,7 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
 
   /* ---------- Rooms and conversations ---------- */
   function enter(r: Room): void {
+    if (s.roomId !== r.id) stopLoops();
     s.roomId = r.id;
     s.event = null;
     s.scene = null;
@@ -441,7 +451,10 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
       if (track) playMusic(track.track, track.once);
     }
     s.scene = scene;
-    runner = createRunner(steps, s.facts, step => { if (step.t === 'music') playMusic(step.track, step.once); else if (s.scene) applyToScene(s.scene, step, project); }, startAt, s.memory, el.id);
+    runner = createRunner(steps, s.facts, step => {
+      if (step.t === 'music') playMusic(step.track, step.once);
+      else if (step.t === 'sound') { if (!step.stop) playSound(step.name, step.loop); else { stopSound(step.name); if (step.music) stopMusic(); } }
+      else if (s.scene) applyToScene(s.scene, step, project); }, startAt, s.memory, el.id);
     advance();
   }
 
@@ -490,6 +503,8 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
     if (!runner) return;
     clearTimeout(autoTimer);
     voice?.pause();
+    // A line's sound can be set to play as the player moves on from it.
+    if (s.event?.t === 'say' && s.event.soundAtEnd) playSound(s.event.sound);
     if (s.scene) nextMoment(s.scene);
     const ev = runner.next();
     s.problem = '';
@@ -498,7 +513,7 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
       s.event = ev;
       lastLine = ev;
       history.push({ who: ev.who, text: ev.text });
-      playSound(ev.sound || lookSound(ev));
+      if (!ev.soundAtEnd) playSound(ev.sound || lookSound(ev));
       playVoice(ev.voice);
       speak(ev);
     } else if (ev.t === 'choice' || ev.t === 'ask') {

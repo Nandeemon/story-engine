@@ -375,6 +375,8 @@ export function inserts(p: Project, r: Room, e: StoryElement): { label: string; 
     { label: 'Change something', text: 'Change affection + 1' },
     { label: 'Go to another room', text: `Go to ${other.name}` },
     { label: 'Music', text: 'Music: ' },
+    { label: 'Sound', text: 'Sound: ' },
+    { label: 'Stop sounds', text: 'Stop sounds' },
     { label: 'Ask', text: 'Ask "What is your name?" as name' },
     { label: 'Ending', text: 'Ending: ' },
     { label: 'End', text: 'End' }
@@ -388,6 +390,10 @@ Mara (smiling): Hi again.
 Mara (sad, shake): With an effect.
 Mara (pulse strength 4 speed 2 x2): Settings 1-5.
 Mara (happy, sound laugh): With a sound.
+Mara (sound bell at the end): Sound on click.
+Sound: rain (loops)
+Stop sound: rain
+Stop sounds and music
 Mara (mark anger): With a mark.
 Mara (in turn): Hi. || Back again?
 Mark Mara with puff

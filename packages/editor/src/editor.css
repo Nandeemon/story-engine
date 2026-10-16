@@ -203,6 +203,22 @@ button.mnode:hover, .mrow:hover { box-shadow: 0 0 0 3px color-mix(in srgb, var(-
 .mnode.part { width: 300px; border-style: dashed; border-color: var(--violet); color: var(--violet); font-weight: 700; }
 .mnode.part .tag { color: var(--violet); }
 .mnode.dim, .mnode.dim .mrow { opacity: .45; }
+/* Smaller boxes, and the button that folds a box */
+.mfold { position: absolute; top: -11px; right: -11px; z-index: 1; display: grid; place-items: center; width: 22px; height: 22px; padding: 0; border: 1.5px solid var(--line); border-radius: 50%; background: var(--surface); color: var(--muted); font-size: 11px; line-height: 1; cursor: pointer; opacity: 0; transition: opacity .12s; }
+.mcard:hover .mfold, .mcard.small .mfold, .mfold:focus-visible { opacity: 1; }
+.mfold:hover { border-color: var(--ink); color: var(--ink); }
+.mnode.mcard.small { width: 220px; padding: 4px; gap: 0; }
+.mcard.small .mrow { flex-wrap: nowrap; padding: 3px 6px; font-size: 12.5px; }
+.mcard.small .mrow .txt { flex: 1 1 auto; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.mcard.small .mrow .expr, .mcard.small .mrow .mini-tag { display: none; }
+.mmore { align-self: flex-start; margin: 2px 6px; padding: 0; border: 0; background: none; color: var(--muted); font-size: 12px; cursor: pointer; }
+.mmore:hover { color: var(--ink); text-decoration: underline; }
+/* Dragging a row to change the order in its box */
+.mcard .mrow { touch-action: none; }
+.mcard.sorting .mrow { cursor: grabbing; }
+.mrow.dragging { position: relative; z-index: 2; background: var(--surface); box-shadow: 0 6px 18px rgba(0, 0, 0, .18); opacity: .95; cursor: grabbing; }
+.mrow.drop-before { box-shadow: inset 0 3px 0 var(--violet); }
+.mrow.drop-after { box-shadow: inset 0 -3px 0 var(--violet); }
 .mnever { max-width: 260px; color: var(--bad); font-size: 12.5px; text-align: center; }
 
 .mnode.on, .mrow.on { outline: 3px solid var(--tape); outline-offset: 2px; }

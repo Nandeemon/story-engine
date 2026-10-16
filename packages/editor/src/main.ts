@@ -10,7 +10,7 @@ import { inserts, lookStage, roomLinks, scriptStatus, viewCheck, viewConvo, view
 import { factKind, findProblems, storyFacts } from './problems';
 import type { Problem } from './problems';
 import type { Adding, ConvoMode, LookTab, UI, View } from './views';
-import { applyZoom, drawEdges, mapAction, mapHTML, mapInput, mapScene, mapSide, mapView, openView, setZoom } from './map';
+import { applyZoom, drawEdges, mapAction, mapHTML, mapInput, mapScene, mapSide, mapView, openView, setZoom, toggleFold, toggleFoldAll } from './map';
 import type { LineWin, MapCtx, MapResult } from './map';
 import { readProjectFile, saveToFile } from './files';
 import { viewCast } from './cast';
@@ -607,7 +607,7 @@ let lookReturn: { elId: string | null; mapSel: string | null } | null = null;
 let lookCompare: 'see-through' | 'difference' = 'see-through';
 
 /** Actions that never change the project, so they are not recorded for Undo. */
-const NOT_RECORDED = new Set(['voice-play', 'voice-upload', 'voice-rec', 'upload-video', 'area-cancel', 'door-cancel', 'edit-enter', 'library', 'win', 'path-draw', 'path-play', 'mark-add', 'music-add', 'cast-sound-add', 'sound-add', 'sound-play', 'cast', 'cast-open', 'cast-back', 'cast-new', 'cast-promote', 'cast-add-looks', 'cast-goto-room', 'cast-goto-convo', 'fx-try', 'scene-toggle', 'home', 'open-story', 'new-story', 'new-sample', 'import-story', 'duplicate-story', 'delete-story', 'test-off', 'look-tab', 'make-game', 'hud-sel', 'play-here', 'check', 'goto-problem', 'test-clear', 'once-lineup', 'look-compare', 'undo', 'redo', 'save-file', 'open-file', 'upload', 'play', 'play-convo', 'stop', 'convo-mode', 'look', 'crumb', 'add-looks', 'look-replace', 'once-picture', 'look-open', 'look-done']);
+const NOT_RECORDED = new Set(['map-fold', 'map-fold-all', 'snd-try', 'voice-play', 'voice-upload', 'voice-rec', 'upload-video', 'area-cancel', 'door-cancel', 'edit-enter', 'library', 'win', 'path-draw', 'path-play', 'mark-add', 'music-add', 'cast-sound-add', 'sound-add', 'sound-play', 'cast', 'cast-open', 'cast-back', 'cast-new', 'cast-promote', 'cast-add-looks', 'cast-goto-room', 'cast-goto-convo', 'fx-try', 'scene-toggle', 'home', 'open-story', 'new-story', 'new-sample', 'import-story', 'duplicate-story', 'delete-story', 'test-off', 'look-tab', 'make-game', 'hud-sel', 'play-here', 'check', 'goto-problem', 'test-clear', 'once-lineup', 'look-compare', 'undo', 'redo', 'save-file', 'open-file', 'upload', 'play', 'play-convo', 'stop', 'convo-mode', 'look', 'crumb', 'add-looks', 'look-replace', 'once-picture', 'look-open', 'look-done']);
 
 const actions: Record<string, (k: string) => void> = {
   crumb(k) {
@@ -798,6 +798,9 @@ const actions: Record<string, (k: string) => void> = {
     save(); render();
     toast(`Deleted ${c.name}. Their lines stay, as a voice without a picture. Undo brings ${c.name} back.`);
   },
+  'map-fold'(k) { toggleFold(k); refreshMap(); },
+  'map-fold-all'() { toggleFoldAll(); refreshMap(); },
+  'snd-try'(k) { previewSound(k, true); },
   'scene-toggle'() { sceneOpen = !sceneOpen; try { localStorage.setItem(SCENE_KEY, sceneOpen ? 'yes' : 'no'); } catch { /* this session */ } refreshMap(); },
   'add-area'() { ui.adding = null; ui.sel = null; ui.drawArea = true; render(); },
   'area-cancel'() { ui.drawArea = false; render(); },
@@ -1517,6 +1520,48 @@ document.addEventListener('pointerup', () => {
   render();
 });
 
+/* Holding a row in a box and dragging it up or down changes the order of the steps in that box. */
+let rowDrag: { row: HTMLElement; card: HTMLElement; from: string; y: number; moved: boolean; to: number | null; before: string } | null = null;
+let justDragged = false;
+document.addEventListener('pointerdown', ev => {
+  const row = (ev.target as HTMLElement).closest<HTMLElement>('.mcard .mrow[data-k]');
+  const card = row?.closest<HTMLElement>('.mcard');
+  if (!row || !card || ev.button !== 0 || card.querySelectorAll('.mrow').length < 2) return;
+  rowDrag = { row, card, from: row.dataset.k!, y: ev.clientY, moved: false, to: null, before: snapshot() };
+});
+document.addEventListener('pointermove', ev => {
+  if (!rowDrag) return;
+  const { row, card } = rowDrag;
+  const dy = ev.clientY - rowDrag.y;
+  if (!rowDrag.moved && Math.abs(dy) < 6) return;
+  if (!rowDrag.moved) { rowDrag.moved = true; row.classList.add('dragging'); card.classList.add('sorting'); try { row.setPointerCapture(ev.pointerId); } catch { /* not supported */ } }
+  const z = parseFloat($('#mzoomlabel')?.textContent ?? '100') / 100 || 1;
+  row.style.transform = `translateY(${dy / z}px)`;
+  // Where it would go: before the first row whose middle is below the pointer.
+  const rows = [...card.querySelectorAll<HTMLElement>('.mrow')].filter(r => r !== row);
+  card.querySelectorAll('.drop-before, .drop-after').forEach(r => r.classList.remove('drop-before', 'drop-after'));
+  const below = rows.find(r => { const b = r.getBoundingClientRect(); return ev.clientY < b.top + b.height / 2; });
+  const indexOf = (r: HTMLElement) => Number(r.dataset.k!.split('.').pop());
+  if (below) { below.classList.add('drop-before'); rowDrag.to = indexOf(below); }
+  else { const last = rows[rows.length - 1]; last.classList.add('drop-after'); rowDrag.to = indexOf(last) + 1; }
+});
+const rowDrop = () => {
+  if (!rowDrag) return;
+  const d = rowDrag;
+  rowDrag = null;
+  if (!d.moved) return;
+  justDragged = true;
+  setTimeout(() => { justDragged = false; }, 0);
+  d.row.style.transform = '';
+  d.row.classList.remove('dragging');
+  d.card.classList.remove('sorting');
+  const ctx = mapCtx();
+  const res = ctx && d.to !== null ? mapAction(ctx, 'reorder', `${d.from}|${d.to}`) : undefined;
+  if (res) { applyMap(res); record(d.before); } else refreshMap();
+};
+document.addEventListener('pointerup', rowDrop);
+document.addEventListener('pointercancel', rowDrop);
+
 /* Dragging the map's background pans it. */
 let pan: { x: number; y: number; left: number; top: number; moved: boolean } | null = null;
 let justPanned = false;
@@ -1566,6 +1611,7 @@ document.addEventListener('click', ev => {
   if (v) { mapView(v.dataset.mapView!); drawEdges(); return; }
   const m = target.closest<HTMLElement>('[data-map-act]');
   const ctx = mapCtx();
+  if (justDragged && m?.closest('.mcard')) return;
   if (m && ctx) {
     if ((m as HTMLButtonElement).disabled) return;
     const act = m.dataset.mapAct!;
@@ -1640,13 +1686,13 @@ function renameEverywhere(kind: 'room' | 'speaker', from: string, to: string): n
 function commitMapField(t: HTMLInputElement): void {
   const ctx = mapCtx();
   if (!ctx) return;
-  if (t.dataset.mapIn === 'say-sound' && t.value === '__upload') {
-    const at = mapSel;
-    pickSound(name => { const c = mapCtx(); if (c && at) { mapSel = at; mapInput({ ...c, sel: at }, 'say-sound', '', name); } });
+  if ((t.dataset.mapIn === 'say-sound' || t.dataset.mapIn === 'snd-name') && t.value === '__upload') {
+    const at = mapSel, field = t.dataset.mapIn;
+    pickSound(name => { const c = mapCtx(); if (c && at) { mapSel = at; mapInput({ ...c, sel: at }, field, '', name); } });
     refreshMap();
     return;
   }
-  if (t.dataset.mapIn === 'say-sound' && t.value) previewSound(t.value);
+  if ((t.dataset.mapIn === 'say-sound' || t.dataset.mapIn === 'snd-name') && t.value) previewSound(t.value);
   if (t.dataset.mapIn === 'music-track' && t.value === '__upload') {
     const at = mapSel;
     pickSound(name => { const c = mapCtx(); if (c && at) { mapSel = at; mapInput({ ...c, sel: at }, 'music-track', '', name); } }, null, true);

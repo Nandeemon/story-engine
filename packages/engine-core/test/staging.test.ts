@@ -39,7 +39,7 @@ describe('stage steps', () => {
 
   it('tells the player about stage steps as they pass', () => {
     const seen: string[] = [];
-    const runner = createRunner(parseScript(SCENE).steps, {}, s => seen.push(s.t === 'music' ? `music ${s.track}` : s.t === 'camera' ? 'camera' : `${s.t} ${s.who}`));
+    const runner = createRunner(parseScript(SCENE).steps, {}, s => seen.push(s.t === 'music' ? `music ${s.track}` : s.t === 'camera' || s.t === 'sound' ? s.t : `${s.t} ${s.who}`));
     const ev = runner.next();
     expect(ev).toMatchObject({ t: 'say', fx: 'shake' });
     expect(seen).toEqual(['show Lin']);

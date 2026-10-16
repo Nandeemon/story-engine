@@ -53,12 +53,15 @@ export function renameSoundInScript(script: string, oldName: string, newName: st
   return script.split('\n').map(line => {
     const mu = line.match(/^(\s*music(?:\s+once)?\s*:\s*)(.+?)\s*$/i);
     if (mu) return lower(mu[2]) === from ? (to ? `${mu[1]}${to}` : `${mu[1].replace(/once\s*/i, '')}off`) : line;
+    // "Sound: rain (loops)" and "Stop sound: rain": steps of their own. A deleted sound leaves them for Check to point out.
+    const st = line.match(/^(\s*(?:stop\s+)?sound\s*:\s*)([^()]+?)(\s*\([^)]*\))?\s*$/i);
+    if (st) return lower(st[2]) === from && to ? `${st[1]}${to}${st[3] ?? ''}` : line;
     const m = line.match(/^(\s*[^:"()#]{1,40}?\s*\()([^)]*)(\)\s*:.*)$/);
     if (!m) return line;
     const parts = m[2].split(',');
-    const i = parts.findIndex(p => { const s = p.trim().match(/^sound\s+(.+)$/i); return !!s && lower(s[1]) === from; });
+    const i = parts.findIndex(p => { const s = p.trim().match(/^sound\s+(.+?)(\s+at the end)?$/i); return !!s && lower(s[1]) === from; });
     if (i < 0) return line;
-    if (to) parts[i] = parts[i].replace(/sound\s+.+/i, `sound ${to}`);
+    if (to) parts[i] = parts[i].replace(/sound\s+.+?(\s+at the end)?$/i, (_, end) => `sound ${to}${end ?? ''}`);
     else parts.splice(i, 1);
     const inner = parts.join(',').trim();
     return inner ? `${m[1]}${parts.join(',').replace(/^\s+/, '')}${m[3]}` : `${m[1].replace(/\s*\($/, '')}${m[3].replace(/^\)/, '')}`;

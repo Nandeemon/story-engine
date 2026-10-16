@@ -100,7 +100,21 @@ let model: Model = { edges: [], jumps: [], parts: new Map() };
 let nextId = 0;
 
 const lower = (s: string) => s.trim().toLowerCase();
-const LINE_KINDS = new Set(['say', 'change', 'note', 'show', 'move', 'hide', 'music', 'mark', 'loop', 'path', 'ask', 'camera']);
+const LINE_KINDS = new Set(['say', 'change', 'note', 'show', 'move', 'hide', 'music', 'sound', 'mark', 'loop', 'path', 'ask', 'camera']);
+
+/* Boxes made smaller: all of them, with single boxes switched the other way. Kept while the editor is open. */
+let allSmall = false;
+const flipped = new Set<string>();
+export function toggleFold(key: string): void { if (flipped.has(key)) flipped.delete(key); else flipped.add(key); }
+export function toggleFoldAll(): void { allSmall = !allSmall; flipped.clear(); }
+/** How many rows a smaller box shows before "+ n more". */
+const SMALL_ROWS = 2;
+
+/** A sound step in plain words. */
+export function soundText(s: Extract<Step, { t: 'sound' }>): string {
+  if (s.stop) return s.name ? `Stop ${s.name}` : `Stop all sounds${s.music ? ' and the music' : ''}`;
+  return s.name && s.name !== '...' ? `♪ ${s.name}${s.loop ? ' (loops)' : ''}` : 'No sound picked';
+}
 const TERMINAL = new Set(['door', 'end', 'jump', 'ending']);
 
 export function startLabel(room: Room, el: StoryElement): string {
@@ -141,11 +155,12 @@ export function mapHTML(ctx: MapCtx): string {
     if (s.t === 'say') {
       const text = s.text === '...' ? '<em>Empty line</em>' : esc(s.text);
       return s.who
-        ? `<button ${attrs}><span class="who${unknownSpeaker(ctx, s.who) ? ' voice" title="A voice without a picture: no character has this name' : ''}">${esc(s.who)}</span>${s.expr ? exprTag(s.who, s.expr) : ''}${s.marks?.length ? `<span class="expr">${esc(s.marks.join(', '))}</span>` : ''}${s.fx ? `<span class="mini-tag">${esc(s.fx)}</span>` : ''}${s.sound ? '<span class="mini-tag">♪</span>' : ''}${s.voice ? '<span class="mini-tag">🎤</span>' : ''}${s.alts?.length ? `<span class="mini-tag">${s.alts.length + 1} ways</span>` : ''}<span class="txt">${text}</span></button>`
+        ? `<button ${attrs}><span class="who${unknownSpeaker(ctx, s.who) ? ' voice" title="A voice without a picture: no character has this name' : ''}">${esc(s.who)}</span>${s.expr ? exprTag(s.who, s.expr) : ''}${s.marks?.length ? `<span class="expr">${esc(s.marks.join(', '))}</span>` : ''}${s.fx ? `<span class="mini-tag">${esc(s.fx)}</span>` : ''}${s.sound ? `<span class="mini-tag" title="${s.soundAtEnd ? 'Sound as the player moves on' : 'Sound as the line appears'}">${s.soundAtEnd ? '→♪' : '♪'}</span>` : ''}${s.voice ? '<span class="mini-tag">🎤</span>' : ''}${s.alts?.length ? `<span class="mini-tag">${s.alts.length + 1} ways</span>` : ''}<span class="txt">${text}</span></button>`
         : `<button ${attrs}><span class="txt narr">${text}</span></button>`;
     }
     if (s.t === 'ask') return `<button ${attrs}><span class="tag">Ask</span><span class="txt">${esc(s.prompt)} → <code>${esc(s.fact)}</code></span></button>`;
     if (s.t === 'camera') return `<button ${attrs}><span class="tag">Camera</span><span class="txt">${s.action === 'zoom' ? `zoom ×${s.scale ?? 1.5}` : esc(s.action)}</span></button>`;
+    if (s.t === 'sound') return `<button ${attrs}><span class="tag">${s.stop ? 'Stop' : 'Sound'}</span><span class="txt">${esc(soundText(s))}</span></button>`;
     if (s.t === 'music') return `<button ${attrs}><span class="tag">Music</span><span class="txt">${s.track ? `♫ ${esc(s.track)}${s.once ? ' (once)' : ''}` : 'Silence'}</span></button>`;
     if (s.t === 'change') return `<button ${attrs}><span class="tag">Change</span><span class="txt">${esc(s.effects.map(effectText).join(', '))}</span></button>`;
     if (s.t === 'note') return `<button ${attrs}><span class="tag">Note</span><span class="txt">${esc(s.text)}</span></button>`;
@@ -177,8 +192,20 @@ export function mapHTML(ctx: MapCtx): string {
       if (LINE_KINDS.has(s.t)) {
         let j = i;
         let rows = '';
-        while (j < list.length && LINE_KINDS.has(list[j].t)) { rows += row(list[j], stepPathOf(lp, j)); j++; }
-        html += `<div class="mnode mcard${dim}" id="${nid}">${rows}</div>`;
+        const key = `${ctx.el.id}|${path}`;
+        const small = allSmall !== flipped.has(key);
+        let hidden = 0;
+        while (j < list.length && LINE_KINDS.has(list[j].t)) {
+          const p = stepPathOf(lp, j);
+          // A smaller box shows its first rows, and the selected one wherever it is.
+          if (small && j - i >= SMALL_ROWS && ctx.sel !== p) hidden++;
+          else rows += row(list[j], p);
+          j++;
+        }
+        const n = j - i;
+        const fold = `<button class="mfold" data-act="map-fold" data-k="${esc(key)}" title="${small ? 'Show the whole box' : 'Make this box smaller'}" aria-label="${small ? 'Show the whole box' : 'Make this box smaller'}" aria-expanded="${!small}">${small ? '▸' : '▾'}</button>`;
+        const more = hidden ? `<button class="mmore" data-act="map-fold" data-k="${esc(key)}">+ ${hidden} more</button>` : '';
+        html += `<div class="mnode mcard${small ? ' small' : ''}${dim}" id="${nid}" data-rows="${n}">${n > 1 || small ? fold : ''}${rows}${more}</div>`;
         link(ents, nid);
         ents = [nid];
         i = j;
@@ -253,7 +280,8 @@ export function mapHTML(ctx: MapCtx): string {
     <button class="btn small quiet" data-map-view="out" aria-label="Zoom out" title="Zoom out">−</button>
     <button class="btn small quiet" data-map-view="reset" id="mzoomlabel" title="Show at actual size">${Math.round(zoom * 100)}%</button>
     <button class="btn small quiet" data-map-view="in" aria-label="Zoom in" title="Zoom in">+</button>
-    <button class="btn small quiet" data-map-view="fit" title="Fit the whole conversation in view">Fit</button></div>`;
+    <button class="btn small quiet" data-map-view="fit" title="Fit the whole conversation in view">Fit</button>
+    <button class="btn small quiet${allSmall ? ' ink' : ''}" data-act="map-fold-all" aria-pressed="${allSmall}" title="${allSmall ? 'Show every box whole' : 'Make every box smaller'}">${allSmall ? 'Whole boxes' : 'Smaller boxes'}</button></div>`;
   return `${banner}<div class="mview">${zoomBar}<div class="mscroll" id="mscroll"><div class="msizer" id="msizer"><div class="mcanvas" id="mcanvas"><svg class="medges" id="medges" aria-hidden="true"></svg>
     <div class="mflow top"><div class="mnode start" id="${startId}">${esc(startLabel(ctx.room, ctx.el))}</div>${body.html}</div></div></div></div></div>`;
 }
@@ -388,6 +416,7 @@ function stepLabel(s: Step): string {
     case 'if': return `only if ${conditionText(s.cond)}`;
     case 'change': return `change ${s.effects.map(effectText).join(', ')}`;
     case 'music': return s.track ? `music ${s.track}` : 'the music stops';
+    case 'sound': return soundText(s).replace(/^♪ /, 'sound ');
     case 'door': return `go to ${s.room}`;
     case 'ask': return `ask "${s.prompt}"`;
     case 'ending': return `ending: ${s.name}`;
@@ -455,7 +484,10 @@ function soundPart(ctx: MapCtx, step: SayStep): string {
   const who = speakerOf(ctx.project, ctx.room, step.who).character;
   const mine = who ? (ctx.project.sounds ?? []).filter(x => x.owner === who.id) : [];
   const quick = mine.length ? `<div class="quick">${mine.map(x => `<button class="chip${lower(x.name) === lower(step.sound ?? '') ? ' on' : ''}" data-map-act="quick-sound" data-k="${esc(x.name)}" title="Play ${esc(x.name)} with this line">♪ ${esc(soundLabel(x.name, who!.name))}</button>`).join('')}</div>` : '';
-  return `<label class="field"><span>Sound with this line</span>${soundSelect(ctx.project, 'm-sound', 'data-map-in="say-sound"', step.sound, 'No sound', who)}</label>${quick}`;
+  const when = step.sound ? `<div class="field"><span>When it plays</span><div class="row">
+      <button class="btn small${step.soundAtEnd ? ' quiet' : ' ink'}" data-map-act="snd-when" data-k="start" aria-pressed="${!step.soundAtEnd}">As the line appears</button>
+      <button class="btn small${step.soundAtEnd ? ' ink' : ' quiet'}" data-map-act="snd-when" data-k="end" aria-pressed="${!!step.soundAtEnd}">When the player moves on</button></div></div>` : '';
+  return `<label class="field"><span>Sound with this line</span>${soundSelect(ctx.project, 'm-sound', 'data-map-in="say-sound"', step.sound, 'No sound', who)}</label>${quick}${when}`;
 }
 
 /** A recorded or uploaded voice for the line. */
@@ -490,7 +522,7 @@ function lineTools(ctx: MapCtx, step: SayStep, scene: Scene): string {
   return `<div class="tools4">
     ${chip('fx', 'Effect', step.fx ?? '', !!step.who)}
     ${chip('marks', 'Marks', (step.marks ?? []).join(', '), !!step.who)}
-    ${chip('sound', 'Sound', [step.sound ?? '', step.voice ? 'voice' : ''].filter(Boolean).join(' + '))}
+    ${chip('sound', 'Sound', [step.sound ? `${step.sound}${step.soundAtEnd ? ' (end)' : ''}` : '', step.voice ? 'voice' : ''].filter(Boolean).join(' + '))}
     ${chip('alts', 'Variations', step.alts?.length ? `${step.alts.length + 1} ways${step.altMode === 'turn' ? ', in turn' : ''}` : '')}
     ${chip('stage', 'Stage', me ? `${spotText({ x: Math.round(me.x) }) || `${Math.round(me.x)}%`}${me.flip ? ', turned' : ''}` : step.who ? 'not on stage' : '')}
     ${chip('facts', 'Story facts', '', facts)}
@@ -569,6 +601,7 @@ const kinds = (top: boolean, hasParts: boolean) => [
   ['if', 'Only if', 'Take one path or another depending on story facts'],
   ['change', 'Change something', 'Change a story fact without saying anything'],
   ['music', 'Music', 'Start, change or stop the background music'],
+  ['sound', 'Sound', 'Play a sound, or stop one sound or all of them'],
   ['door', 'Go to another room', 'The player moves to another room'],
   ['ask', 'Ask the player', 'The player types an answer, such as their name, kept as a story fact'],
   ['camera', 'Camera', 'Zoom in on a spot, shake, flash, or back to the whole picture'],
@@ -728,6 +761,18 @@ export function mapSide(ctx: MapCtx): string {
         <label class="field"><span>Track</span>${musicSelect(ctx.project, 'm-music', 'data-map-in="music-track"', step.track, [['', 'Silence']])}</label>
         ${step.track ? `<div class="row"><label class="check"><input type="checkbox" id="m-music-once" data-map-in="music-once"${step.once ? ' checked' : ''}><span>Play once instead of looping</span></label></div>` : ''}
         ${del()}`;
+    case 'sound': {
+      const mode = !step.stop ? 'play' : step.name ? 'stop' : 'all';
+      const pick = `<div class="row">${([['play', 'Play a sound'], ['stop', 'Stop a sound'], ['all', 'Stop all sounds']] as const).map(([k, n]) => `<button class="btn small${mode === k ? ' ink' : ' quiet'}" data-map-act="snd-mode" data-k="${k}" aria-pressed="${mode === k}">${n}</button>`).join('')}</div>`;
+      const has = (ctx.project.sounds ?? []).some(x => !x.music);
+      const which = mode === 'all' ? '' : `<label class="field"><span>${mode === 'play' ? 'Sound' : 'Which sound to stop'}</span>${soundSelect(ctx.project, 'm-snd', 'data-map-in="snd-name"', step.name === '...' ? '' : step.name, 'Choose…')}</label>
+        ${step.name && step.name !== '...' && mode === 'play' ? `<button class="btn small quiet" data-act="snd-try" data-k="${esc(step.name)}">▶ Listen</button>` : ''}`;
+      const opts = mode === 'play' ? `<div class="row"><label class="check"><input type="checkbox" id="m-snd-loop" data-map-in="snd-loop"${step.loop ? ' checked' : ''}><span>Keep playing until it is stopped</span></label></div>`
+        : mode === 'all' ? `<div class="row"><label class="check"><input type="checkbox" id="m-snd-music" data-map-in="snd-music"${step.music ? ' checked' : ''}><span>Stop the music too</span></label></div>` : '';
+      const hint = mode === 'play' ? (step.loop ? 'It loops until a Stop step or until the player leaves the room.' : 'It plays once, while the conversation goes on.')
+        : mode === 'stop' ? 'Stops that sound if it is playing, for example one that loops.' : 'Stops every sound and voice that is playing.';
+      return `${header(mode === 'play' ? 'Sound' : 'Stop sound')}${pick}${which}${opts}<p class="hint">${hint}${has ? '' : ' Add sounds under Pictures &amp; sounds first.'}</p>${del()}`;
+    }
     case 'door':
       return `${header('Go to another room')}
         <label class="field"><span>Room</span><select id="m-room" data-map-in="door-room">${ctx.project.rooms.map(r => `<option${lower(r.name) === lower(step.room) ? ' selected' : ''}>${esc(r.name)}</option>`).join('')}${ctx.project.rooms.some(r => lower(r.name) === lower(step.room)) ? '' : `<option selected>${esc(step.room)}</option>`}</select></label>
@@ -785,6 +830,7 @@ function newStep(kind: string, ctx: MapCtx, parts: string[]): Step {
     case 'if': return { t: 'if', cond: { fact: 'affection', op: '>=', value: 5 }, then: [], else: [] };
     case 'change': return { t: 'change', effects: [{ fact: 'affection', op: '+', value: 1 }] };
     case 'music': return { t: 'music', track: (ctx.project.sounds ?? []).find(x => x.music)?.name ?? '' };
+    case 'sound': return { t: 'sound', name: (ctx.project.sounds ?? []).find(x => !x.music)?.name ?? '...' };
     case 'door': return { t: 'door', room: other.name };
     case 'ask': return { t: 'ask', prompt: 'What is your name?', fact: 'name' };
     case 'ending': return { t: 'ending', name: 'The end' };
@@ -901,6 +947,34 @@ export function mapAction(ctx: MapCtx, act: string, k: string): MapResult | unde
       if (act === 'alt-remove') { step.alts = (step.alts ?? []).filter((_, i) => i !== Number(k)); if (!step.alts.length) { delete step.alts; delete step.altMode; } }
       if (act === 'alt-mode') step.altMode = k === 'turn' ? 'turn' : 'random';
       if (act === 'voice-off') delete step.voice;
+      return commit(ctx.sel);
+    }
+    case 'reorder': {
+      // Dragging a row in a box: k is "<from path>|<index to put it before>", in the same list.
+      const [from, to] = k.split('|');
+      const { list, index } = splitPath(from);
+      const target = getList(steps, list);
+      let at = Number(to);
+      if (!target || !target[index] || !Number.isInteger(at) || at < 0 || at > target.length) return undefined;
+      if (at > index) at--;
+      if (at === index) return undefined;
+      const [moved] = target.splice(index, 1);
+      target.splice(at, 0, moved);
+      const wasSel = ctx.sel === from;
+      return commit(wasSel || !ctx.sel ? stepPathOf(list, at) : ctx.sel);
+    }
+    case 'snd-when': {
+      const step = getStep(steps, path);
+      if (step?.t !== 'say') return undefined;
+      if (k === 'end') step.soundAtEnd = true; else delete step.soundAtEnd;
+      return commit(ctx.sel);
+    }
+    case 'snd-mode': {
+      const step = getStep(steps, path);
+      if (step?.t !== 'sound') return undefined;
+      if (k === 'play') { delete step.stop; delete step.music; if (!step.name) step.name = (ctx.project.sounds ?? []).find(x => !x.music)?.name ?? '...'; }
+      if (k === 'stop') { step.stop = true; delete step.loop; delete step.music; if (!step.name) step.name = (ctx.project.sounds ?? []).find(x => !x.music)?.name ?? '...'; }
+      if (k === 'all') { step.stop = true; step.name = ''; delete step.loop; }
       return commit(ctx.sel);
     }
     case 'cam-action': {
@@ -1079,7 +1153,7 @@ export function mapInput(ctx: MapCtx, field: string, k: string, value: string): 
       if (n === FX_NORMAL[key]) delete step.fxOpts[key];
       if (!Object.keys(step.fxOpts).length) delete step.fxOpts;
     }
-    if (field === 'say-sound') step.sound = value || undefined;
+    if (field === 'say-sound') { panel = !step.sound !== !value; step.sound = value || undefined; if (!value) delete step.soundAtEnd; }
     if (field === 'alt-text' && step.alts) step.alts[Number(k)] = text.trim() || '...';
     if (field === 'say-who') { panel = !step.who !== !value.trim(); step.who = value; if (!value.trim()) step.expr = ''; }
     if (field === 'say-expr') step.expr = value;
@@ -1112,6 +1186,10 @@ export function mapInput(ctx: MapCtx, field: string, k: string, value: string): 
       const n = Number(value);
       if (n === 3) delete step.move[key]; else step.move[key] = n;
     }
+  } else if (step.t === 'sound') {
+    if (field === 'snd-name') { panel = true; step.name = value || '...'; }
+    if (field === 'snd-loop') { if (value === 'true') step.loop = true; else delete step.loop; panel = true; }
+    if (field === 'snd-music') { if (value === 'true') step.music = true; else delete step.music; }
   } else if (step.t === 'music') {
     if (field === 'music-track') { panel = !step.track !== !value; step.track = value; if (!value) delete step.once; }
     if (field === 'music-once') { if (value === 'true') step.once = true; else delete step.once; }

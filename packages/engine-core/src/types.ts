@@ -28,6 +28,8 @@ export interface SayStep {
   fxOpts?: { strength?: number; speed?: number; times?: number };
   /** A sound from the story's sounds, by name, played as the line appears. */
   sound?: string;
+  /** Play the sound when the player moves on from the line instead of as it appears. */
+  soundAtEnd?: boolean;
   /** Marks (an anger sign, a sweat drop, a puff) on the speaker for this line only. */
   marks?: string[];
   /** Other ways to say it: one is picked at random each time, or they come in turn (the last one stays). */
@@ -94,11 +96,17 @@ export interface PartStep { t: 'part'; name: string }
 export interface JumpStep { t: 'jump'; part: string }
 /** Background music from here on: a track by name (looping unless once), or silence when track is empty. */
 export interface MusicStep { t: 'music'; track: string; once?: boolean }
+/**
+ * A sound as a step of its own: plays a sound (looping until stopped, when loop),
+ * stops one sound (stop with a name), or stops every sound (stop with no name;
+ * music too, when music).
+ */
+export interface SoundStep { t: 'sound'; name: string; loop?: boolean; stop?: boolean; music?: boolean }
 /** An author's note (a line starting with #). The player never sees it. */
 export interface NoteStep { t: 'note'; text: string }
 
 /** One step of a conversation. */
-export type Step = SayStep | ChoiceStep | IfStep | ChangeStep | DoorStep | EndStep | PartStep | JumpStep | NoteStep | ShowStep | MoveStep | HideStep | MusicStep | MarkStep | LoopStep | PathStep | AskStep | EndingStep | CameraStep;
+export type Step = SayStep | ChoiceStep | IfStep | ChangeStep | DoorStep | EndStep | PartStep | JumpStep | NoteStep | ShowStep | MoveStep | HideStep | MusicStep | MarkStep | LoopStep | PathStep | AskStep | EndingStep | CameraStep | SoundStep;
 export type StageStep = ShowStep | MoveStep | HideStep | MarkStep | LoopStep | PathStep | CameraStep;
 
 export interface ScriptError {

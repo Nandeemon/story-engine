@@ -70,11 +70,12 @@ export function findProblems(p: Project): Problem[] {
     if (el.cond && !scripted.has(el.cond.fact)) out.push({ ...base, inRoom: true, level: 'warning', text: `${el.name} is only in the room while "${el.cond.fact}" says so, but no conversation changes or checks "${el.cond.fact}", so ${el.name} may never show.` });
     if (el.sound && !sounds.has(el.sound.toLowerCase())) out.push({ ...base, inRoom: true, level: 'warning', text: `The sound "${el.sound}" played on click is not among your sounds.` });
     walkWithPaths(parseScript(el.script).steps, (st, path) => {
-      if (st.t === 'say' && st.sound && !sounds.has(st.sound.toLowerCase())) out.push({ ...base, level: 'warning', path, text: `The sound "${st.sound}" is not among your sounds. Add it on the Story map, or pick another.` });
+      if (st.t === 'say' && st.sound && !sounds.has(st.sound.toLowerCase())) out.push({ ...base, level: 'warning', path, text: `The sound "${st.sound}" is not among your sounds. Add it under Pictures & sounds, or pick another.` });
       for (const mk of st.t === 'say' ? st.marks ?? [] : st.t === 'mark' && st.mark ? [st.mark] : []) {
         if (!findMark(p, mk)) out.push({ ...base, level: 'warning', path, text: `There is no mark called "${mk}". Add it under Marks on the Story map, or pick another.` });
       }
-      if (st.t === 'music' && st.track && !sounds.has(st.track.toLowerCase())) out.push({ ...base, level: 'warning', path, text: `The music "${st.track}" is not among your music. Add it on the Story map, or pick another.` });
+      if (st.t === 'sound' && st.name && !sounds.has(st.name.toLowerCase())) out.push({ ...base, level: 'warning', path, text: `The sound "${st.name}" is not among your sounds. Add it under Pictures & sounds, or pick another.` });
+      if (st.t === 'music' && st.track && !sounds.has(st.track.toLowerCase())) out.push({ ...base, level: 'warning', path, text: `The music "${st.track}" is not among your music. Add it under Pictures & sounds, or pick another.` });
     });
   }
   for (const w of p.hud ?? []) {

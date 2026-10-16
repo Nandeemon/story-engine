@@ -171,6 +171,15 @@ function parse(src: string, noteSources: boolean): ParseResult {
         pos++;
         const track = m[2].trim();
         steps.push(mark(/^(off|none|stop|silence)$/i.test(track) ? { t: 'music', track: '' } : { t: 'music', track, ...(m[1] ? { once: true } : {}) }, l));
+      } else if ((m = l.text.match(/^stop\s+(?:all\s+)?sounds(\s+and\s+music)?$/i))) {
+        pos++;
+        steps.push(mark({ t: 'sound', name: '', stop: true, ...(m[1] ? { music: true } : {}) }, l));
+      } else if ((m = l.text.match(/^stop\s+sound\s*:\s*(.+)$/i))) {
+        pos++;
+        steps.push(mark({ t: 'sound', name: m[1].trim(), stop: true }, l));
+      } else if ((m = l.text.match(/^sound\s*:\s*([^()]+?)\s*(\(\s*(?:loops?|looping)\s*\))?$/i))) {
+        pos++;
+        steps.push(mark({ t: 'sound', name: m[1].trim(), ...(m[2] ? { loop: true } : {}) }, l));
       } else if (/^end$/i.test(l.text)) {
         pos++;
         steps.push(mark({ t: 'end' }, l));
@@ -206,7 +215,7 @@ function parse(src: string, noteSources: boolean): ParseResult {
         const who = m[1].trim();
         // "(sad, shake strength 4, sound laugh)": a look, a line effect and a sound, in any order.
         const parts = (m[2] ?? '').split(',').map(x => x.trim()).filter(Boolean);
-        let fx: ReturnType<typeof parseLineFx> = null, sound = '';
+        let fx: ReturnType<typeof parseLineFx> = null, sound = '', soundEnd = false;
         const looks: string[] = [], marks: string[] = [];
         let voice = '', altMode: 'random' | 'turn' | '' = '';
         for (const part of parts) {
@@ -214,14 +223,14 @@ function parse(src: string, noteSources: boolean): ParseResult {
           const snd = part.match(/^sound\s+(.+)$/i);
           const mk = part.match(/^mark\s+(.+)$/i);
           const vc = part.match(/^voice\s+(.+)$/i);
-          if (f) fx = f; else if (snd && !sound) sound = snd[1].trim(); else if (vc && !voice) voice = vc[1].trim(); else if (mk) marks.push(mk[1].trim().toLowerCase());
+          if (f) fx = f; else if (snd && !sound) { sound = snd[1].trim().replace(/\s+at the end$/i, () => { soundEnd = true; return ''; }); } else if (vc && !voice) voice = vc[1].trim(); else if (mk) marks.push(mk[1].trim().toLowerCase());
           else if (/^(one of|in turn)$/i.test(part)) altMode = /turn/i.test(part) ? 'turn' : 'random';
           else looks.push(part);
         }
         const expr = looks.join(', ');
         const say: Step = /^narration$/i.test(who) ? { t: 'say', who: '', expr: '', text: m[3] } : { t: 'say', who, expr, text: m[3] };
         if (fx && say.who) { say.fx = fx.fx; if (Object.keys(fx.opts).length) say.fxOpts = fx.opts; }
-        if (sound) say.sound = sound;
+        if (sound) { say.sound = sound; if (soundEnd) say.soundAtEnd = true; }
         if (marks.length && say.who) say.marks = marks;
         if (voice) say.voice = voice;
         // "First || Second || Third": other ways to say the line.
@@ -320,7 +329,7 @@ function headerOf(s: Step): string | null {
     case 'say': {
       const text = oneLine(s.text) || '...';
       const who = cleanName(s.who);
-      const sound = s.sound ? `sound ${cleanName(s.sound).replace(/,/g, ' ')}` : '';
+      const sound = s.sound ? `sound ${cleanName(s.sound).replace(/,/g, ' ')}${s.soundAtEnd ? ' at the end' : ''}` : '';
       const marks = who ? (s.marks ?? []).map(x => `mark ${cleanName(x).replace(/,/g, ' ')}`) : [];
       const alts = (s.alts ?? []).map(oneLine).filter(Boolean);
       const voice = s.voice ? `voice ${cleanName(s.voice).replace(/,/g, ' ')}` : '';
@@ -358,6 +367,9 @@ function headerOf(s: Step): string | null {
     case 'loop': return `Loop ${cleanName(s.who)} with ${idleText(s.move)}`;
     case 'path': return `Path ${cleanName(s.who)} over ${s.secs}s${s.repeat === 'loop' ? ' loop' : s.repeat === 'pingpong' ? ' back and forth' : ''}${s.ease === 'steady' ? ' steady' : ''}: ${pathPointsText(s.points)}`;
     case 'music': return s.track ? `Music${s.once ? ' once' : ''}: ${oneLine(s.track)}` : 'Music: off';
+    case 'sound':
+      if (s.stop) return s.name ? `Stop sound: ${cleanName(s.name)}` : `Stop sounds${s.music ? ' and music' : ''}`;
+      return `Sound: ${cleanName(s.name) || '...'}${s.loop ? ' (loops)' : ''}`;
   }
 }
 

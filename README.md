@@ -74,7 +74,7 @@ Add music on the Story map (up to 15 MB a track; MP3 or OGG keeps it small). A r
 
 ## Effects and sounds
 
-A line can give the speaker an effect: shake, tremble, pulse, pop, bounce, jump or flash, each with Strength, Speed and Times (1 to 5). Upload your own sounds (a laugh, a gasp, a door) and play them with a line or when something is clicked. In the script: `Mara (happy, pulse strength 4 x2, sound laugh): Ha!`. The Story map lists the sounds, to listen, rename or remove.
+A line can give the speaker an effect: shake, tremble, pulse, pop, bounce, jump or flash, each with Strength, Speed and Times (1 to 5). Upload your own sounds (a laugh, a gasp, a door) and play them with a line or when something is clicked. In the script: `Mara (happy, pulse strength 4 x2, sound laugh): Ha!`. A line's sound plays as the line appears, or, set to **When the player moves on**, as the player clicks on (`sound laugh at the end`). A sound can also be a step of its own: **Sound** plays one, once or looping until stopped (`Sound: door creak`, `Sound: rain (loops)`), and the same step can stop one sound (`Stop sound: rain`) or every sound, with the music too if you like (`Stop sounds`, `Stop sounds and music`). Looping sounds stop when the player leaves the room. Pictures & sounds lists the sounds, to listen, rename or remove.
 
 ## Characters
 
@@ -126,6 +126,8 @@ Each backdrop can **Fill** the stage (drag the backdrop in the room to choose wh
 ## Writing a conversation
 
 Every conversation can be shown two ways, switched at the top of the conversation view. **Map** (the default) draws it as boxes: click a box to change it, click + to add a step there. The mouse wheel zooms the map around the pointer (Shift with the wheel scrolls sideways), and on a wide screen the scene sits beside the map, both using the whole window. **Script** shows it as text. Both edit the same conversation.
+
+Lines that follow each other share one box. Hold a row and drag it up or down to change the order in its box. The ▾ on a box (shown on hover) makes it smaller, a line each and the first rows only; **Smaller boxes** beside the zoom does it for all of them, to see the shape of a long conversation.
 
 ```
 Mara: You came back.
