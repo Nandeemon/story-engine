@@ -3,7 +3,7 @@
  * The same drawing serves the game and the editor's Look view, where every panel
  * shows (the hidden ones see-through) and can be picked and dragged.
  */
-import { fillText, findLook, panelItems, panelVisible, testCondition } from '@story-engine/engine-core';
+import { ITEM_PREFIX, fillText, findLook, panelItems, panelVisible, testCondition } from '@story-engine/engine-core';
 import type { Facts, Panel, PanelBlock, Project } from '@story-engine/engine-core';
 import { esc } from './art';
 
@@ -33,8 +33,12 @@ function blockHTML(p: Project, b: PanelBlock, facts: Facts, edit: boolean, selec
     case 'list': {
       const items = panelItems(b.prefix, facts);
       const tile = (it: { fact: string; name: string; count: number }) => {
-        const icon = b.icons?.[it.name] ?? b.icons?.[it.fact.slice(b.prefix.length)];
-        return `<span class="it" title="${esc(it.name)}">${icon ? `<img src="${esc(icon)}" alt="">` : `<i>${esc(it.name.charAt(0).toUpperCase())}</i>`}<span>${esc(it.name)}${it.count > 1 ? ` ×${it.count}` : ''}</span></span>`;
+        // The story's Items list names an item and gives its icon; icons set on the block are from before that list.
+        const id = it.fact.slice(b.prefix.length);
+        const item = b.prefix.toLowerCase() === ITEM_PREFIX ? p.items?.find(x => x.id === id) : undefined;
+        const name = item?.name ?? it.name;
+        const icon = item?.icon ?? b.icons?.[it.name] ?? b.icons?.[id];
+        return `<span class="it" title="${esc(name)}">${icon ? `<img src="${esc(icon)}" alt="">` : `<i>${esc(name.charAt(0).toUpperCase())}</i>`}<span>${esc(name)}${it.count > 1 ? ` ×${it.count}` : ''}</span></span>`;
       };
       return `<div${attrs}>${items.length ? items.map(tile).join('') : `<span class="none">${esc(b.empty ?? 'Nothing yet')}</span>`}</div>`;
     }

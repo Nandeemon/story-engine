@@ -1,5 +1,6 @@
 import '@story-engine/runtime/game.css';
 import './editor.css';
+import './content.css';
 import { areaPoints, elementConds, setAreaShape, cleanPanelName, newBlock, panelFromTemplate, renamePanelInScript, factsToReach, startFacts, pathAt, simplifyPath, walkSteps, characterOf, cleanLookName, cleanMarkName, cleanSoundName, factName, renameMarkInScript, renameSoundInScript, toValue, createProject, createRoom, findLook, findRoomByName, newId, normalizeProject, parseScript, renameLookInScript, renameRoomInScript, renameSpeakerInScript, uniqueLookName, writeScript, getStep } from '@story-engine/engine-core';
 import type { Condition, Panel, PanelBlock, PanelTemplate, Character, CharacterLook, FactDef, Facts, Idle, MarkDef, PathStep, Step, Project, Room, StoryElement } from '@story-engine/engine-core';
 import { BACKDROPS, CHARACTERS, OBJECTS, STARTER_MARKS, findMark, backdropHTML, createPlayer, elementArt, elementStyle, areaArt, esc, fxVars, lookStyle, sayHTML } from '@story-engine/runtime';
@@ -14,6 +15,7 @@ import { applyZoom, drawEdges, mapAction, mapHTML, mapInput, mapScene, mapSide, 
 import type { LineWin, MapCtx, MapResult } from './map';
 import { readProjectFile, saveToFile } from './files';
 import { viewCast } from './cast';
+import { addItem } from '@story-engine/engine-core';
 
 const $ = <T extends HTMLElement = HTMLElement>(s: string) => document.querySelector<T>(s);
 
@@ -57,24 +59,28 @@ function testFacts(): Facts | undefined {
   return out;
 }
 let problems: Problem[] = [];
-/** The on-screen display widget being edited in Look. */
-let hudSel: string | null = null;
 let lookTab: LookTab = 'style';
 /** The character open in the Characters view; null shows the list. */
 let castSel: string | null = null;
-const hudWidget = (id: string | undefined) => project.hud?.find(w => w.id === id);
 /** The interface panel, and the block in it, picked in Look. */
 let panelSel: string | null = null;
 let blockSel: string | null = null;
+/** The Library's filter, and the mark whose animation settings are open. */
+let libFilter = 'all';
+let libMark: string | null = null;
 const panelOf = (id: string | null) => project.panels?.find(x => x.id === id);
 const blockOf = () => panelOf(panelSel)?.blocks.find(b => b.id === blockSel);
 function refreshLookStage(): void {
   const host = $('#lookstage');
-  if (host) host.innerHTML = lookStage(project, room(), hudSel, testFacts() ?? {}, { panel: panelSel, block: blockSel });
+  if (host) host.innerHTML = lookStage(project, room(), testFacts() ?? {}, { panel: panelSel, block: blockSel }, lookTab);
 }
 /** Set when a conversation is opened, so the map opens on its start. */
 let freshConvo = false;
 
+/** A clickable area that leads somewhere is named after where it leads ("Door to Kitchen"), unless the author named it. */
+function nameAfterDoor(e: StoryElement, to: string): void {
+  if (e.kind === 'area' && /^(Clickable area( \d+)?|Door to .*)$/.test(e.name)) e.name = `Door to ${to}`;
+}
 const room = (): Room => project.rooms.find(r => r.id === ui.roomId) ?? project.rooms[0];
 const selected = (): StoryElement | undefined => room().els.find(e => e.id === ui.sel);
 
@@ -278,7 +284,7 @@ function renderView(): void {
   switch (ui.view) {
     case 'home': main.innerHTML = viewHome(stories, storyId); break;
     case 'cast': main.innerHTML = viewCast(project, castSel); break;
-    case 'library': main.innerHTML = viewLibrary(project); break;
+    case 'library': main.innerHTML = viewLibrary(project, libFilter, libMark); break;
     case 'map': main.innerHTML = viewMap(project, ui, problems.filter(x => x.level === 'error').length); requestAnimationFrame(drawRoomLinks); break;
     case 'room':
       main.innerHTML = viewRoom(project, ui, r, e);
@@ -303,7 +309,7 @@ function renderView(): void {
       freshConvo = false;
       break;
     }
-    case 'look': main.innerHTML = viewLook(project, r, hudSel, testFacts() ?? {}, lookTab, { panel: panelSel, block: blockSel }); break;
+    case 'look': main.innerHTML = viewLook(project, r, testFacts() ?? {}, lookTab, { panel: panelSel, block: blockSel }); break;
     case 'play': main.innerHTML = viewPlay(); break;
     case 'check': main.innerHTML = viewCheck(project, problems, test); break;
   }
@@ -517,7 +523,6 @@ function enterProject(p: Project, id: string, view: View): void {
   ui.roomId = project.rooms[0].id;
   ui.sel = null;
   mapSel = null;
-  hudSel = null;
   lookTab = 'style';
   loadTest();
   pruneOncePictures();
@@ -616,7 +621,7 @@ let lookReturn: { elId: string | null; mapSel: string | null } | null = null;
 let lookCompare: 'see-through' | 'difference' = 'see-through';
 
 /** Actions that never change the project, so they are not recorded for Undo. */
-const NOT_RECORDED = new Set(['panel-sel', 'pblock-sel', 'area-shape', 'shape-undo', 'map-fold', 'map-fold-all', 'snd-try', 'voice-play', 'voice-upload', 'voice-rec', 'upload-video', 'area-cancel', 'door-cancel', 'edit-enter', 'library', 'win', 'path-draw', 'path-play', 'mark-add', 'music-add', 'cast-sound-add', 'sound-add', 'sound-play', 'cast', 'cast-open', 'cast-back', 'cast-new', 'cast-promote', 'cast-add-looks', 'cast-goto-room', 'cast-goto-convo', 'fx-try', 'scene-toggle', 'home', 'open-story', 'new-story', 'new-sample', 'import-story', 'duplicate-story', 'delete-story', 'test-off', 'look-tab', 'make-game', 'hud-sel', 'play-here', 'check', 'goto-problem', 'test-clear', 'once-lineup', 'look-compare', 'undo', 'redo', 'save-file', 'open-file', 'upload', 'play', 'play-convo', 'stop', 'convo-mode', 'look', 'crumb', 'add-looks', 'look-replace', 'once-picture', 'look-open', 'look-done']);
+const NOT_RECORDED = new Set(['lib-filter', 'lib-mark', 'panel-sel', 'pblock-sel', 'area-shape', 'shape-undo', 'map-fold', 'map-fold-all', 'snd-try', 'voice-play', 'voice-upload', 'voice-rec', 'upload-video', 'area-cancel', 'door-cancel', 'edit-enter', 'library', 'win', 'path-draw', 'path-play', 'mark-add', 'music-add', 'cast-sound-add', 'sound-add', 'sound-play', 'cast', 'cast-open', 'cast-back', 'cast-new', 'cast-promote', 'cast-add-looks', 'cast-goto-room', 'cast-goto-convo', 'fx-try', 'scene-toggle', 'home', 'open-story', 'new-story', 'new-sample', 'import-story', 'duplicate-story', 'delete-story', 'test-off', 'look-tab', 'make-game', 'play-here', 'check', 'goto-problem', 'test-clear', 'once-lineup', 'look-compare', 'undo', 'redo', 'save-file', 'open-file', 'upload', 'play', 'play-convo', 'stop', 'convo-mode', 'look', 'crumb', 'add-looks', 'look-replace', 'once-picture', 'look-open', 'look-done']);
 
 const actions: Record<string, (k: string) => void> = {
   crumb(k) {
@@ -835,6 +840,7 @@ const actions: Record<string, (k: string) => void> = {
     const r = createRoom(uniqueRoomName(name));
     project.rooms.push(r);
     e.script = `Go to ${r.name}`;
+    nameAfterDoor(e, r.name);
     ui.namingRoom = false;
     save(); render();
     toast(`Made the room "${r.name}". Use "Go to ${r.name} now" to set it up.`);
@@ -927,7 +933,6 @@ const actions: Record<string, (k: string) => void> = {
   'goto-problem'(k) {
     const pr = problems[Number(k)];
     if (!pr) return;
-    if (pr.hud) { hudSel = pr.hud; lookTab = 'hud'; panelSel = null; go('look'); return; }
     if (pr.panel) { panelSel = pr.panel; blockSel = null; lookTab = 'hud'; go('look'); return; }
     ui.roomId = pr.roomId;
     if (!pr.elId) { ui.sel = null; go('room'); return; }
@@ -942,26 +947,16 @@ const actions: Record<string, (k: string) => void> = {
   },
   'test-off'() { test.use = false; saveTest(); render(); toast('Test values are off. Play starts with every fact unset.'); },
   'test-clear'() { test.values = {}; saveTest(); render(); },
-  'hud-add'(k) {
-    project.hud ??= [];
-    const meter = k === 'meter';
-    // Start with a story fact that is not shown yet, preferring numbers.
-    const used = new Set(project.hud.map(x => x.fact));
-    const free = storyFacts(project).filter(f => !used.has(f));
-    const fact = free.find(f => factKind(project, f) === 'number') ?? free[0] ?? (meter ? 'affection' : 'gold');
-    const text = fact.replace(/[_.]/g, ' ').replace(/^./, c => c.toUpperCase());
-    const w = { id: newId(), kind: meter ? 'meter' as const : 'label' as const, fact, text, max: meter ? 10 : 100, x: 2, y: 3 + project.hud.length * 9, w: 24 };
-    project.hud.push(w);
-    hudSel = w.id;
-    save(); render();
-  },
   'panel-add'(k) {
     const pn = panelFromTemplate(k as PanelTemplate, (project.panels ?? []).map(x => x.name), project.characters[0]?.id);
     (project.panels ??= []).push(pn);
+    // One value starts with a number fact the story already uses.
+    const first = pn.blocks[0], fact = storyFacts(project).find(f => factKind(project, f) === 'number');
+    if (k === 'value' && first?.kind === 'meter' && fact) { first.fact = fact; first.label = fact.replace(/^.*\./, '').replace(/_/g, ' ').replace(/^./, c => c.toUpperCase()); }
     panelSel = pn.id; blockSel = null; lookTab = 'hud';
     save(); render();
   },
-  'panel-sel'(k) { panelSel = k || null; blockSel = null; hudSel = null; render(); },
+  'panel-sel'(k) { panelSel = k || null; blockSel = null; render(); },
   'panel-remove'() { project.panels = (project.panels ?? []).filter(x => x.id !== panelSel); if (!project.panels.length) delete project.panels; panelSel = null; blockSel = null; save(); render(); },
   'panel-copy'() {
     const pn = panelOf(panelSel);
@@ -1002,10 +997,19 @@ const actions: Record<string, (k: string) => void> = {
   },
   'pn-frame'() { const pn = panelOf(panelSel); if (pn) pickImageFile(img => { pn.frame = { img, slice: pn.frame?.slice ?? 30, width: pn.frame?.width ?? 1.5 }; pn.style = 'frame'; save(); render(); }, 1024); },
   'pb-image'() { const b = blockOf(); if (b?.kind === 'image') pickImageFile(img => { b.img = img; save(); render(); }); },
+  'item-add'() {
+    const input = $<HTMLInputElement>('#item-new');
+    const name = input?.value.replace(/\s+/g, ' ').trim() ?? '';
+    if (!name) { input?.focus(); toast('Give the item a name first, such as old key.'); return; }
+    const it = addItem(project, name);
+    save(); render();
+    toast(`${it.name} is an item now. Give it in a conversation with "Give or take an item".`);
+  },
+  'item-icon'(k) { pickImageFile(img => { addItem(project, k.replace(/_/g, ' '), k).icon = img; save(); render(); }, 160); },
+  'lib-filter'(k) { libFilter = k || 'all'; libMark = null; render(); },
+  'lib-mark'(k) { libMark = libMark === k ? null : k; render(); },
   'pb-icon'(k) { const b = blockOf(); if (b?.kind === 'list') pickImageFile(img => { b.icons = { ...(b.icons ?? {}), [k]: img }; save(); render(); }, 160); },
   'look-tab'(k) { lookTab = k === 'hud' ? 'hud' : 'style'; render(); },
-  'hud-sel'(k) { hudSel = hudSel === k ? null : k; render(); },
-  'hud-remove'(k) { project.hud = (project.hud ?? []).filter(w => w.id !== k); if (!project.hud.length) delete project.hud; hudSel = null; save(); render(); },
   stop() {
     const back = ui.back === 'convo' && selected() ? 'convo' : ui.back === 'map' ? 'map' : 'room';
     if (back === 'convo') freshConvo = false;
@@ -1532,6 +1536,55 @@ document.addEventListener('change', ev => {
   save(); render();
 });
 
+/* An item's new name is kept when the field is left; its story fact stays the same. */
+document.addEventListener('change', ev => {
+  const t = ev.target as HTMLInputElement;
+  if (t.dataset.in !== 'item-name') return;
+  const id = t.dataset.k ?? '';
+  const name = t.value.replace(/\s+/g, ' ').trim().slice(0, 40);
+  addItem(project, name || id.replace(/_/g, ' '), id).name = name || id.replace(/_/g, ' ');
+  save(); render();
+});
+document.addEventListener('keydown', ev => {
+  if ((ev.target as HTMLElement).id === 'item-new' && ev.key === 'Enter') { ev.preventDefault(); const before = snapshot(); actions['item-add'](''); record(before); }
+});
+
+/* Dragging a panel block by its handle (⋮⋮) changes the order of the blocks. */
+let blockDrag: { pn: Panel; id: string; row: HTMLElement; y: number; to: number | null; before: string } | null = null;
+document.addEventListener('pointerdown', ev => {
+  const h = (ev.target as HTMLElement).closest<HTMLElement>('[data-pbdrag]');
+  const pn = panelOf(panelSel);
+  if (!h || !pn || ev.button !== 0) return;
+  const row = h.closest<HTMLElement>('[data-pbrow]')!;
+  blockDrag = { pn, id: h.dataset.pbdrag!, row, y: ev.clientY, to: null, before: snapshot() };
+  row.classList.add('dragging');
+  try { h.setPointerCapture(ev.pointerId); } catch { /* not supported */ }
+  ev.preventDefault();
+});
+document.addEventListener('pointermove', ev => {
+  const d = blockDrag;
+  if (!d) return;
+  d.row.style.translate = `0 ${ev.clientY - d.y}px`;
+  const rows = [...document.querySelectorAll<HTMLElement>('[data-pbrow]')].filter(r => r !== d.row);
+  let to = rows.findIndex(r => { const b = r.getBoundingClientRect(); return ev.clientY < b.top + b.height / 2; });
+  if (to < 0) to = rows.length;
+  d.to = to;
+  rows.forEach((r, i) => r.classList.toggle('dropbefore', i === to));
+  document.querySelector('.hudlist')?.classList.toggle('dropend', to === rows.length);
+});
+document.addEventListener('pointerup', () => {
+  const d = blockDrag;
+  blockDrag = null;
+  if (!d) return;
+  const from = d.pn.blocks.findIndex(b => b.id === d.id);
+  if (d.to !== null && from >= 0 && d.to !== from) {
+    const [b] = d.pn.blocks.splice(from, 1);
+    d.pn.blocks.splice(d.to, 0, b);
+    save(); record(d.before);
+  }
+  render();
+});
+
 let panelDrag: { pn: Panel; box: DOMRect; x: number; y: number; px: number; py: number; pw: number; ph: number; resize: boolean; moved: boolean; before: string } | null = null;
 document.addEventListener('pointerdown', ev => {
   const t = ev.target as HTMLElement;
@@ -1541,7 +1594,7 @@ document.addEventListener('pointerdown', ev => {
   if (!node || !stage || !pn || ev.button !== 0) return;
   const block = t.closest<HTMLElement>('[data-pblock]')?.dataset.pblock ?? null;
   const resize = !!t.closest('[data-presize]');
-  if (panelSel !== pn.id || (block && block !== blockSel)) { panelSel = pn.id; hudSel = null; lookTab = 'hud'; if (block) blockSel = block; else if (panelSel !== pn.id) blockSel = null; render(); }
+  if (panelSel !== pn.id || (block && block !== blockSel)) { panelSel = pn.id; lookTab = 'hud'; if (block) blockSel = block; else if (panelSel !== pn.id) blockSel = null; render(); }
   panelDrag = { pn, box: stage.getBoundingClientRect(), x: ev.clientX, y: ev.clientY, px: pn.x, py: pn.y, pw: pn.w, ph: pn.h, resize, moved: false, before: snapshot() };
   ev.preventDefault();
 });
@@ -1753,36 +1806,6 @@ document.addEventListener('pointerup', () => {
   if (!step) return;
   applyMap(mapAction(ctx, 'scene-place', `${d.who}|${d.x}|${Math.abs(d.y - 98) < 2 ? '' : d.y}`));
   record(before);
-});
-
-/* Dragging a widget of the on-screen display in Look places it. */
-let hudDrag: { id: string; node: HTMLElement; box: DOMRect; dx: number; dy: number; before: string; moved: boolean } | null = null;
-document.addEventListener('pointerdown', ev => {
-  const node = (ev.target as HTMLElement).closest<HTMLElement>('[data-hud]');
-  if (!node || ui.view !== 'look') return;
-  const stage = node.closest<HTMLElement>('[data-stage]')!;
-  const box = stage.getBoundingClientRect(), r = node.getBoundingClientRect();
-  hudDrag = { id: node.dataset.hud!, node, box, dx: ev.clientX - r.left, dy: ev.clientY - r.top, before: snapshot(), moved: false };
-  hudSel = hudDrag.id;
-  lookTab = 'hud';
-  try { node.setPointerCapture(ev.pointerId); } catch { /* not supported */ }
-  ev.preventDefault();
-});
-document.addEventListener('pointermove', ev => {
-  const d = hudDrag, w = d && hudWidget(d.id);
-  if (!d || !w) return;
-  d.moved = true;
-  w.x = Math.round(Math.max(0, Math.min(95, (ev.clientX - d.dx - d.box.left) / d.box.width * 100)) * 10) / 10;
-  w.y = Math.round(Math.max(0, Math.min(95, (ev.clientY - d.dy - d.box.top) / d.box.height * 100)) * 10) / 10;
-  d.node.style.left = `${w.x}%`;
-  d.node.style.top = `${w.y}%`;
-});
-document.addEventListener('pointerup', () => {
-  const d = hudDrag;
-  hudDrag = null;
-  if (!d) return;
-  if (d.moved) { save(); record(d.before); }
-  render();
 });
 
 /* Holding a row in a box and dragging it up or down changes the order of the steps in that box. */
@@ -2107,15 +2130,11 @@ document.addEventListener('input', ev => {
       if (!e) break;
       if (t.value === '__new') { ui.namingRoom = true; render(); $<HTMLInputElement>('#new-room-name')?.focus(); return; }
       e.script = t.value ? `Go to ${t.value}` : '';
+      if (t.value) nameAfterDoor(e, t.value);
       save(); render(); return;
     }
     case 'story-title': { const v = t.value.replace(/\s+/g, ' '); if (v.trim()) project.title = v; else delete project.title; break; }
     case 'test-use': test.use = t.checked; saveTest(); renderBar(); return;
-    case 'hud-fact': { const w = hudWidget(t.dataset.k); if (w) { w.fact = t.value.trim().replace(/[^\w.]/g, '_') || 'fact'; refreshLookStage(); } break; }
-    case 'hud-text': { const w = hudWidget(t.dataset.k); if (w) { w.text = t.value; refreshLookStage(); } break; }
-    case 'hud-max': { const w = hudWidget(t.dataset.k); if (w) { w.max = Math.max(1, Number(t.value) || 1); refreshLookStage(); } break; }
-    case 'hud-w': { const w = hudWidget(t.dataset.k); if (w) { w.w = Number(t.value); refreshLookStage(); } break; }
-    case 'hud-hide': { const w = hudWidget(t.dataset.k); if (w) { w.hideUnset = t.checked || undefined; refreshLookStage(); } break; }
     case 'test-fact': test.values[t.dataset.k ?? ''] = t.value.trim(); saveTest(); renderBar(); return;
     case 'bg-zoom': { const bg = room().bg; if (bg) { bg.zoom = Number(t.value); refreshBackdrop(); } break; }
     case 'bg-color': { const bg = room().bg; if (bg) { bg.color = t.value; refreshBackdrop(); } break; }

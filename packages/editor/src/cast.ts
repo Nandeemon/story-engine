@@ -5,7 +5,7 @@
  */
 import { elementConds, parseScript, talkedFact, valueText, walkSteps } from '@story-engine/engine-core';
 import type { Character, FactDef, Project, Room, Step, StoryElement } from '@story-engine/engine-core';
-import { esc } from '@story-engine/runtime';
+import { CHARACTERS, characterSVG, esc } from '@story-engine/runtime';
 import { soundRow } from './widgets';
 import { idleField } from './views';
 
@@ -127,8 +127,9 @@ function factsSection(p: Project, c: Character, info: CastInfo): string {
   return `<section><div class="label">Story facts and milestones</div>
     <p class="hint">Keep track of what matters for ${esc(c.name)}. In a conversation, change these with Change and test them with Only if; ${esc(c.name)}'s lines get one-click buttons for them.</p>
     <div class="factlist">${rows}${auto}</div>
-    <div class="factadd"><select id="cast-fact-kind" aria-label="Kind">${(Object.keys(KIND_WORDS) as FactDef['kind'][]).map(k => `<option value="${k}" title="${esc(KIND_HELP[k])}">${KIND_WORDS[k]}: ${esc(KIND_HELP[k])}</option>`).join('')}</select>
+    <div class="factadd"><select id="cast-fact-kind" aria-label="Kind">${(Object.keys(KIND_WORDS) as FactDef['kind'][]).filter(k => k !== 'item').map(k => `<option value="${k}" title="${esc(KIND_HELP[k])}">${KIND_WORDS[k]}: ${esc(KIND_HELP[k])}</option>`).join('')}</select>
       <input type="text" id="cast-fact-name" placeholder="Name, such as affection" aria-label="Name"><button class="btn small" data-act="cast-fact-add">+ Add</button></div>
+    <p class="hint">Things the player can have, such as a letter or a key, are items of the whole story: see Items under Pictures &amp; sounds, and give them in a conversation with "Give or take an item".</p>
     ${others.length ? `<div class="label">Also used in ${esc(c.name)}'s conversations</div><div class="row">${others.map(f => `<button class="chip" data-act="cast-fact-track" data-k="${esc(f)}" title="Keep track of ${esc(f)} here">${esc(f)} +</button>`).join('')}</div>` : ''}
   </section>`;
 }
@@ -163,12 +164,23 @@ function castList(p: Project): string {
       <span class="meta"><b>${esc(c.name)}</b><span>${plural(looks, 'look')} · ${plural(info.convos.length, 'conversation')}</span></span></button>`;
   }).join('');
   const others = otherSpeakers(p);
-  const otherList = others.length ? `<h3 class="sub">Others who speak</h3>
-    <p class="hint">Starter figures and voices without a picture can speak in any conversation too. Give one your own picture to make them a main character with looks.</p>
-    <div class="others">${others.map(o => `<div class="other"><b>${esc(o.name)}</b><span>${o.starter ? 'Starter figure' : 'Voice'}${o.lines ? ` · ${plural(o.lines, 'line')}` : ''}</span><button class="btn small quiet" data-act="cast-promote" data-k="${esc(o.name)}">Give a picture</button></div>`).join('')}</div>` : '';
-  return `<div class="side home"><div class="maphead"><div><h2>Characters</h2><p class="hint">Your main characters, made from your own pictures. Open one to see their looks, where they are and what they take part in.</p></div>
-      <div class="row"><button class="btn play" data-act="cast-new">+ New character</button></div></div>
-    <div class="map stories">${cards}<button class="card new" data-act="cast-new">+ New character</button></div>
+  // Starter figures speak like any character: they are listed with them, marked as starter figures.
+  const starters = others.filter(o => o.starter).map(o => {
+    let at: { room: Room; el: StoryElement } | undefined;
+    for (const room of p.rooms) for (const el of room.els) if (!at && el.kind === 'char' && !el.characterId && lower(el.name) === lower(o.name)) at = { room, el };
+    const info = castInfo(p, o.name);
+    const art = characterSVG({ ...(CHARACTERS[at?.el.preset ?? ''] ?? CHARACTERS.mara), name: o.name }, at?.el.expr);
+    return `<div class="card castcard starter"><button class="castopen" data-act="cast-goto-room" data-k="${at ? `${esc(at.room.id)}|${esc(at.el.id)}` : ''}" title="Open ${esc(o.name)} in ${esc(at?.room.name ?? 'the room')}"><span class="pic svg">${art}<span class="badge">Starter figure</span></span>
+      <span class="meta"><b>${esc(o.name)}</b><span>${plural(o.lines, 'line')} · ${plural(info.convos.length, 'conversation')}</span></span></button>
+      <button class="btn small quiet" data-act="cast-promote" data-k="${esc(o.name)}" title="Give ${esc(o.name)} your own picture and looks">Give a picture</button></div>`;
+  }).join('');
+  const voices = others.filter(o => !o.starter);
+  const otherList = voices.length ? `<h3 class="sub">Voices without a picture</h3>
+    <p class="hint">Names that speak in a conversation but have no picture, such as a voice on the phone. Give one a picture to see them on stage.</p>
+    <div class="others">${voices.map(o => `<div class="other"><b>${esc(o.name)}</b><span>Voice${o.lines ? ` · ${plural(o.lines, 'line')}` : ''}</span><button class="btn small quiet" data-act="cast-promote" data-k="${esc(o.name)}">Give a picture</button></div>`).join('')}</div>` : '';
+  return `<div class="side home"><div class="maphead"><div><h2>Characters</h2><p class="hint">Everyone who speaks in your story. Open one to see their looks, where they are and what they take part in.</p></div>
+      <div class="row"><button class="btn" data-act="cast-new">+ New character</button></div></div>
+    <div class="map stories">${cards}${starters}<button class="card new" data-act="cast-new">+ New character</button></div>
     ${otherList}</div>`;
 }
 

@@ -1,7 +1,8 @@
-import type { Idle, MarkDef, MarkSpot, Backdrop, Character, CharacterLook, CompareOp, Condition, FactDef, FactValue, Facts, HudWidget, Look, Project, Room, Sound, StoryElement } from './types';
+import type { Idle, MarkDef, MarkSpot, Backdrop, Character, CharacterLook, CompareOp, Condition, FactDef, FactValue, Facts, Look, Project, Room, Sound, StoryElement } from './types';
 import { IDLE_MOVES, isLineEffect } from './staging';
 import { renameLookInScript } from './refs';
 import { normalizePanels } from './panels';
+import { normalizeItems } from './items';
 
 export const DEFAULT_LOOK: Look = { theme: 'velvet', font: 'Lora', radius: 14, size: 2 };
 
@@ -182,18 +183,23 @@ export function normalizeProject(raw: unknown): Project | null {
     }
   }
   const look = (r.look && typeof r.look === 'object' ? r.look : {}) as Record<string, unknown>;
-  const hud: HudWidget[] = (Array.isArray(r.hud) ? r.hud : []).filter(w => w && typeof w === 'object').map((w: Record<string, unknown>) => ({
-    id: str(w.id, newId()),
-    kind: w.kind === 'meter' ? 'meter' : 'label',
-    fact: str(w.fact, 'fact').replace(/[^\w.]/g, '_') || 'fact',
-    text: str(w.text, ''),
-    max: Math.max(1, num(w.max, 100)),
-    x: clamp(num(w.x, 2), 0, 95),
-    y: clamp(num(w.y, 3), 0, 95),
-    w: clamp(num(w.w, 24), 5, 90),
-    ...(w.hideUnset === true ? { hideUnset: true } : {})
-  }));
-  const panels = normalizePanels(r.panels, rooms.map(x => x.id), characters.map(c => c.id));
+  // The old on-screen display: each widget becomes a panel of one block with no background.
+  const oldHud = (Array.isArray(r.hud) ? r.hud : []).filter(w => w && typeof w === 'object').map((w: Record<string, unknown>) => {
+    const fact = str(w.fact, 'fact').replace(/[^\w.]/g, '_') || 'fact';
+    const meter = w.kind === 'meter';
+    const text = str(w.text, '');
+    return {
+      id: str(w.id, newId()), name: text || fact.replace(/[_.]/g, ' '),
+      x: clamp(num(w.x, 2), 0, 95), y: clamp(num(w.y, 3), 0, 95), w: meter ? clamp(num(w.w, 24), 5, 90) : 16, h: meter ? 8 : 7,
+      layout: 'row', style: 'none', when: 'always',
+      blocks: [{
+        id: newId(), kind: meter ? 'meter' : 'number', fact, label: text, ...(meter ? { max: Math.max(1, num(w.max, 100)) } : {}),
+        ...(w.hideUnset === true ? { cond: { fact, op: 'truthy', value: true } } : {})
+      }]
+    };
+  });
+  const panels = normalizePanels([...(Array.isArray(r.panels) ? r.panels : []), ...oldHud], rooms.map(x => x.id), characters.map(c => c.id));
+  const items = normalizeItems(r.items);
   const sounds: Sound[] = (Array.isArray(r.sounds) ? r.sounds : []).filter(x => x && typeof x === 'object' && typeof (x as Record<string, unknown>).data === 'string')
     .map((x: Record<string, unknown>) => ({ id: str(x.id, newId()), name: cleanSoundName(str(x.name, 'sound')), data: x.data as string, ...(typeof x.owner === 'string' && characters.some(c => c.id === x.owner) ? { owner: x.owner } : {}),
       ...(typeof x.volume === 'number' && x.volume !== 100 ? { volume: clamp(Math.round(x.volume), 0, 100) } : {}),
@@ -210,7 +216,7 @@ export function normalizeProject(raw: unknown): Project | null {
     ...(typeof r.title === 'string' && r.title.trim() ? { title: r.title.trim().slice(0, 80) } : {}),
     rooms,
     characters,
-    ...(hud.length ? { hud } : {}),
+    ...(items.length ? { items } : {}),
     ...(panels.length ? { panels } : {}),
     ...(sounds.length ? { sounds } : {}),
     ...(marks.length ? { marks } : {}),

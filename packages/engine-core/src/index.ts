@@ -12,3 +12,4 @@ export { renameRoomInScript, renameSpeakerInScript, renameLookInScript, renameSo
 export { storyFactNames } from './facts';
 export { panelFactKey, cleanPanelName, panelVisible, panelRule, panelItems, newBlock, panelFromTemplate, PANEL_TEMPLATES } from './panels';
 export type { PanelContext, PanelTemplate } from './panels';
+export { ITEM_PREFIX, itemIdOf, itemFact, itemName, itemOfStep, storyItems, addItem, normalizeItems } from './items';

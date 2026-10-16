@@ -42,7 +42,7 @@ export function panelRule(p: Panel, roomName: (id: string) => string): string {
   if (p.when === 'talk') parts.push('only during conversations');
   if (p.when === 'explore') parts.push('only while looking around');
   if (p.cond) parts.push(`only if ${p.cond.fact}`);
-  if (p.startHidden) parts.push(p.key || p.button ? 'until the player opens it' : 'until a conversation shows it');
+  if (p.startHidden) parts.push(p.key || p.button ? 'hidden until the player opens it' : 'hidden until a conversation shows it');
   return parts.join(', ');
 }
 
@@ -128,6 +128,7 @@ export const PANEL_TEMPLATES = [
   ['inventory', 'Inventory', 'What the player has; the I key opens it'],
   ['card', 'Character card', 'A portrait, a name and how they feel about you'],
   ['quests', 'Quest log', 'The current quest, from a story fact'],
+  ['value', 'One value', 'One story fact as a number or a meter, with no box around it'],
   ['buttons', 'Button row', 'Buttons that change story facts or run a few lines'],
   ['blank', 'Empty panel', 'Start from nothing and add blocks']
 ] as const;
@@ -152,6 +153,8 @@ export function panelFromTemplate(t: PanelTemplate, taken: string[], characterId
       { id: id(), kind: 'text', text: 'Quest' },
       { id: id(), kind: 'text', text: '{quest}', cond: { fact: 'quest', op: 'truthy', value: true } },
       { id: id(), kind: 'text', text: 'Nothing to do yet', cond: { fact: 'quest', op: '=', value: 0 } }] });
+    case 'value': return P('Value', { x: 2, y: 3, w: 22, h: 8, style: 'none', blocks: [
+      { id: id(), kind: 'meter', fact: 'affection', label: 'Affection', max: 10 }] });
     case 'buttons': return P('Buttons', { x: 30, y: 3, w: 40, h: 8, layout: 'row', style: 'none', when: 'explore', blocks: [
       { id: id(), kind: 'button', label: 'Rest', script: 'Change hp = 10\nNarration: You feel rested.' },
       { id: id(), kind: 'button', label: 'Look around', script: 'Narration: Nothing out of place.' }] });

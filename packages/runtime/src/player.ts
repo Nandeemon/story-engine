@@ -4,7 +4,6 @@ import { applyToScene, fxVars, nextMoment, present, roomScene, staged, stagedAtt
 import type { Scene } from './scene';
 import { areaArt, areaClip, backdropHTML, choicesHTML, elementArt, elementStyle, lookStyle, sayHTML } from './stage';
 import { esc } from './art';
-import { hudHTML } from './hud';
 import { panelsHTML } from './panels';
 
 export interface PlayState {
@@ -268,7 +267,7 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
     }
 
     const hud = stage.querySelector<HTMLElement>('.hudlayer');
-    if (hud) hud.innerHTML = hudHTML(project.hud, s.facts) + panelsHTML(project, s.facts, { roomId: s.roomId, talking: !!(s.scene || s.event) });
+    if (hud) hud.innerHTML = panelsHTML(project, s.facts, { roomId: s.roomId, talking: !!(s.scene || s.event) });
     const ev = s.event;
     const showHint = !ev && !s.scene && !talked && !ending && !!opts.hint && r.els.some(canTalk);
     game.innerHTML = !ev ? (showHint ? `<div class="gamehint">${esc(opts.hint!)}</div>` : '')
