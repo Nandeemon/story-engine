@@ -1,5 +1,6 @@
 import { CONDITION_WORDS, IDLE_MOVES, storyItems, characterOf, elementConds, findRoomByName, parseScript, summarize, valueText, walkSteps } from '@story-engine/engine-core';
-import { missingLook, unknownSpeaker } from './map';
+import { KIND_GROUPS, missingLook, unknownSpeaker } from './map';
+import type { KindGroup } from './map';
 import { factKind, storyFacts } from './problems';
 import { musicSelect, soundRow, soundSelect } from './widgets';
 import type { Problem } from './problems';
@@ -97,7 +98,7 @@ function soundsSection(p: Project, filter = 'all'): string {
   const fxSec = `<section class="soundsec"><div class="label">Sounds</div>
     ${fx.map(row).join('') || '<p class="hint">No sounds yet. Add your own, such as a laugh, a gasp or a door.</p>'}
     <div class="row"><button class="btn small" data-act="sound-add">+ Add a sound</button></div>
-    <p class="hint">A sound plays when something is clicked (under More on the thing) or with a line (in the line's Effect and sound).</p></section>`;
+    <p class="hint">A sound plays when something is clicked (under More on the thing) or with a line (under Sound on the line).</p></section>`;
   const musicSec = `<section class="soundsec"><div class="label">Music</div>
     ${music.map(row).join('') || '<p class="hint">No music yet. Add a track, then pick it for a room or start it in a conversation.</p>'}
     <div class="row"><button class="btn small" data-act="music-add">+ Add music</button></div>
@@ -457,22 +458,41 @@ export function viewRoom(p: Project, ui: UI, r: Room, e: StoryElement | undefine
   return `<div class="work"><div>${stageHTML(r, { mode: 'edit', look: p.look, selected: lining ? null : ui.sel, characters: p.characters, lineup: lining })}</div><aside class="side">${side}</aside></div>`;
 }
 
-/** Text inserted by the buttons above the script. */
-export function inserts(p: Project, r: Room, e: StoryElement): { label: string; text: string }[] {
+/** Text put in by the script's Insert menu, in the same groups as "Add a step" in the map. */
+export function inserts(p: Project, r: Room, e: StoryElement): { label: string; text: string; hint: string; group: KindGroup }[] {
   const other = p.rooms.find(x => x.id !== r.id) ?? r;
+  const who = e.kind === 'char' ? e.name : p.characters[0]?.name ?? r.els.find(x => x.kind === 'char')?.name ?? 'Lin';
   return [
-    { label: 'Line', text: e.kind === 'char' ? `${e.name}: ` : '' },
-    { label: 'Choice', text: 'Choice\n  "First answer"\n    \n  "Second answer"\n    ' },
-    { label: 'Only if', text: 'Only if affection is at least 5\n  ' },
-    { label: 'Change something', text: 'Change affection + 1' },
-    { label: 'Go to another room', text: `Go to ${other.name}` },
-    { label: 'Music', text: 'Music: ' },
-    { label: 'Sound', text: 'Sound: ' },
-    { label: 'Stop sounds', text: 'Stop sounds' },
-    { label: 'Ask', text: 'Ask "What is your name?" as name' },
-    { label: 'Ending', text: 'Ending: ' },
-    { label: 'End', text: 'End' }
+    { label: 'Line', text: e.kind === 'char' ? `${e.name}: ` : '', hint: 'Someone says something', group: 'top' },
+    { label: 'Choice', text: 'Choice\n  "First answer"\n    \n  "Second answer"\n    ', hint: 'The player picks an answer', group: 'top' },
+    { label: 'Only if', text: 'Only if affection is at least 5\n  ', hint: 'Depends on story facts', group: 'top' },
+    { label: 'Change something', text: 'Change affection + 1', hint: 'Change a story fact', group: 'top' },
+    { label: 'Ask the player', text: 'Ask "What is your name?" as name', hint: 'The player types an answer', group: 'talk' },
+    { label: 'Note', text: '# ', hint: 'Only you see it', group: 'talk' },
+    { label: 'Bring someone in', text: `Show ${who} at left with fade`, hint: 'A character comes on stage', group: 'stage' },
+    { label: 'Move someone', text: `Move ${who} to center`, hint: 'Place, size or turn', group: 'stage' },
+    { label: 'Take someone out', text: `Hide ${who} with fade`, hint: 'A character leaves', group: 'stage' },
+    { label: 'Put a mark on someone', text: `Mark ${who} with anger`, hint: 'Stays until taken off', group: 'stage' },
+    { label: 'Change how someone moves', text: `Loop ${who} with sway`, hint: 'Sway, bob, breathe, float', group: 'stage' },
+    { label: 'Camera', text: 'Camera zoom 1.5 at 50% 40%', hint: 'Zoom, shake or flash', group: 'stage' },
+    { label: 'Music', text: 'Music: ', hint: 'Background music', group: 'sound' },
+    { label: 'Sound', text: 'Sound: ', hint: 'Play a sound', group: 'sound' },
+    { label: 'Stop sounds', text: 'Stop sounds', hint: 'Stop every sound', group: 'sound' },
+    { label: 'Show a panel', text: `Show panel ${p.panels?.[0]?.name ?? 'Inventory'}`, hint: 'From Look › Interface', group: 'sound' },
+    { label: 'Go to another room', text: `Go to ${other.name}`, hint: 'The player moves on', group: 'flow' },
+    { label: 'Part', text: 'Part: Later', hint: 'A point to jump to', group: 'flow' },
+    { label: 'Go to a part', text: 'Go to part Later', hint: 'Continue from a part', group: 'flow' },
+    { label: 'Ending', text: 'Ending: ', hint: 'One of the story\'s endings', group: 'flow' },
+    { label: 'End', text: 'End', hint: 'The conversation closes', group: 'flow' }
   ];
+}
+
+/** The script's Insert menu: the four used most, then the groups. */
+function insertMenu(p: Project, r: Room, e: StoryElement): string {
+  const list = inserts(p, r, e).map((x, i) => ({ ...x, i }));
+  const item = (x: (typeof list)[number]) => `<button class="mk" data-act="insert" data-k="${x.i}"><b>${esc(x.label)}</b><span>${esc(x.hint)}</span></button>`;
+  const groups = KIND_GROUPS.map(([g, title]) => `<div class="mgroup"><div class="label">${title}</div>${list.filter(x => x.group === g).map(item).join('')}</div>`).join('');
+  return `<details class="insmenu"><summary class="btn small">Insert ▾</summary><div class="inspop mkadd"><div class="mgroup mtop">${list.filter(x => x.group === 'top').map(item).join('')}</div>${groups}</div></details>`;
 }
 
 export type ConvoMode = 'map' | 'script';
@@ -524,17 +544,17 @@ function convoBar(mode: ConvoMode): string {
 
 export function viewConvo(p: Project, r: Room, e: StoryElement, mode: ConvoMode, map: { canvas: string; side: string; scene: string; sceneOpen?: boolean }): string {
   if (mode === 'map') {
-    return `<div class="work"><div class="mapwrap mapmode${map.sceneOpen === false ? ' noscene' : ''}" id="mapwrap">${convoBar(mode)}<div id="mscene">${map.scene}</div><div id="mapholder">${map.canvas}</div></div><aside class="side" id="mside">${map.side}</aside></div>`;
+    return `<div class="work"><div class="mapwrap mapmode${map.sceneOpen === false ? ' noscene' : ''}" id="mapwrap">${convoBar(mode)}<div id="mscene">${map.scene}</div><div class="msplitter" role="separator" aria-orientation="vertical" aria-label="Width of the scene" tabindex="0" title="Drag to make the scene wider or narrower"></div><div id="mapholder">${map.canvas}</div></div><aside class="side" id="mside">${map.side}</aside></div>`;
   }
   const who = e.kind === 'char' ? esc(e.name) : 'Narrator';
   return `<div class="work"><div class="mapwrap">${convoBar(mode)}<div class="paper">
-      <div class="row">${inserts(p, r, e).map((x, i) => `<button class="btn small quiet" data-act="insert" data-k="${i}">+ ${x.label}</button>`).join('')}</div>
+      <div class="row">${insertMenu(p, r, e)}</div>
       <p class="status" id="status" role="status"></p>
       <div class="scriptbox"><div class="gutter" id="gutter" aria-hidden="true"></div><textarea id="script" data-in="script" spellcheck="false" aria-label="What ${esc(e.name)} says" placeholder="${who}: Type the first line here.">${esc(e.script)}</textarea></div>
     </div></div>
     <aside class="side"><h2>What ${e.kind === 'char' ? `${esc(e.name)} says` : 'happens'}</h2>
       <p class="hint">Write it like a script. A name and a colon starts a line. Indent with two spaces to put lines under an answer. Lines that are not indented run after every answer.</p>
-      <pre class="cheat">${esc(CHEAT)}</pre>
+      <details class="more cheatbox"><summary>Cheat sheet</summary><pre class="cheat">${esc(CHEAT)}</pre></details>
       <div id="facts"></div></aside></div>`;
 }
 

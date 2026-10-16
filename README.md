@@ -72,7 +72,7 @@ Every game has small buttons in the corner (Look can turn them off): **back** a 
 - **Other ways to say a line**, at random or in turn: `Mara (in turn): Hi. || Back again? || You again.`
 - **Camera**: zoom in on a spot, shake, flash, or back to the whole picture. **Go to** a room with a fade, through black, or a slide.
 - **Look**: lines as speech bubbles over the speaker, narration over the whole picture.
-- **Voice**: record a line with the microphone in its Sound window. **Video backdrops**: Change the backdrop → Use a video.
+- **Voice**: record a line with the microphone on its Sound page. **Video backdrops**: Change the backdrop → Use a video.
 
 ## Marks and movement
 
@@ -108,7 +108,7 @@ Add a character with **Use your own picture**: that picture is the character's b
 
 ## Staging a conversation
 
-When a conversation starts, characters who take no part step aside until it ends (or choose "The room stays as it is"). Click a step in the map: the scene beside it shows the stage at that step. A line's panel shows who speaks, the text and the look; Effect, Marks, Sound, Stage, Variations and Story facts are chips that open their own small window. Drag anyone there to place them from that step on, or use the place buttons, size, and turn around; the place holds until it changes. Pick an effect for the line (shake, bounce, jump, flash), bring someone in or take someone out. Someone who speaks but is not on stage comes in by themselves.
+When a conversation starts, characters who take no part step aside until it ends (or choose "The room stays as it is"). Click a step in the map: the scene beside it shows the stage at that step. A line's panel shows who speaks, the text and the look; Effect, Marks, Sound, Stage, Variations and Story facts are small pills that show what is set; each opens its own page in the panel, with **‹ Line** (or Escape) to go back. Drag anyone there to place them from that step on, or use the place buttons, size, and turn around; the place holds until it changes. Pick an effect for the line (shake, bounce, jump, flash), bring someone in or take someone out. Someone who speaks but is not on stage comes in by themselves.
 
 In the script these are plain lines:
 
@@ -137,9 +137,11 @@ Each backdrop can **Fill** the stage (drag the backdrop in the room to choose wh
 
 ## Writing a conversation
 
-Every conversation can be shown two ways, switched at the top of the conversation view. **Map** (the default) draws it as boxes: click a box to change it, click + to add a step there. The mouse wheel zooms the map around the pointer (Shift with the wheel scrolls sideways), and on a wide screen the scene sits beside the map, both using the whole window. **Script** shows it as text. Both edit the same conversation.
+Every conversation can be shown two ways, switched at the top of the conversation view. **Map** (the default) draws it as boxes: click a box to change it, click + to add a step there. **Add a step** has a box to find a step by name, the four used most, then the rest in groups. The map opens at actual size on its start; the mouse wheel zooms around the pointer (Shift with the wheel scrolls sideways) and **Fit** shows it all. On a wide screen the scene sits beside the map, both using the whole window; drag the bar between them to make the scene wider or narrower. **Script** shows it as text, with an **Insert** menu in the same groups and a **Cheat sheet** that opens when wanted. Both edit the same conversation.
 
-Lines that follow each other share one box. Hold a row and drag it up or down to change the order in its box. The ▾ on a box (shown on hover) makes it smaller, a line each and the first rows only; **Smaller boxes** beside the zoom does it for all of them, to see the shape of a long conversation.
+Double-click a line in the map to type in it there: Enter keeps it and starts the next line by the same speaker, Enter on an empty line stops, Escape leaves it as it was. With a box selected, ↑ and ↓ go through the steps in reading order, ← and → go between answers or the two paths of an Only if, Enter goes to the panel, Delete removes the step (Undo brings it back), `/` or `a` adds a step after it, and Escape lets go.
+
+Lines that follow each other share one box. Hold a row (or its ⋮⋮ handle) and drag it up or down to change the order in its box; drag an answer sideways to change the order of the answers. The ▾ on a box (shown on hover) makes it smaller, a line each and the first rows only; **Smaller boxes** beside the zoom does it for all of them, to see the shape of a long conversation.
 
 ```
 Mara: You came back.

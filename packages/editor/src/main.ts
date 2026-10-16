@@ -2,6 +2,7 @@ import '@story-engine/runtime/game.css';
 import './editor.css';
 import './frame.css';
 import './content.css';
+import './mapui.css';
 import { areaPoints, elementConds, setAreaShape, cleanPanelName, newBlock, panelFromTemplate, renamePanelInScript, factsToReach, startFacts, pathAt, simplifyPath, walkSteps, characterOf, cleanLookName, cleanMarkName, cleanSoundName, factName, renameMarkInScript, renameSoundInScript, toValue, createProject, createRoom, findLook, findRoomByName, newId, normalizeProject, parseScript, renameLookInScript, renameRoomInScript, renameSpeakerInScript, uniqueLookName, writeScript, getStep } from '@story-engine/engine-core';
 import type { Condition, Panel, PanelBlock, PanelTemplate, Character, CharacterLook, FactDef, Facts, Idle, MarkDef, PathStep, Step, Project, Room, StoryElement } from '@story-engine/engine-core';
 import { BACKDROPS, CHARACTERS, OBJECTS, STARTER_MARKS, findMark, backdropHTML, createPlayer, elementArt, elementStyle, areaArt, esc, fxVars, lookStyle, sayHTML } from '@story-engine/runtime';
@@ -12,7 +13,7 @@ import { inserts, lookStage, roomLinks, scriptStatus, shareSheet, viewCheck, vie
 import { factKind, findProblems, storyFacts } from './problems';
 import type { Problem } from './problems';
 import type { Adding, ConvoMode, LookTab, UI, View } from './views';
-import { applyZoom, drawEdges, mapAction, mapHTML, mapInput, mapScene, mapSide, mapView, openView, setZoom, toggleFold, toggleFoldAll } from './map';
+import { addKeyAfter, applyZoom, drawEdges, mapAction, mapHTML, mapInput, mapScene, mapSide, mapView, nextInOrder, openView, setZoom, sideways, toggleFold, toggleFoldAll } from './map';
 import type { LineWin, MapCtx, MapResult } from './map';
 import { readProjectFile, saveToFile } from './files';
 import { viewCast } from './cast';
@@ -40,6 +41,15 @@ let lineWin: LineWin | null = null;
 const SCENE_KEY = 'story-engine:scene-open';
 let sceneOpen = true;
 try { sceneOpen = localStorage.getItem(SCENE_KEY) !== 'no'; } catch { /* shown */ }
+/** The width of the scene beside the map, in pixels, when the author has dragged it; null keeps the default. */
+const SCENE_W_KEY = 'story-engine:scene-width';
+let sceneWidth: number | null = null;
+try { const w = Number(localStorage.getItem(SCENE_W_KEY)); if (w > 0) sceneWidth = w; } catch { /* default width */ }
+/** The line being typed in place in the map, and whether it was just added by Enter. */
+let inlineEdit: string | null = null;
+let inlineNew = false;
+/** What was selected before "Add a step" opened, so Escape can go back to it. */
+let selBeforeAdd: string | null = null;
 
 /* Test values for story facts: kept in this browser for testing only, never part of the story. */
 const TEST_KEY = 'story-engine:test-facts';
@@ -435,6 +445,7 @@ function renderView(): void {
       const ctx = mapCtx()!;
       main.innerHTML = viewConvo(project, r, e!, convoMode, { canvas: convoMode === 'map' ? mapHTML(ctx) : '', side: convoMode === 'map' ? mapSide(ctx) : '', scene: convoMode === 'map' ? mapScene(ctx, sceneOpen) : '', sceneOpen });
       if (convoMode === 'map') {
+        if (sceneWidth) $('#mapwrap')?.style.setProperty('--scene-w', `${sceneWidth}px`);
         if (freshConvo) openView(); else applyZoom();
         afterMap();
         syncPlayFrom();
@@ -450,10 +461,11 @@ function renderView(): void {
 
 function mapCtx(): MapCtx | null {
   const e = selected();
-  return e ? { project, room: room(), el: e, sel: mapSel, pen: pathPen, pathPt, win: lineWin } : null;
+  return e ? { project, room: room(), el: e, sel: mapSel, pen: pathPen, pathPt, win: lineWin, edit: inlineEdit } : null;
 }
 
 let observer: ResizeObserver | null = null;
+let redrawingMap = false;
 function afterMap(): void {
   requestAnimationFrame(drawEdges);
   observer?.disconnect();
@@ -492,8 +504,12 @@ function refreshMap(): void {
   // Fields keep focus by id; buttons by what they do.
   const focusSel = !inSide ? '' : active!.id ? `#${CSS.escape(active!.id)}`
     : active!.dataset.mapAct ? `[data-map-act="${active!.dataset.mapAct}"]${active!.dataset.k ? `[data-k="${CSS.escape(active!.dataset.k)}"]` : ''}` : '';
-  holder.innerHTML = mapHTML(ctx);
-  side.innerHTML = mapSide(ctx);
+  // A line being typed in the map keeps what has been typed so far.
+  const typing = active?.id === 'm-inline' ? { k: active.closest<HTMLElement>('.mrow')?.dataset.k, value: (active as HTMLTextAreaElement).value, at: (active as HTMLTextAreaElement).selectionStart } : null;
+  if (inlineEdit && !getStep(parseScript(ctx.el.script).steps, inlineEdit)) inlineEdit = null;
+  // Focus leaving a field that is being replaced is not the author leaving it.
+  redrawingMap = true;
+  try { holder.innerHTML = mapHTML(ctx); side.innerHTML = mapSide(ctx); } finally { redrawingMap = false; }
   const sceneHost = $('#mscene');
   if (sceneHost) sceneHost.innerHTML = mapScene(ctx, sceneOpen);
   $('#mapwrap')?.classList.toggle('noscene', !sceneOpen);
@@ -501,8 +517,13 @@ function refreshMap(): void {
   applyZoom();
   const next = $('#mscroll');
   if (next) { next.scrollLeft = scroll[0]; next.scrollTop = scroll[1]; }
+  const inline = $<HTMLTextAreaElement>('#m-inline');
+  if (inline && typing && typing.k === inlineEdit) { inline.value = typing.value; inline.setSelectionRange(typing.at, typing.at); }
+  if (inline) { growInline(inline); inline.focus({ preventScroll: true }); }
   if (focusSel) side.querySelector<HTMLElement>(focusSel)?.focus();
-  else holder.querySelector<HTMLElement>('.on')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  else if (!inline) holder.querySelector<HTMLElement>('.on')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  // "Add a step" opens ready to type in its search box.
+  if (!focusSel && mapSel?.startsWith('add:')) $('#m-kind-find')?.focus({ preventScroll: true });
   afterMap();
 }
 
@@ -514,6 +535,7 @@ function syncPlayFrom(): void {
 
 function applyMap(res: MapResult | undefined): void {
   if (!res) return;
+  if (res.sel?.startsWith('add:') && !mapSel?.startsWith('add:')) selBeforeAdd = mapSel;
   mapSel = res.sel ?? null;
   save();
   refreshMap();
@@ -857,7 +879,14 @@ const actions: Record<string, (k: string) => void> = {
   },
   'fx-try'() { tryEffect(); },
   library() { go('library'); },
-  win(k) { lineWin = !k || lineWin === k ? null : k as LineWin; refreshMap(); },
+  win(k) {
+    const was = lineWin;
+    lineWin = !k || lineWin === k ? null : k as LineWin;
+    refreshMap();
+    // The tool page opens with the way back focused; back on the line, its pill is.
+    if (lineWin) $<HTMLElement>('#mside .mback')?.focus();
+    else if (was) $<HTMLElement>(`#mside .pill[data-k="${was}"]`)?.focus();
+  },
   'path-draw'() { pathPen = true; pathPt = null; refreshMap(); },
   'path-play'() { playPathPreview(); },
   'mark-add'() { const input = $<HTMLInputElement>('#markfile')!; input.value = ''; input.click(); },
@@ -1006,10 +1035,12 @@ const actions: Record<string, (k: string) => void> = {
     const text = inserts(project, room(), e)[Number(k)].text;
     const before = t.value.slice(0, t.selectionStart), after = t.value.slice(t.selectionEnd);
     const lead = before && !before.endsWith('\n') ? '\n' : '';
-    t.value = before + lead + text + after;
+    const tail = after && !after.startsWith('\n') ? '\n' : '';
+    t.value = before + lead + text + tail + after;
     const at = (before + lead + text).length;
     e.script = t.value;
     save(); updateStatus();
+    document.querySelectorAll('details.insmenu[open]').forEach(d => d.removeAttribute('open'));
     t.focus(); t.setSelectionRange(at, at);
   },
   front() { const r = room(), e = selected(); if (!e) return; r.els = r.els.filter(x => x !== e).concat(e); save(); render(); },
@@ -1210,7 +1241,7 @@ document.addEventListener('keydown', ev => {
 
 // Escape closes an open line window first, before it would deselect the step.
 document.addEventListener('keydown', ev => {
-  if (ev.key === 'Escape' && lineWin) { ev.stopImmediatePropagation(); lineWin = null; refreshMap(); }
+  if (ev.key === 'Escape' && lineWin) { ev.stopImmediatePropagation(); ev.preventDefault(); actions.win(''); }
 }, true);
 
 /* ---------- New characters from a picture ---------- */
@@ -1981,6 +2012,7 @@ document.addEventListener('pointerup', () => {
 let rowDrag: { row: HTMLElement; card: HTMLElement; from: string; y: number; moved: boolean; to: number | null; before: string } | null = null;
 let justDragged = false;
 document.addEventListener('pointerdown', ev => {
+  if ((ev.target as HTMLElement).closest('textarea, input')) return;
   const row = (ev.target as HTMLElement).closest<HTMLElement>('.mcard .mrow[data-k]');
   const card = row?.closest<HTMLElement>('.mcard');
   if (!row || !card || ev.button !== 0 || card.querySelectorAll('.mrow').length < 2) return;
@@ -2044,6 +2076,224 @@ document.addEventListener('pointerup', () => {
   $('#mscroll')?.classList.remove('panning');
 });
 
+/* Dragging an answer box sideways changes the order of the answers. */
+let ansDrag: { node: HTMLElement; branch: HTMLElement; split: HTMLElement; choice: string; from: number; x: number; moved: boolean; to: number | null; before: string } | null = null;
+document.addEventListener('pointerdown', ev => {
+  const node = (ev.target as HTMLElement).closest<HTMLElement>('.mnode.answer[data-ans]');
+  const branch = node?.parentElement, split = branch?.parentElement;
+  if (!node || !branch || !split || ev.button !== 0) return;
+  ansDrag = { node, branch, split, choice: (node.dataset.k ?? '').split('#o')[0], from: Number(node.dataset.ans), x: ev.clientX, moved: false, to: null, before: snapshot() };
+});
+document.addEventListener('pointermove', ev => {
+  const d = ansDrag;
+  if (!d) return;
+  const dx = ev.clientX - d.x;
+  if (!d.moved && Math.abs(dx) < 6) return;
+  if (!d.moved) { d.moved = true; d.branch.classList.add('dragging'); d.split.classList.add('sorting'); try { d.node.setPointerCapture(ev.pointerId); } catch { /* not supported */ } }
+  const z = parseFloat($('#mzoomlabel')?.textContent ?? '100') / 100 || 1;
+  d.branch.style.transform = `translateX(${dx / z}px)`;
+  const others = [...d.split.querySelectorAll<HTMLElement>(':scope > .mbranch > .mnode.answer[data-ans]')].filter(n => n !== d.node);
+  d.split.querySelectorAll('.drop-left, .drop-right').forEach(n => n.classList.remove('drop-left', 'drop-right'));
+  const right = others.find(n => { const b = n.getBoundingClientRect(); return ev.clientX < b.left + b.width / 2; });
+  if (right) { right.classList.add('drop-left'); d.to = Number(right.dataset.ans); }
+  else if (others.length) { const last = others[others.length - 1]; last.classList.add('drop-right'); d.to = Number(last.dataset.ans) + 1; }
+});
+const ansDrop = () => {
+  const d = ansDrag;
+  ansDrag = null;
+  if (!d?.moved) return;
+  justDragged = true;
+  setTimeout(() => { justDragged = false; }, 0);
+  d.branch.style.transform = '';
+  d.branch.classList.remove('dragging');
+  d.split.classList.remove('sorting');
+  const ctx = mapCtx();
+  const res = ctx && d.to !== null ? mapAction(ctx, 'opt-reorder', `${d.choice}|${d.from}|${d.to}`) : undefined;
+  if (res) { applyMap(res); record(d.before); } else refreshMap();
+};
+document.addEventListener('pointerup', ansDrop);
+document.addEventListener('pointercancel', ansDrop);
+
+/* The scene beside the map can be made wider or narrower by dragging the bar between them. */
+const SCENE_MIN = 260;
+const sceneMax = () => Math.max(SCENE_MIN, ($('#mapwrap')?.clientWidth ?? 1200) - 380);
+function setSceneWidth(w: number, keep: boolean): void {
+  sceneWidth = Math.round(Math.max(SCENE_MIN, Math.min(sceneMax(), w)));
+  $('#mapwrap')?.style.setProperty('--scene-w', `${sceneWidth}px`);
+  if (keep) try { localStorage.setItem(SCENE_W_KEY, String(sceneWidth)); } catch { /* this session */ }
+}
+let splitDrag: { x: number; w: number } | null = null;
+document.addEventListener('pointerdown', ev => {
+  const bar = (ev.target as HTMLElement).closest<HTMLElement>('.msplitter');
+  if (!bar || ev.button !== 0) return;
+  ev.preventDefault();
+  splitDrag = { x: ev.clientX, w: $('#mscene')?.offsetWidth ?? 340 };
+  bar.classList.add('dragging');
+  try { bar.setPointerCapture(ev.pointerId); } catch { /* not supported */ }
+});
+document.addEventListener('pointermove', ev => { if (splitDrag) setSceneWidth(splitDrag.w + ev.clientX - splitDrag.x, false); });
+const splitDrop = () => {
+  if (!splitDrag) return;
+  splitDrag = null;
+  $('.msplitter')?.classList.remove('dragging');
+  if (sceneWidth) setSceneWidth(sceneWidth, true);
+  drawEdges();
+};
+document.addEventListener('pointerup', splitDrop);
+document.addEventListener('pointercancel', splitDrop);
+
+/* ---------- The map from the keyboard ---------- */
+
+const onMap = () => ui.view === 'convo' && convoMode === 'map' && !!$('#mscroll');
+/** Selects a step in the map, closing a line tool page, and keeps the zoom as it is. */
+function selectMap(sel: string | null): void {
+  if (sel === mapSel) return;
+  if (sel?.startsWith('add:') && !mapSel?.startsWith('add:')) selBeforeAdd = mapSel;
+  mapSel = sel;
+  pathPt = null; pathPen = false; lineWin = null; inlineEdit = null;
+  refreshMap();
+}
+/** Shows only the steps in "Add a step" whose name or description has every word typed. */
+function findKinds(q: string): void {
+  const words = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  let shown = 0;
+  document.querySelectorAll<HTMLElement>('#mside .mk').forEach(b => { b.hidden = !words.every(w => (b.dataset.find ?? '').includes(w)); if (!b.hidden) shown++; });
+  document.querySelectorAll<HTMLElement>('#mside .mgroup').forEach(g => { g.hidden = !g.querySelector('.mk:not([hidden])'); });
+  const none = $<HTMLElement>('#mside .mnone');
+  if (none) none.hidden = shown > 0;
+}
+document.addEventListener('input', ev => { if ((ev.target as HTMLElement).id === 'm-kind-find') findKinds((ev.target as HTMLInputElement).value); });
+document.addEventListener('keydown', ev => {
+  if (!onMap() || ev.metaKey || ev.ctrlKey || ev.altKey) return;
+  const t = ev.target as HTMLElement;
+  // The bar beside the scene: ← and → make the scene narrower or wider.
+  if (t.classList?.contains('msplitter')) {
+    if (ev.key === 'ArrowLeft' || ev.key === 'ArrowRight') { ev.preventDefault(); setSceneWidth(($('#mscene')?.offsetWidth ?? 340) + (ev.key === 'ArrowLeft' ? -24 : 24), true); }
+    return;
+  }
+  // "Add a step": type to find, Enter adds the first one found, ↓ and ↑ go through the list, Escape goes back.
+  const visible = () => [...document.querySelectorAll<HTMLElement>('#mside .mk:not([hidden])')];
+  if (t.id === 'm-kind-find') {
+    if (ev.key === 'Enter') { ev.preventDefault(); visible()[0]?.click(); }
+    else if (ev.key === 'ArrowDown') { ev.preventDefault(); visible()[0]?.focus(); }
+    else if (ev.key === 'Escape') { ev.preventDefault(); ev.stopPropagation(); selectMap(selBeforeAdd); }
+    return;
+  }
+  if (t.classList?.contains('mk') && t.closest('#mside') && (ev.key === 'ArrowDown' || ev.key === 'ArrowUp')) {
+    ev.preventDefault();
+    const list = visible(), i = list.indexOf(t);
+    if (ev.key === 'ArrowUp' && i <= 0) $('#m-kind-find')?.focus(); else list[Math.min(list.length - 1, i + (ev.key === 'ArrowDown' ? 1 : -1))]?.focus();
+    return;
+  }
+  if (t.closest?.('input, textarea, select, [contenteditable]')) return;
+  const ctx = mapCtx();
+  if (!ctx) return;
+  const key = ev.key;
+  if (key === 'ArrowDown' || key === 'ArrowUp') { ev.preventDefault(); selectMap(nextInOrder(ctx, key === 'ArrowDown' ? 1 : -1)); }
+  else if (key === 'ArrowLeft' || key === 'ArrowRight') { ev.preventDefault(); const n = sideways(ctx, key === 'ArrowRight' ? 1 : -1); if (n) selectMap(n); }
+  else if (key === 'Enter') {
+    // Enter on a button presses it; anywhere else it goes to the first field of the panel.
+    if (!mapSel || t.closest('button, a, summary')) return;
+    const field = $('#mside')?.querySelector<HTMLElement>('input:not([type=hidden]):not([disabled]), textarea:not([disabled]), select:not([disabled])');
+    if (field) { ev.preventDefault(); field.focus(); }
+  } else if (key === 'Delete' || key === 'Backspace') {
+    if (!mapSel || mapSel.startsWith('add:')) return;
+    ev.preventDefault();
+    const before = snapshot();
+    const res = mapAction(ctx, mapSel.includes('#o') ? 'opt-remove' : 'delete', '');
+    if (!res) return;
+    lineWin = null; pathPt = null; pathPen = false;
+    applyMap(res);
+    record(before);
+    toast('Deleted. Undo brings it back.');
+  } else if (key === '/' || key === 'a') {
+    const k = addKeyAfter(ctx);
+    if (!k) return;
+    ev.preventDefault();
+    selectMap(k);
+  }
+});
+
+/* ---------- Typing a line in place in the map ---------- */
+
+function growInline(t: HTMLTextAreaElement): void { t.style.height = 'auto'; t.style.height = `${t.scrollHeight}px`; }
+function startInline(path: string, isNew: boolean): void {
+  inlineEdit = path; inlineNew = isNew;
+  if (mapSel !== path) { mapSel = path; pathPt = null; pathPen = false; }
+  lineWin = null;
+  refreshMap();
+  const t = $<HTMLTextAreaElement>('#m-inline');
+  if (t) { t.focus(); if (!isNew) t.select(); }
+}
+/** Keeps what was typed; with next, adds a line by the same speaker below and goes on typing there. */
+function commitInline(next: boolean): void {
+  const t = $<HTMLTextAreaElement>('#m-inline'), path = inlineEdit, ctx = mapCtx();
+  inlineEdit = null;
+  if (!t || !path || !ctx) return;
+  const before = fieldSnapshot ?? snapshot();
+  let sel: string | null = path;
+  if (!t.value.trim() && inlineNew) {
+    // A new line left empty is taken out again, so Enter on an empty line ends the typing.
+    sel = mapAction({ ...ctx, sel: path }, 'delete', '')?.sel ?? null;
+    next = false;
+  } else {
+    mapInput({ ...ctx, sel: path }, 'say-text', '', t.value);
+    if (next) {
+      const res = mapAction({ ...mapCtx()!, sel: path }, 'add-after', '');
+      if (res?.sel) { sel = res.sel; inlineEdit = sel; inlineNew = true; }
+    }
+  }
+  mapSel = sel;
+  save();
+  record(before);
+  fieldSnapshot = null;
+  if (pointerDown && !next) pendingRefresh = true; else refreshMap();
+}
+function cancelInline(): void {
+  const path = inlineEdit, ctx = mapCtx();
+  inlineEdit = null;
+  if (path && ctx && inlineNew) {
+    // A line added by Enter and not typed in goes away again.
+    const st = getStep(parseScript(ctx.el.script).steps, path);
+    if (st?.t === 'say' && st.text === '...') {
+      const before = fieldSnapshot ?? snapshot();
+      mapSel = mapAction({ ...ctx, sel: path }, 'delete', '')?.sel ?? null;
+      save(); record(before);
+    }
+  }
+  fieldSnapshot = null;
+  refreshMap();
+}
+/* A double click on a line types in it. Each click redraws the map, so the browser's own
+   dblclick lands on a box that is gone: two clicks on the same line close together count. */
+let lastLineClick = { k: '', t: 0 };
+function lineDoubleClick(m: HTMLElement): boolean {
+  if (!m.matches('.mrow.k-say[data-k]')) { lastLineClick = { k: '', t: 0 }; return false; }
+  const k = m.dataset.k!, now = performance.now();
+  const twice = lastLineClick.k === k && now - lastLineClick.t < 450;
+  lastLineClick = twice ? { k: '', t: 0 } : { k, t: now };
+  if (twice) startInline(k, false);
+  return twice;
+}
+document.addEventListener('keydown', ev => {
+  const t = ev.target as HTMLTextAreaElement;
+  if (t.id !== 'm-inline') return;
+  if (ev.key === 'Enter' && !ev.shiftKey && !ev.isComposing) { ev.preventDefault(); commitInline(true); }
+  else if (ev.key === 'Escape') { ev.preventDefault(); ev.stopPropagation(); cancelInline(); }
+});
+document.addEventListener('input', ev => {
+  const t = ev.target as HTMLTextAreaElement;
+  if (t.id !== 'm-inline') return;
+  growInline(t);
+  const game = $('.mpreview .game'), who = t.closest('.mrow')?.querySelector('.who')?.textContent ?? '';
+  if (game) game.innerHTML = sayHTML(who, t.value, false);
+});
+document.addEventListener('focusout', ev => {
+  const t = ev.target as HTMLElement;
+  // Leaving the line keeps what was typed; a redraw that replaces the field does not count.
+  if (t.id === 'm-inline' && inlineEdit && !redrawingMap && t.isConnected && t.closest<HTMLElement>('.mrow')?.dataset.k === inlineEdit) commitInline(false);
+});
+
 document.addEventListener('click', ev => {
   const target = ev.target as HTMLElement;
   const b = target.closest<HTMLElement>('[data-act]');
@@ -2068,11 +2318,12 @@ document.addEventListener('click', ev => {
   if (v) { mapView(v.dataset.mapView!); drawEdges(); return; }
   const m = target.closest<HTMLElement>('[data-map-act]');
   const ctx = mapCtx();
-  if (justDragged && m?.closest('.mcard')) return;
+  if (justDragged && m?.closest('.mcard, .mnode.answer')) return;
   if (m && ctx) {
     if ((m as HTMLButtonElement).disabled) return;
     const act = m.dataset.mapAct!;
     if (act === 'pt-done') { pathPt = null; refreshMap(); return; }
+    if (lineDoubleClick(m)) return;
     const before = snapshot();
     const prevSel = mapSel;
     const res = mapAction(ctx, act, m.dataset.k ?? '');
@@ -2107,7 +2358,7 @@ document.addEventListener('focusin', ev => {
 });
 document.addEventListener('focusout', ev => {
   const lost = ev.target as HTMLElement;
-  if (!isField(lost) || fieldSnapshot === null) return;
+  if (!isField(lost) || fieldSnapshot === null || redrawingMap) return;
   const next = (ev as FocusEvent).relatedTarget as HTMLElement | null;
   // Removed while focused (the map redraws its panel): the same field comes back, so the visit goes on.
   if (!next && !lost.isConnected) return;
@@ -2438,7 +2689,7 @@ document.addEventListener('keydown', ev => {
     if (key === 'z' && !ev.shiftKey) { ev.preventDefault(); undo(); return; }
     if ((key === 'z' && ev.shiftKey) || key === 'y') { ev.preventDefault(); redo(); return; }
   }
-  if (ui.view === 'convo' && !typing && ev.key === 'Escape' && mapSel) { mapSel = null; refreshMap(); return; }
+  if (ui.view === 'convo' && !typing && ev.key === 'Escape' && mapSel) { mapSel = mapSel.startsWith('add:') ? selBeforeAdd : null; inlineEdit = null; refreshMap(); return; }
   const nudging = !typing && ui.view === 'room' ? editedLook() : undefined;
   if (nudging && ev.key.startsWith('Arrow')) {
     ev.preventDefault();

@@ -25,6 +25,8 @@ export interface MapCtx {
   el: StoryElement;
   /** What is selected: a step path, "<path>#o<k>" for an answer, or "add:<list>:<index>". */
   sel: string | null;
+  /** The line being typed in place in the map, by its path. */
+  edit?: string | null;
 }
 
 /* ---------- Speakers and their looks ---------- */
@@ -117,6 +119,8 @@ export function soundText(s: Extract<Step, { t: 'sound' }>): string {
   return s.name && s.name !== '...' ? `♪ ${s.name}${s.loop ? ' (loops)' : ''}` : 'No sound picked';
 }
 const TERMINAL = new Set(['door', 'end', 'jump', 'ending']);
+/** The handle shown on a row or an answer when the pointer is over it: drag it to change the order. */
+const GRIP = '<span class="mgrip" aria-hidden="true" title="Drag to change the order">⋮⋮</span>';
 
 export function startLabel(room: Room, el: StoryElement): string {
   const first = room.auto && (room.autoEl ? room.els.find(x => x.id === room.autoEl) : room.els.find(x => x.script.trim()));
@@ -153,24 +157,28 @@ export function mapHTML(ctx: MapCtx): string {
 
   const row = (s: Step, path: string): string => {
     const attrs = `class="mrow k-${s.t}${on(path)}"${pick(path)}`;
+    const open = `<button ${attrs}>${readOnly ? '' : GRIP}`;
+    if (s.t === 'say' && ctx.edit === path && !readOnly) {
+      return `<div class="mrow k-say on editing" data-k="${esc(path)}">${s.who ? `<span class="who">${esc(s.who)}</span>` : ''}<textarea class="minline" id="m-inline" rows="1" aria-label="${s.who ? `What ${esc(s.who)} says` : 'Narration'}" placeholder="Type the line, Enter for the next one">${s.text === '...' ? '' : esc(s.text)}</textarea></div>`;
+    }
     if (s.t === 'say') {
       const text = s.text === '...' ? '<em>Empty line</em>' : esc(s.text);
       return s.who
-        ? `<button ${attrs}><span class="who${unknownSpeaker(ctx, s.who) ? ' voice" title="A voice without a picture: no character has this name' : ''}">${esc(s.who)}</span>${s.expr ? exprTag(s.who, s.expr) : ''}${s.marks?.length ? `<span class="expr">${esc(s.marks.join(', '))}</span>` : ''}${s.fx ? `<span class="mini-tag">${esc(s.fx)}</span>` : ''}${s.sound ? `<span class="mini-tag" title="${s.soundAtEnd ? 'Sound as the player moves on' : 'Sound as the line appears'}">${s.soundAtEnd ? '→♪' : '♪'}</span>` : ''}${s.voice ? '<span class="mini-tag">🎤</span>' : ''}${s.alts?.length ? `<span class="mini-tag">${s.alts.length + 1} ways</span>` : ''}<span class="txt">${text}</span></button>`
-        : `<button ${attrs}><span class="txt narr">${text}</span></button>`;
+        ? `${open}<span class="who${unknownSpeaker(ctx, s.who) ? ' voice" title="A voice without a picture: no character has this name' : ''}">${esc(s.who)}</span>${s.expr ? exprTag(s.who, s.expr) : ''}${s.marks?.length ? `<span class="expr">${esc(s.marks.join(', '))}</span>` : ''}${s.fx ? `<span class="mini-tag">${esc(s.fx)}</span>` : ''}${s.sound ? `<span class="mini-tag" title="${s.soundAtEnd ? 'Sound as the player moves on' : 'Sound as the line appears'}">${s.soundAtEnd ? '→♪' : '♪'}</span>` : ''}${s.voice ? '<span class="mini-tag">🎤</span>' : ''}${s.alts?.length ? `<span class="mini-tag">${s.alts.length + 1} ways</span>` : ''}<span class="txt">${text}</span></button>`
+        : `${open}<span class="txt narr">${text}</span></button>`;
     }
-    if (s.t === 'ask') return `<button ${attrs}><span class="tag">Ask</span><span class="txt">${esc(s.prompt)} → <code>${esc(s.fact)}</code></span></button>`;
-    if (s.t === 'camera') return `<button ${attrs}><span class="tag">Camera</span><span class="txt">${s.action === 'zoom' ? `zoom ×${s.scale ?? 1.5}` : esc(s.action)}</span></button>`;
-    if (s.t === 'panel') return `<button ${attrs}><span class="tag">Interface</span><span class="txt">${s.show ? 'Show' : 'Hide'} ${esc(s.name)}</span></button>`;
-    if (s.t === 'sound') return `<button ${attrs}><span class="tag">${s.stop ? 'Stop' : 'Sound'}</span><span class="txt">${esc(soundText(s))}</span></button>`;
-    if (s.t === 'music') return `<button ${attrs}><span class="tag">Music</span><span class="txt">${s.track ? `♫ ${esc(s.track)}${s.once ? ' (once)' : ''}` : 'Silence'}</span></button>`;
-    if (itemStepText(ctx.project, s)) return `<button ${attrs}><span class="tag">Item</span><span class="txt">${esc(itemStepText(ctx.project, s)!)}</span></button>`;
-    if (s.t === 'change') return `<button ${attrs}><span class="tag">Change</span><span class="txt">${esc(s.effects.map(effectText).join(', '))}</span></button>`;
-    if (s.t === 'note') return `<button ${attrs}><span class="tag">Note</span><span class="txt">${esc(s.text)}</span></button>`;
-    if (s.t === 'mark' || s.t === 'loop' || s.t === 'path') return `<button ${attrs}><span class="tag">Stage</span><span class="txt">${esc(stageText(s))}</span></button>`;
+    if (s.t === 'ask') return `${open}<span class="tag">Ask</span><span class="txt">${esc(s.prompt)} → <code>${esc(s.fact)}</code></span></button>`;
+    if (s.t === 'camera') return `${open}<span class="tag">Camera</span><span class="txt">${s.action === 'zoom' ? `zoom ×${s.scale ?? 1.5}` : esc(s.action)}</span></button>`;
+    if (s.t === 'panel') return `${open}<span class="tag">Interface</span><span class="txt">${s.show ? 'Show' : 'Hide'} ${esc(s.name)}</span></button>`;
+    if (s.t === 'sound') return `${open}<span class="tag">${s.stop ? 'Stop' : 'Sound'}</span><span class="txt">${esc(soundText(s))}</span></button>`;
+    if (s.t === 'music') return `${open}<span class="tag">Music</span><span class="txt">${s.track ? `♫ ${esc(s.track)}${s.once ? ' (once)' : ''}` : 'Silence'}</span></button>`;
+    if (itemStepText(ctx.project, s)) return `${open}<span class="tag">Item</span><span class="txt">${esc(itemStepText(ctx.project, s)!)}</span></button>`;
+    if (s.t === 'change') return `${open}<span class="tag">Change</span><span class="txt">${esc(s.effects.map(effectText).join(', '))}</span></button>`;
+    if (s.t === 'note') return `${open}<span class="tag">Note</span><span class="txt">${esc(s.text)}</span></button>`;
+    if (s.t === 'mark' || s.t === 'loop' || s.t === 'path') return `${open}<span class="tag">Stage</span><span class="txt">${esc(stageText(s))}</span></button>`;
     if (s.t === 'show' || s.t === 'move' || s.t === 'hide') {
       const bad = unknownSpeaker(ctx, s.who) ? ' bad" title="No character has this name. If this is narration, write Narration: in front of it in the script.' : '';
-      return `<button ${attrs}><span class="tag">Stage</span><span class="txt${bad}">${esc(stageText(s))}</span></button>`;
+      return `${open}<span class="tag">Stage</span><span class="txt${bad}">${esc(stageText(s))}</span></button>`;
     }
     return '';
   };
@@ -222,7 +230,7 @@ export function mapHTML(ctx: MapCtx): string {
           model.edges.push([nid, hid]);
           const sub = flow(o.steps, `${path}.o${k}`, [hid], reach, false);
           exits.push(...sub.exits);
-          html += `<div class="mbranch"><button class="mnode answer${dim}${on(key)}" id="${hid}"${pick(key)}><span class="q">${o.text === '...' ? '<em>Empty answer</em>' : esc(o.text)}</span>${fx}</button><div class="mflow">${sub.html}</div></div>`;
+          html += `<div class="mbranch"><button class="mnode answer${dim}${on(key)}" id="${hid}"${pick(key)}${s.options.length > 1 && !readOnly ? ` data-ans="${k}"` : ''}>${s.options.length > 1 && !readOnly ? GRIP : ''}<span class="q">${o.text === '...' ? '<em>Empty answer</em>' : esc(o.text)}</span>${fx}</button><div class="mflow">${sub.html}</div></div>`;
         });
         if (!readOnly) html += `<div class="mbranch ghost"><button class="mnode answer add" data-map-act="add-answer" data-k="${path}">+ Answer</button></div>`;
         html += '</div>';
@@ -336,18 +344,124 @@ export function mapView(kind: string): void {
 }
 
 /**
- * First look at a conversation: everything at full size when it fits; otherwise
- * shrink it down to 60% at most and put the start in the middle of the view.
+ * First look at a conversation: at actual size, with the start in the middle at
+ * the top. Fit is only ever done when asked for.
  */
 export function openView(): void {
   const sc = document.getElementById('mscroll'), canvas = document.getElementById('mcanvas');
   const start = canvas?.querySelector<HTMLElement>('.mnode.start');
   if (!sc || !canvas || !start) return;
-  zoom = Math.min(1, Math.max(0.6, (sc.clientWidth - 8) / canvas.offsetWidth));
+  zoom = 1;
   applyZoom();
-  const centre = (start.offsetLeft + start.offsetWidth / 2 + (start.offsetParent as HTMLElement).offsetLeft) * zoom;
-  sc.scrollLeft = centre - sc.clientWidth / 2;
-  sc.scrollTop = 0;
+  const centre = () => {
+    const x = start.offsetLeft + start.offsetWidth / 2 + (start.offsetParent as HTMLElement).offsetLeft;
+    sc.scrollLeft = x - sc.clientWidth / 2;
+    sc.scrollTop = 0;
+  };
+  centre();
+  // The page can still be widening as the view opens: keep the start centred until the author moves the map.
+  if (!('ResizeObserver' in window)) return;
+  let touched = false;
+  const stop = () => { touched = true; ro.disconnect(); };
+  const ro = new ResizeObserver(() => { if (touched || !start.isConnected) stop(); else centre(); });
+  ro.observe(sc);
+  sc.addEventListener('pointerdown', stop, { once: true });
+  sc.addEventListener('wheel', stop, { once: true, passive: true });
+  setTimeout(stop, 1000);
+}
+
+/* ---------- Moving around with the keyboard ---------- */
+
+/** Every step and answer in reading order, as the map draws them: down the page, each answer with its own path before the next answer. */
+export function readingOrder(ctx: MapCtx): string[] {
+  const { steps, errors } = parseScript(ctx.el.script);
+  if (errors.length) return [];
+  const out: string[] = [];
+  const walk = (list: Step[], lp: string): void => list.forEach((s, i) => {
+    const path = stepPathOf(lp, i);
+    out.push(path);
+    if (s.t === 'choice') s.options.forEach((o, k) => { out.push(`${path}#o${k}`); walk(o.steps, `${path}.o${k}`); });
+    if (s.t === 'if') { walk(s.then, `${path}.t`); walk(s.else, `${path}.e`); }
+  });
+  walk(steps, '');
+  return out;
+}
+
+/** What a list of steps belongs to: an answer ("<path>#o<k>"), an "Only if" (its path), or nothing for the top. */
+function ownerOf(list: string): string | null {
+  if (!list) return null;
+  const parts = list.split('.');
+  const branch = parts.pop()!;
+  const path = parts.join('.');
+  return branch.startsWith('o') ? `${path}#${branch}` : path;
+}
+
+/** The step before or after the selection in reading order (↑ and ↓). With nothing selected, the first or the last. */
+export function nextInOrder(ctx: MapCtx, dir: 1 | -1): string | null {
+  const order = readingOrder(ctx);
+  if (!order.length) return null;
+  const sel = ctx.sel;
+  if (!sel) return dir > 0 ? order[0] : order[order.length - 1];
+  if (sel.startsWith('add:')) {
+    const [, list, at] = sel.split(':');
+    const before = Number(at) > 0 ? stepPathOf(list, Number(at) - 1) : ownerOf(list);
+    const after = stepPathOf(list, Number(at));
+    if (dir < 0) return before ?? order[0];
+    if (order.includes(after)) return after;
+    return before ? order[Math.min(order.length - 1, order.indexOf(before) + 1)] : order[0];
+  }
+  const i = order.indexOf(sel);
+  if (i < 0) return order[0];
+  return order[Math.max(0, Math.min(order.length - 1, i + dir))];
+}
+
+/**
+ * The neighbour to the left or right (← and →): the next answer of a choice, or
+ * the same place in the next answer's or the other path's steps. On a choice or
+ * an "Only if" itself, → goes into its first answer or path.
+ */
+export function sideways(ctx: MapCtx, dir: 1 | -1): string | null {
+  const { steps, errors } = parseScript(ctx.el.script);
+  const sel = ctx.sel;
+  if (errors.length || !sel || sel.startsWith('add:')) return null;
+  const [path0, opt] = sel.split('#o');
+  const step = getStep(steps, path0);
+  if (opt !== undefined) return step?.t === 'choice' && step.options[Number(opt) + dir] ? `${path0}#o${Number(opt) + dir}` : null;
+  if (step?.t === 'choice' && dir > 0) return `${path0}#o0`;
+  if (step?.t === 'if' && dir > 0) return step.then.length ? `${path0}.t.0` : step.else.length ? `${path0}.e.0` : null;
+  // Inside a path: the same place in the neighbouring one, looking further out when there is none.
+  let path = path0;
+  while (path.split('.').length >= 3) {
+    const parts = path.split('.');
+    const index = Number(parts.pop());
+    const branch = parts.pop()!;
+    const owner = parts.join('.');
+    const os = getStep(steps, owner);
+    if (os?.t === 'choice' && branch.startsWith('o')) {
+      const j = Number(branch.slice(1)) + dir;
+      const o = os.options[j];
+      if (o) return o.steps.length ? `${owner}.o${j}.${Math.min(index, o.steps.length - 1)}` : `${owner}#o${j}`;
+    } else if (os?.t === 'if') {
+      const other = branch === 't' && dir > 0 ? 'e' : branch === 'e' && dir < 0 ? 't' : '';
+      const list = other === 't' ? os.then : other === 'e' ? os.else : null;
+      if (list) return list.length ? `${owner}.${other}.${Math.min(index, list.length - 1)}` : owner;
+    }
+    path = owner;
+  }
+  return null;
+}
+
+/** Where "Add a step" goes for the selection: right after a step, at the start of an answer's path, or at the end. */
+export function addKeyAfter(ctx: MapCtx): string | null {
+  const { steps, errors } = parseScript(ctx.el.script);
+  if (errors.length) return null;
+  const sel = ctx.sel;
+  if (!sel) return `add::${steps.length}`;
+  if (sel.startsWith('add:')) return sel;
+  const [path, opt] = sel.split('#o');
+  if (opt !== undefined) return `add:${path}.o${opt}:0`;
+  const { list, index } = splitPath(path);
+  return `add:${list}:${index + 1}`;
 }
 
 /** Draws the connecting lines once the boxes are laid out. */
@@ -491,7 +605,8 @@ function soundPart(ctx: MapCtx, step: SayStep): string {
   const when = step.sound ? `<div class="field"><span>When it plays</span><div class="row">
       <button class="btn small${step.soundAtEnd ? ' quiet' : ' ink'}" data-map-act="snd-when" data-k="start" aria-pressed="${!step.soundAtEnd}">As the line appears</button>
       <button class="btn small${step.soundAtEnd ? ' ink' : ' quiet'}" data-map-act="snd-when" data-k="end" aria-pressed="${!!step.soundAtEnd}">When the player moves on</button></div></div>` : '';
-  return `<label class="field"><span>Sound with this line</span>${soundSelect(ctx.project, 'm-sound', 'data-map-in="say-sound"', step.sound, 'No sound', who)}</label>${quick}${when}`;
+  const listen = step.sound ? `<button class="btn small quiet" data-act="snd-try" data-k="${esc(step.sound)}">▶ Listen</button>` : '';
+  return `<label class="field"><span>Sound with this line</span>${soundSelect(ctx.project, 'm-sound', 'data-map-in="say-sound"', step.sound, 'No sound', who)}</label>${listen}${quick}${when}`;
 }
 
 /** A recorded or uploaded voice for the line. */
@@ -515,31 +630,34 @@ function altsPart(step: SayStep): string {
 export type LineWin = 'fx' | 'marks' | 'sound' | 'stage' | 'facts' | 'alts';
 
 /**
- * The line's extras as a row of chips that say what is set; each opens its own
- * small window, so the panel itself stays short.
+ * The line's extras as one row of small pills that say what is set. Each opens
+ * its own page inside the panel, so the panel itself stays short.
  */
 function lineTools(ctx: MapCtx, step: SayStep, scene: Scene): string {
   const who = speakerOf(ctx.project, ctx.room, step.who).character;
   const facts = !!who?.facts?.some(d => d.kind !== 'word');
   const me = scene.chars.find(c => c.visible && lower(c.name) === lower(step.who));
-  const chip = (k: LineWin, label: string, value: string, show = true) => show ? `<button class="tool${ctx.win === k ? ' open' : ''}${value ? ' set' : ''}" data-act="win" data-k="${k}" aria-expanded="${ctx.win === k}"><b>${label}</b><span>${value ? esc(value) : '—'}</span></button>` : '';
-  return `<div class="tools4">
-    ${chip('fx', 'Effect', step.fx ?? '', !!step.who)}
-    ${chip('marks', 'Marks', (step.marks ?? []).join(', '), !!step.who)}
-    ${chip('sound', 'Sound', [step.sound ? `${step.sound}${step.soundAtEnd ? ' (end)' : ''}` : '', step.voice ? 'voice' : ''].filter(Boolean).join(' + '))}
-    ${chip('alts', 'Variations', step.alts?.length ? `${step.alts.length + 1} ways${step.altMode === 'turn' ? ', in turn' : ''}` : '')}
-    ${chip('stage', 'Stage', me ? `${spotText({ x: Math.round(me.x) }) || `${Math.round(me.x)}%`}${me.flip ? ', turned' : ''}` : step.who ? 'not on stage' : '')}
-    ${chip('facts', 'Story facts', '', facts)}
+  const pill = (k: LineWin, label: string, value: string, show = true) => show
+    ? `<button class="pill${value ? ' set' : ''}" data-act="win" data-k="${k}" title="${esc(value ? `${label}: ${value}` : label)}"><b>${label}</b>${value ? `<span>${esc(value)}</span>` : ''}</button>` : '';
+  return `<div class="pills" role="group" aria-label="More for this line">
+    ${pill('fx', 'Effect', step.fx ?? '', !!step.who)}
+    ${pill('marks', 'Marks', (step.marks ?? []).join(', '), !!step.who)}
+    ${pill('sound', 'Sound', [step.sound ? `${step.sound}${step.soundAtEnd ? ' (end)' : ''}` : '', step.voice ? 'voice' : ''].filter(Boolean).join(' + '))}
+    ${pill('alts', 'Variations', step.alts?.length ? `${step.alts.length + 1} ways` : '')}
+    ${pill('stage', 'Stage', me ? `${spotText({ x: Math.round(me.x) }) || `${Math.round(me.x)}%`}${me.flip ? ', turned' : ''}` : step.who ? 'off' : '')}
+    ${pill('facts', 'Story facts', '', facts)}
   </div>`;
 }
 
-/** The window a line tool opens. */
-function lineWindow(ctx: MapCtx, step: SayStep, scene: Scene): string {
+/** A line tool's page, shown in the panel in place of the line, with a way back. */
+function linePage(ctx: MapCtx, step: SayStep, scene: Scene): string {
   const titles: Record<LineWin, string> = { fx: `Effect on ${step.who}`, marks: `Marks on ${step.who}`, sound: 'Sound and voice', stage: 'On stage', facts: 'After this line', alts: 'Other ways to say it' };
   const w = ctx.win!;
   const body = w === 'fx' ? effectPart(step) : w === 'marks' ? marksPart(ctx, step) : w === 'sound' ? soundPart(ctx, step) + voicePart(ctx, step) : w === 'alts' ? altsPart(step)
     : w === 'stage' ? stageField(ctx, scene, step.who) : quickFacts(ctx, step);
-  return `<div class="win" role="dialog" aria-label="${esc(titles[w])}"><div class="winh"><b>${esc(titles[w])}</b><button class="btn small quiet" data-act="win" data-k="" aria-label="Close">✕</button></div><div class="winb">${body || '<p class="hint">Nothing to set here.</p>'}</div></div>`;
+  const said = step.text === '...' ? '' : step.text;
+  return `<div class="drillh"><button class="mback" data-act="win" data-k="" aria-label="Back to the line">‹ Line</button><span class="drillof">${esc(step.who ? `${step.who}: ${said}` : said)}</span></div>
+    <h2>${esc(titles[w])}</h2><div class="drillb">${body || '<p class="hint">Nothing to set here.</p>'}</div>`;
 }
 
 /** A character's sound without their name in front: "lin laugh" shows as "laugh". */
@@ -599,29 +717,47 @@ function lookField(ctx: MapCtx, who: string, expr: string): string {
   return `<p class="hint">${esc(who)} is not placed in this room, so there are no looks to pick here yet.</p>`;
 }
 
-const kinds = (top: boolean, hasParts: boolean) => [
-  ['say', 'Line', 'Someone says something, or a line of narration'],
-  ['choice', 'Choice', 'The player picks one of several answers'],
-  ['if', 'Only if', 'Take one path or another depending on story facts'],
-  ['change', 'Change something', 'Change a story fact without saying anything'],
-  ['item', 'Give or take an item', 'The player gets something, such as a key, or loses it'],
-  ['music', 'Music', 'Start, change or stop the background music'],
-  ['sound', 'Sound', 'Play a sound, or stop one sound or all of them'],
-  ['panel', 'Show or hide a panel', 'An inventory, a status bar or another panel from Look › Interface'],
-  ['door', 'Go to another room', 'The player moves to another room'],
-  ['ask', 'Ask the player', 'The player types an answer, such as their name, kept as a story fact'],
-  ['camera', 'Camera', 'Zoom in on a spot, shake, flash, or back to the whole picture'],
-  ['ending', 'Ending', 'One of the story\'s endings: shown to the player and counted on the title screen'],
-  ...(hasParts ? [['jump', 'Go to a part', 'Continue from a named part of this conversation']] : []),
-  ['show', 'Bring someone in', 'A character comes on stage, with an effect'],
-  ['move', 'Move someone', 'Change where someone stands, their size, or turn them'],
-  ['hide', 'Take someone out', 'A character leaves the stage'],
-  ['mark', 'Put a mark on someone', 'An anger sign, a sweat drop or a puff that stays until taken off'],
-  ['path', 'Draw a path', 'Someone moves along a line you draw, while the lines go on'],
-  ['loop', 'Change how someone moves', 'Sway, bob, breathe or float while standing'],
-  ['end', 'End', 'The conversation closes here'],
-  ...(top ? [['part', 'Part', 'A named point that "Go to a part" can jump to']] : [])
+/* "Add a step": the four used most, then the rest in groups. One entry per line: kind, name, what it does, group. */
+export type KindGroup = 'top' | 'talk' | 'stage' | 'sound' | 'flow';
+export const KIND_GROUPS: [KindGroup, string][] = [['talk', 'Talk and logic'], ['stage', 'Stage and camera'], ['sound', 'Sound and interface'], ['flow', 'Flow']];
+const kinds = (top: boolean, hasParts: boolean): [string, string, string, KindGroup][] => [
+  ['say', 'Line', 'Someone says something, or a line of narration', 'top'],
+  ['choice', 'Choice', 'The player picks one of several answers', 'top'],
+  ['if', 'Only if', 'Take one path or another depending on story facts', 'top'],
+  ['change', 'Change something', 'Change a story fact without saying anything', 'top'],
+  ['item', 'Give or take an item', 'The player gets something, such as a key, or loses it', 'talk'],
+  ['ask', 'Ask the player', 'The player types an answer, such as their name, kept as a story fact', 'talk'],
+  ['show', 'Bring someone in', 'A character comes on stage, with an effect', 'stage'],
+  ['move', 'Move someone', 'Change where someone stands, their size, or turn them', 'stage'],
+  ['hide', 'Take someone out', 'A character leaves the stage', 'stage'],
+  ['mark', 'Put a mark on someone', 'An anger sign, a sweat drop or a puff that stays until taken off', 'stage'],
+  ['path', 'Draw a path', 'Someone moves along a line you draw, while the lines go on', 'stage'],
+  ['loop', 'Change how someone moves', 'Sway, bob, breathe or float while standing', 'stage'],
+  ['camera', 'Camera', 'Zoom in on a spot, shake, flash, or back to the whole picture', 'stage'],
+  ['music', 'Music', 'Start, change or stop the background music', 'sound'],
+  ['sound', 'Sound', 'Play a sound, or stop one sound or all of them', 'sound'],
+  ['panel', 'Show or hide a panel', 'An inventory, a status bar or another panel from Look › Interface', 'sound'],
+  ['door', 'Go to another room', 'The player moves to another room', 'flow'],
+  ...(top ? [['part', 'Part', 'A named point that "Go to a part" can jump to', 'flow'] as [string, string, string, KindGroup]] : []),
+  ...(hasParts ? [['jump', 'Go to a part', 'Continue from a named part of this conversation', 'flow'] as [string, string, string, KindGroup]] : []),
+  ['ending', 'Ending', 'One of the story\'s endings: shown to the player and counted on the title screen', 'flow'],
+  ['end', 'End', 'The conversation closes here', 'flow']
 ];
+
+/** The "Add a step" panel: a box to find a step by name, the four used most, then the groups. */
+function addPanel(top: boolean, hasParts: boolean): string {
+  const list = kinds(top, hasParts);
+  const item = ([k, n, d]: [string, string, string, KindGroup]) =>
+    `<button class="mk" data-map-act="insert" data-k="${k}" title="${esc(d)}" data-find="${esc(lower(`${n} ${d}`))}"><b>${esc(n)}</b><span>${esc(d)}</span></button>`;
+  const groups = KIND_GROUPS.map(([g, title]) => {
+    const items = list.filter(x => x[3] === g);
+    return items.length ? `<div class="mgroup"><div class="label">${title}</div>${items.map(item).join('')}</div>` : '';
+  }).join('');
+  return `<div class="mhead"><h2>Add a step</h2><button class="btn small quiet" data-map-act="deselect">Cancel</button></div>
+    <input type="search" id="m-kind-find" class="mfind" placeholder="Find a step" aria-label="Find a step" autocomplete="off" spellcheck="false">
+    <div class="mkadd"><div class="mgroup mtop">${list.filter(x => x[3] === 'top').map(item).join('')}</div>${groups}
+    <p class="hint mnone" hidden>No step has that name. Try another word.</p></div>`;
+}
 
 export function mapSide(ctx: MapCtx): string {
   const { steps, errors } = parseScript(ctx.el.script);
@@ -645,15 +781,13 @@ export function mapSide(ctx: MapCtx): string {
 
   if (sel.startsWith('add:')) {
     const [, list] = sel.split(':');
-    return `<h2>Add a step here</h2><div class="mkinds">${kinds(list === '', s.parts.length > 0).map(([k, n, d]) =>
-      `<button class="mkind" data-map-act="insert" data-k="${k}"><b>${n}</b><span>${d}</span></button>`).join('')}</div>
-      <button class="btn small quiet" data-map-act="deselect">Cancel</button>`;
+    return addPanel(list === '', s.parts.length > 0);
   }
 
   const [path, opt] = sel.split('#o');
   const step = getStep(steps, path);
   if (!step) return '<p class="hint">That step is gone. Click another box.</p>';
-  const del = (label = 'Delete this step') => `<button class="btn small danger" data-map-act="delete">${label}</button>`;
+  const del = (label = 'Delete this step') => `<button class="btn small quiet danger mdel" data-map-act="delete" title="Delete (or press Delete)">${label}</button>`;
   const header = (t: string) => `<div class="mhead"><h2>${t}</h2><button class="btn small quiet" data-map-act="deselect">Done</button></div>`;
 
   if (opt !== undefined && step.t === 'choice') {
@@ -664,8 +798,8 @@ export function mapSide(ctx: MapCtx): string {
       ${effectRows(o.effects)}
       <div class="row"><label class="check"><input type="checkbox" data-map-act="opt-flag" data-k="once"${o.once ? ' checked' : ''}><span>Gone once it is picked</span></label></div>
       <div class="row"><label class="check"><input type="checkbox" data-map-act="opt-flag" data-k="fallback"${o.fallback ? ' checked' : ''}><span>Only when no other answer is left</span></label></div>
-      <div class="row"><button class="btn small quiet" data-map-act="opt-move" data-k="-1"${k === 0 ? ' disabled' : ''}>Move left</button><button class="btn small quiet" data-map-act="opt-move" data-k="1"${k === step.options.length - 1 ? ' disabled' : ''}>Move right</button></div>
-      <button class="btn small danger" data-map-act="opt-remove"${step.options.length < 2 ? ' disabled title="A choice needs at least one answer"' : ''}>Remove this answer</button>`;
+      <div class="row mmove"><span class="hint">Drag the answer in the map to change the order.</span><button class="btn small quiet micon" data-map-act="opt-move" data-k="-1" aria-label="Move left" title="Move left"${k === 0 ? ' disabled' : ''}>←</button><button class="btn small quiet micon" data-map-act="opt-move" data-k="1" aria-label="Move right" title="Move right"${k === step.options.length - 1 ? ' disabled' : ''}>→</button></div>
+      <button class="btn small quiet danger mdel" data-map-act="opt-remove"${step.options.length < 2 ? ' disabled title="A choice needs at least one answer"' : ''}>Remove this answer</button>`;
   }
 
   switch (step.t) {
@@ -673,6 +807,7 @@ export function mapSide(ctx: MapCtx): string {
       const speakers = new Set([...ctx.room.els.filter(x => x.kind === 'char').map(x => x.name), ...ctx.project.characters.map(c => c.name)]);
       walkSteps(steps, x => { if (x.t === 'say' && x.who) speakers.add(x.who); });
       const scene = sceneAt(ctx, steps, path);
+      if (ctx.win) return linePage(ctx, step, scene);
       return `${header('Line')}
         <label class="field"><span>Who speaks</span><input type="text" list="m-who" id="m-who-in" data-map-in="say-who" value="${esc(step.who)}" placeholder="Leave empty for narration"></label>
         <datalist id="m-who">${[...speakers].map(n => `<option value="${esc(n)}">`).join('')}</datalist>
@@ -680,8 +815,7 @@ export function mapSide(ctx: MapCtx): string {
         <label class="field"><span>${step.who ? 'What they say' : 'Narration'}</span><textarea id="m-text" data-map-in="say-text" rows="3" placeholder="Type the line here">${step.text === '...' ? '' : esc(step.text)}</textarea></label>
         ${lookField(ctx, step.who, step.expr)}
         ${lineTools(ctx, step, scene)}
-        ${ctx.win ? lineWindow(ctx, step, scene) : ''}
-        <div class="row"><button class="btn small" data-map-act="add-after">+ Line after this</button><button class="btn small play" data-act="play-here" title="Play the conversation from this line, with the scene as it stands here">Play from here</button>${del()}</div>`;
+        <div class="row mfoot"><button class="btn small" data-map-act="add-after">+ Line after this</button><button class="btn small quiet" data-act="play-here" title="Play the conversation from this line, with the scene as it stands here">▶ Play from here</button>${del('Delete')}</div>`;
     }
     case 'show':
     case 'move':
@@ -909,7 +1043,8 @@ export function mapAction(ctx: MapCtx, act: string, k: string): MapResult | unde
       const target = getList(steps, list);
       if (!target) return undefined;
       target.splice(index, 1);
-      return commit(null);
+      // The step that took its place stays selected, or the one before, so Delete can be pressed again.
+      return commit(target[index] ? path : index > 0 ? stepPathOf(list, index - 1) : null);
     }
     case 'add-answer': {
       const step = getStep(steps, k) as ChoiceStep | null;
@@ -931,6 +1066,19 @@ export function mapAction(ctx: MapCtx, act: string, k: string): MapResult | unde
       if (j < 0 || j >= step.options.length) return undefined;
       [step.options[i], step.options[j]] = [step.options[j], step.options[i]];
       return commit(`${path}#o${j}`);
+    }
+    case 'opt-reorder': {
+      // Dragging an answer sideways: k is "<choice path>|<from>|<index to put it before>".
+      const [cp, from, to] = k.split('|');
+      const step = getStep(steps, cp) as ChoiceStep | null;
+      const i = Number(from);
+      let at = Number(to);
+      if (step?.t !== 'choice' || !step.options[i] || !Number.isInteger(at) || at < 0 || at > step.options.length) return undefined;
+      if (at > i) at--;
+      if (at === i) return undefined;
+      const [moved] = step.options.splice(i, 1);
+      step.options.splice(at, 0, moved);
+      return commit(`${cp}#o${at}`);
     }
     case 'stage-spot':
     case 'stage-place': {
