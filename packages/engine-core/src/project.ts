@@ -1,6 +1,7 @@
 import type { Idle, MarkDef, MarkSpot, Backdrop, Character, CharacterLook, CompareOp, Condition, FactDef, FactValue, Facts, HudWidget, Look, Project, Room, Sound, StoryElement } from './types';
 import { IDLE_MOVES, isLineEffect } from './staging';
 import { renameLookInScript } from './refs';
+import { normalizePanels } from './panels';
 
 export const DEFAULT_LOOK: Look = { theme: 'velvet', font: 'Lora', radius: 14, size: 2 };
 
@@ -192,6 +193,7 @@ export function normalizeProject(raw: unknown): Project | null {
     w: clamp(num(w.w, 24), 5, 90),
     ...(w.hideUnset === true ? { hideUnset: true } : {})
   }));
+  const panels = normalizePanels(r.panels, rooms.map(x => x.id), characters.map(c => c.id));
   const sounds: Sound[] = (Array.isArray(r.sounds) ? r.sounds : []).filter(x => x && typeof x === 'object' && typeof (x as Record<string, unknown>).data === 'string')
     .map((x: Record<string, unknown>) => ({ id: str(x.id, newId()), name: cleanSoundName(str(x.name, 'sound')), data: x.data as string, ...(typeof x.owner === 'string' && characters.some(c => c.id === x.owner) ? { owner: x.owner } : {}),
       ...(typeof x.volume === 'number' && x.volume !== 100 ? { volume: clamp(Math.round(x.volume), 0, 100) } : {}),
@@ -209,6 +211,7 @@ export function normalizeProject(raw: unknown): Project | null {
     rooms,
     characters,
     ...(hud.length ? { hud } : {}),
+    ...(panels.length ? { panels } : {}),
     ...(sounds.length ? { sounds } : {}),
     ...(marks.length ? { marks } : {}),
     look: {

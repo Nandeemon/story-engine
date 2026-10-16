@@ -45,6 +45,12 @@ In **Look**, under On-screen display, add a **Meter** (a bar, such as affection 
 - **Once:** a conversation can happen every time, or once, after which the thing cannot be clicked or is gone.
 - **When the player enters:** a room can start a conversation straight away, on every visit or only the first.
 
+## Interface panels
+
+Look › **Interface** builds the game's own interface. **+ Panel** offers a status bar, an inventory, a character card, a quest log, a button row or an empty panel; it lands in the picture, where you drag it, drag its corner to resize it (in percent, so it holds at any size) and click a block to change it. A panel is built from blocks: **Text** (with facts in braces, `{gold} gold`), **Number**, **Meter**, **Picture**, **Button** (runs a few lines of script, such as `Change hp = 10` or `Show panel Inventory`, while the player looks around), **Inventory list** (every `has.<item>` fact that is yes, with an icon you can add per item) and **Portrait**. Every block can show only if a story fact says so.
+
+When a panel shows: always, only in some rooms, only during conversations, or only while looking around, and under More, only if a story fact says so. The player can open and close it with a key (I for the inventory) and a small button, and conversations can with `Show panel Inventory` and `Hide panel Inventory` (also a step in the map). Panels take the dialogue box's look, or none, or a frame picture of your own whose corners stay sharp at any size. In Look every panel shows, the hidden ones see-through; the side panel says when each one shows.
+
 ## Paths you draw
 
 Pick a line, open **Stage** and press **Draw a path**, then draw with the mouse in the scene: the character moves along that line while the conversation goes on. Set how long it takes, whether it runs once, loops or goes back and forth, and a smooth or steady tempo. Click a dot on the path to change things as the character passes it: size, turning around, an effect (shake, bounce, pop…), how visible, or the look. Drag dots to adjust the line, and play it in the scene. In the script: `Path Mara over 4s back and forth: 30 98, 50 90 size 60 bounce, 70 98 flip`.

@@ -20,6 +20,8 @@ export interface Problem {
   inRoom?: boolean;
   /** An on-screen display item, shown in Look. */
   hud?: string;
+  /** An interface panel in Look. */
+  panel?: string;
   where: string;
   text: string;
 }
@@ -74,12 +76,22 @@ export function findProblems(p: Project): Problem[] {
       for (const mk of st.t === 'say' ? st.marks ?? [] : st.t === 'mark' && st.mark ? [st.mark] : []) {
         if (!findMark(p, mk)) out.push({ ...base, level: 'warning', path, text: `There is no mark called "${mk}". Add it under Marks on the Story map, or pick another.` });
       }
+      if (st.t === 'panel' && !(p.panels ?? []).some(x => x.name.toLowerCase() === st.name.trim().toLowerCase())) out.push({ ...base, level: 'warning', path, text: `There is no panel called "${st.name}". Make it under Look › Interface, or pick another.` });
       if (st.t === 'sound' && st.name && !sounds.has(st.name.toLowerCase())) out.push({ ...base, level: 'warning', path, text: `The sound "${st.name}" is not among your sounds. Add it under Pictures & sounds, or pick another.` });
       if (st.t === 'music' && st.track && !sounds.has(st.track.toLowerCase())) out.push({ ...base, level: 'warning', path, text: `The music "${st.track}" is not among your music. Add it under Pictures & sounds, or pick another.` });
     });
   }
   for (const w of p.hud ?? []) {
     if (!used.has(w.fact)) out.push({ level: 'warning', roomId: p.rooms[0]?.id ?? '', hud: w.id, where: 'Look › On-screen display', text: `"${w.text || w.fact}" shows the story fact "${w.fact}", but no conversation changes or checks it.` });
+  }
+  for (const pn of p.panels ?? []) {
+    const at = { roomId: p.rooms[0]?.id ?? '', panel: pn.id, where: `Look › Interface › ${pn.name}` };
+    for (const b of pn.blocks) {
+      if ((b.kind === 'number' || b.kind === 'meter') && !used.has(b.fact)) out.push({ ...at, level: 'warning', text: `"${b.label || b.fact}" shows the story fact "${b.fact}", but no conversation changes or checks it.` });
+      if (b.kind === 'button') { const e = parseScript(b.script).errors[0]; if (e) out.push({ ...at, level: 'error', text: `The button "${b.label}": line ${e.n} needs fixing. ${e.msg}` }); }
+    }
+    if (pn.when === 'rooms' && !pn.rooms?.length) out.push({ ...at, level: 'warning', text: 'It shows only in some rooms, but no room is ticked, so it never shows.' });
+    if (pn.startHidden && !pn.key && !pn.button && !p.rooms.some(r => r.els.some(e => new RegExp(`^\\s*show\\s+panel\\s+${pn.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`, 'im').test(e.script)))) out.push({ ...at, level: 'warning', text: 'It is hidden at the start, and neither the player nor any conversation can show it.' });
   }
   // Rooms with no way on: no Go to and no ending in anything there.
   if (p.rooms.length > 1) for (const room of p.rooms) {
@@ -101,6 +113,16 @@ export function findProblems(p: Project): Problem[] {
     });
   }
   for (const w of p.hud ?? []) tested.add(w.fact);
+  for (const pn of p.panels ?? []) {
+    if (pn.cond) tested.add(pn.cond.fact);
+    for (const b of pn.blocks) {
+      if (b.cond) tested.add(b.cond.fact);
+      if (b.kind === 'number' || b.kind === 'meter') tested.add(b.fact);
+      if (b.kind === 'text') for (const m of b.text.matchAll(/\{([\w.]+)\}/g)) tested.add(m[1]);
+      if (b.kind === 'list') for (const f of changed) if (f.toLowerCase().startsWith(b.prefix.toLowerCase())) tested.add(f);
+      if (b.kind === 'button') walkSteps(parseScript(b.script).steps, st => { if (st.t === 'change') st.effects.forEach(e => changed.add(e.fact)); if (st.t === 'if') tested.add(st.cond.fact); });
+    }
+  }
   for (const f of changed) if (!tested.has(f)) problemsOut.push({ level: 'note', roomId: p.rooms[0]?.id ?? '', where: 'Story facts', text: `"${f}" is changed, but nothing checks it with Only if, shows it, or puts it in a line, so it makes no difference yet.` });
   // A room that starts a conversation with something that may not be there.
   for (const room of p.rooms) {

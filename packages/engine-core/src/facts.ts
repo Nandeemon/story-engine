@@ -15,5 +15,7 @@ export function storyFactNames(p: Project): string[] {
     for (const c of elementConds(e)) set.add(c.fact);
   }
   for (const c of p.characters) for (const f of c.facts ?? []) set.add(f.fact);
+  // What panel buttons change or check.
+  for (const pn of p.panels ?? []) for (const b of pn.blocks) if (b.kind === 'button') summarize(parseScript(b.script).steps).facts.forEach(f => set.add(f));
   return [...set].sort();
 }

@@ -6,4 +6,6 @@ export type { Player, PlayerOptions, PlayState, SavedGame } from './player';
 export { startScene, roomScene, applyToScene, nextMoment, sceneHTML, staged, stagedAttrs, stagedKey, fxVars, present } from './scene';
 export type { Scene, StagedChar, Progress } from './scene';
 export { hudHTML } from './hud';
+export { panelsHTML } from './panels';
+export type { PanelDraw } from './panels';
 export { STARTER_MARKS, findMark, allMarks, markArt, markSpot, markHTML } from './marks';

@@ -5,7 +5,8 @@ import { musicSelect, soundRow, soundSelect } from './widgets';
 import type { Problem } from './problems';
 import type { StoryInfo } from './store';
 import type { Character, CompareOp, FactValue, Idle, Project, Room, Sound, StoryElement } from '@story-engine/engine-core';
-import { BACKDROPS, CHARACTERS, EXPRESSIONS, FONTS, OBJECTS, THEMES, allMarks, markArt, backdropHTML, characterSVG, choicesHTML, esc, hudHTML, sayHTML, stageHTML } from '@story-engine/runtime';
+import { BACKDROPS, CHARACTERS, EXPRESSIONS, FONTS, OBJECTS, THEMES, allMarks, markArt, backdropHTML, characterSVG, choicesHTML, esc, hudHTML, panelsHTML, sayHTML, stageHTML } from '@story-engine/runtime';
+import { panelSampleFacts, panelSection } from './panels';
 import type { Preset } from '@story-engine/runtime';
 
 export type View = 'home' | 'cast' | 'library' | 'map' | 'room' | 'convo' | 'look' | 'play' | 'check';
@@ -495,7 +496,9 @@ export function scriptStatus(p: Project, r: Room, script: string): { text: strin
 }
 
 /** The look stage, with the on-screen display drawn from test values or examples. */
-export function lookStage(p: Project, r: Room, hudSel: string | null, facts: Record<string, unknown>): string {
+export interface PanelSel { panel: string | null; block: string | null }
+
+export function lookStage(p: Project, r: Room, hudSel: string | null, facts: Record<string, unknown>, ps: PanelSel = { panel: null, block: null }): string {
   const L = p.look;
   const who = r.els.find(e => e.kind === 'char')?.name ?? p.characters[0]?.name ?? p.rooms.flatMap(x => x.els).find(e => e.kind === 'char')?.name ?? 'Someone';
   const box = (L.choices ?? 'box') === 'box';
@@ -505,7 +508,8 @@ export function lookStage(p: Project, r: Room, hudSel: string | null, facts: Rec
       + sayHTML(who, 'This is how a line of dialogue looks in your game.', false);
   const sample: Record<string, FactValue> = {};
   for (const w of p.hud ?? []) sample[w.fact] = (facts[w.fact] as FactValue | undefined) ?? (w.kind === 'meter' ? Math.round(w.max * 0.6) : 12);
-  return stageHTML(r, { mode: 'look', look: L, game: demo + hudHTML(p.hud, sample, { editable: true, selected: hudSel ?? undefined }), characters: p.characters });
+  const panels = p.panels?.length ? panelsHTML(p, panelSampleFacts(p, facts), { roomId: r.id, talking: false, edit: ps }) : '';
+  return stageHTML(r, { mode: 'look', look: L, game: demo + hudHTML(p.hud, sample, { editable: true, selected: hudSel ?? undefined }) + panels, characters: p.characters });
 }
 
 function hudSection(p: Project, hudSel: string | null): string {
@@ -522,8 +526,8 @@ function hudSection(p: Project, hudSel: string | null): string {
       <p class="hint">Drag it in the picture to place it. The picture shows an example value, or your test value when test values are on.</p>
       <button class="btn small danger" data-act="hud-remove" data-k="${esc(w.id)}">Remove</button></div>`;
   }).join('');
-  return `<div class="field">
-    <p class="hint">Show a story fact over the game all the time, such as affection as a meter or money as a number.</p>
+  return `<div class="field"><span>Single values</span>
+    <p class="hint">Show one story fact over the game all the time, such as affection as a meter or money as a number. For more, use a panel above.</p>
     ${storyFacts(p).length ? '' : '<p class="hint">Your story has no story facts yet. A conversation makes one with an answer like <code>"Thank you" affection + 1</code> or a line like <code>Change gold + 5</code>.</p>'}
     <div class="row"><button class="btn small" data-act="hud-add" data-k="meter">+ Meter</button><button class="btn small" data-act="hud-add" data-k="label">+ Number or word</button></div>
     <datalist id="hud-facts">${storyFacts(p).map(f => `<option value="${esc(f)}">`).join('')}</datalist>
@@ -540,7 +544,7 @@ function toHex(c: string): string {
   return '#' + m[1].split(',').slice(0, 3).map(x => Math.round(Number(x)).toString(16).padStart(2, '0')).join('');
 }
 
-export function viewLook(p: Project, r: Room, hudSel: string | null = null, facts: Record<string, unknown> = {}, tab: LookTab = 'style'): string {
+export function viewLook(p: Project, r: Room, hudSel: string | null = null, facts: Record<string, unknown> = {}, tab: LookTab = 'style', ps: PanelSel = { panel: null, block: null }): string {
   const L = p.look;
   const box = (L.choices ?? 'box') === 'box';
   const seg = (t: LookTab, label: string) => `<button role="tab" class="seg${tab === t ? ' on' : ''}" aria-selected="${tab === t}" data-act="look-tab" data-k="${t}">${label}</button>`;
@@ -569,10 +573,11 @@ export function viewLook(p: Project, r: Room, hudSel: string | null = null, fact
           <p class="hint">Small buttons in the corner of the game: go back a line, read earlier lines, change text speed and volume, and save.</p></div>
       </div></details>
       <p class="hint">Changes show in the picture as you make them, and apply to the whole game.</p>`;
-  const count = p.hud?.length ? ` (${p.hud.length})` : '';
-  return `<div class="work"><div id="lookstage">${lookStage(p, r, hudSel, facts)}</div><aside class="side"><h2>The look of your game</h2>
-      <div class="segs" role="tablist" aria-label="What to change">${seg('style', 'Style')}${seg('hud', `On-screen display${count}`)}</div>
-      ${tab === 'style' ? style : hudSection(p, hudSel)}
+  const n = (p.hud?.length ?? 0) + (p.panels?.length ?? 0);
+  const count = n ? ` (${n})` : '';
+  return `<div class="work"><div id="lookstage">${lookStage(p, r, hudSel, facts, ps)}</div><aside class="side"><h2>The look of your game</h2>
+      <div class="segs" role="tablist" aria-label="What to change">${seg('style', 'Style')}${seg('hud', `Interface${count}`)}</div>
+      ${tab === 'style' ? style : panelSection(p, ps.panel, ps.block) + (ps.panel ? '' : hudSection(p, hudSel))}
       <button class="btn block" data-act="crumb" data-k="room">Done</button></aside></div>`;
 }
 

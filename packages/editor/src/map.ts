@@ -100,7 +100,7 @@ let model: Model = { edges: [], jumps: [], parts: new Map() };
 let nextId = 0;
 
 const lower = (s: string) => s.trim().toLowerCase();
-const LINE_KINDS = new Set(['say', 'change', 'note', 'show', 'move', 'hide', 'music', 'sound', 'mark', 'loop', 'path', 'ask', 'camera']);
+const LINE_KINDS = new Set(['say', 'change', 'note', 'show', 'move', 'hide', 'music', 'sound', 'panel', 'mark', 'loop', 'path', 'ask', 'camera']);
 
 /* Boxes made smaller: all of them, with single boxes switched the other way. Kept while the editor is open. */
 let allSmall = false;
@@ -160,6 +160,7 @@ export function mapHTML(ctx: MapCtx): string {
     }
     if (s.t === 'ask') return `<button ${attrs}><span class="tag">Ask</span><span class="txt">${esc(s.prompt)} → <code>${esc(s.fact)}</code></span></button>`;
     if (s.t === 'camera') return `<button ${attrs}><span class="tag">Camera</span><span class="txt">${s.action === 'zoom' ? `zoom ×${s.scale ?? 1.5}` : esc(s.action)}</span></button>`;
+    if (s.t === 'panel') return `<button ${attrs}><span class="tag">Interface</span><span class="txt">${s.show ? 'Show' : 'Hide'} ${esc(s.name)}</span></button>`;
     if (s.t === 'sound') return `<button ${attrs}><span class="tag">${s.stop ? 'Stop' : 'Sound'}</span><span class="txt">${esc(soundText(s))}</span></button>`;
     if (s.t === 'music') return `<button ${attrs}><span class="tag">Music</span><span class="txt">${s.track ? `♫ ${esc(s.track)}${s.once ? ' (once)' : ''}` : 'Silence'}</span></button>`;
     if (s.t === 'change') return `<button ${attrs}><span class="tag">Change</span><span class="txt">${esc(s.effects.map(effectText).join(', '))}</span></button>`;
@@ -417,6 +418,7 @@ function stepLabel(s: Step): string {
     case 'change': return `change ${s.effects.map(effectText).join(', ')}`;
     case 'music': return s.track ? `music ${s.track}` : 'the music stops';
     case 'sound': return soundText(s).replace(/^♪ /, 'sound ');
+    case 'panel': return `${s.show ? 'show' : 'hide'} the ${s.name} panel`;
     case 'door': return `go to ${s.room}`;
     case 'ask': return `ask "${s.prompt}"`;
     case 'ending': return `ending: ${s.name}`;
@@ -602,6 +604,7 @@ const kinds = (top: boolean, hasParts: boolean) => [
   ['change', 'Change something', 'Change a story fact without saying anything'],
   ['music', 'Music', 'Start, change or stop the background music'],
   ['sound', 'Sound', 'Play a sound, or stop one sound or all of them'],
+  ['panel', 'Show or hide a panel', 'An inventory, a status bar or another panel from Look › Interface'],
   ['door', 'Go to another room', 'The player moves to another room'],
   ['ask', 'Ask the player', 'The player types an answer, such as their name, kept as a story fact'],
   ['camera', 'Camera', 'Zoom in on a spot, shake, flash, or back to the whole picture'],
@@ -761,6 +764,14 @@ export function mapSide(ctx: MapCtx): string {
         <label class="field"><span>Track</span>${musicSelect(ctx.project, 'm-music', 'data-map-in="music-track"', step.track, [['', 'Silence']])}</label>
         ${step.track ? `<div class="row"><label class="check"><input type="checkbox" id="m-music-once" data-map-in="music-once"${step.once ? ' checked' : ''}><span>Play once instead of looping</span></label></div>` : ''}
         ${del()}`;
+    case 'panel': {
+      const names = (ctx.project.panels ?? []).map(x => x.name);
+      if (!names.some(n => lower(n) === lower(step.name))) names.push(step.name);
+      return `${header(step.show ? 'Show a panel' : 'Hide a panel')}
+        <div class="row"><button class="btn small${step.show ? ' ink' : ' quiet'}" data-map-act="pnl-show" data-k="1" aria-pressed="${step.show}">Show</button><button class="btn small${step.show ? ' quiet' : ' ink'}" data-map-act="pnl-show" data-k="" aria-pressed="${!step.show}">Hide</button></div>
+        <label class="field"><span>Panel</span><select id="m-pnl" data-map-in="pnl-name">${names.map(n => `<option${lower(n) === lower(step.name) ? ' selected' : ''}>${esc(n)}</option>`).join('')}</select></label>
+        <p class="hint">${ctx.project.panels?.length ? 'It stays that way until another step, or the player, changes it.' : 'Your game has no panels yet. Make them under Look › Interface.'}</p>${del()}`;
+    }
     case 'sound': {
       const mode = !step.stop ? 'play' : step.name ? 'stop' : 'all';
       const pick = `<div class="row">${([['play', 'Play a sound'], ['stop', 'Stop a sound'], ['all', 'Stop all sounds']] as const).map(([k, n]) => `<button class="btn small${mode === k ? ' ink' : ' quiet'}" data-map-act="snd-mode" data-k="${k}" aria-pressed="${mode === k}">${n}</button>`).join('')}</div>`;
@@ -830,6 +841,7 @@ function newStep(kind: string, ctx: MapCtx, parts: string[]): Step {
     case 'if': return { t: 'if', cond: { fact: 'affection', op: '>=', value: 5 }, then: [], else: [] };
     case 'change': return { t: 'change', effects: [{ fact: 'affection', op: '+', value: 1 }] };
     case 'music': return { t: 'music', track: (ctx.project.sounds ?? []).find(x => x.music)?.name ?? '' };
+    case 'panel': return { t: 'panel', name: ctx.project.panels?.[0]?.name ?? 'Inventory', show: true };
     case 'sound': return { t: 'sound', name: (ctx.project.sounds ?? []).find(x => !x.music)?.name ?? '...' };
     case 'door': return { t: 'door', room: other.name };
     case 'ask': return { t: 'ask', prompt: 'What is your name?', fact: 'name' };
@@ -962,6 +974,12 @@ export function mapAction(ctx: MapCtx, act: string, k: string): MapResult | unde
       target.splice(at, 0, moved);
       const wasSel = ctx.sel === from;
       return commit(wasSel || !ctx.sel ? stepPathOf(list, at) : ctx.sel);
+    }
+    case 'pnl-show': {
+      const step = getStep(steps, path);
+      if (step?.t !== 'panel') return undefined;
+      step.show = !!k;
+      return commit(ctx.sel);
     }
     case 'snd-when': {
       const step = getStep(steps, path);
@@ -1186,6 +1204,8 @@ export function mapInput(ctx: MapCtx, field: string, k: string, value: string): 
       const n = Number(value);
       if (n === 3) delete step.move[key]; else step.move[key] = n;
     }
+  } else if (step.t === 'panel' && field === 'pnl-name') {
+    step.name = value;
   } else if (step.t === 'sound') {
     if (field === 'snd-name') { panel = true; step.name = value || '...'; }
     if (field === 'snd-loop') { if (value === 'true') step.loop = true; else delete step.loop; panel = true; }

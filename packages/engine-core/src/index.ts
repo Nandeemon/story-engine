@@ -8,5 +8,7 @@ export { getList, getStep, splitPath, stepPathOf, stepsBefore, walkWithPaths, un
 export { SPOTS, ENTER_EFFECTS, EXIT_EFFECTS, LINE_EFFECTS, FX_NORMAL, IDLE_MOVES, parseIdle, idleText, parsePathPoints, pathPointsText, pathAt, simplifyPath, isLineEffect, parseLineFx, lineFxText, parsePlace, placeText, snapToSpot } from './staging';
 export type { FxOptions, PathState } from './staging';
 export type { StepPath, ListPath } from './paths';
-export { renameRoomInScript, renameSpeakerInScript, renameLookInScript, renameSoundInScript, renameMarkInScript } from './refs';
+export { renameRoomInScript, renameSpeakerInScript, renameLookInScript, renameSoundInScript, renameMarkInScript, renamePanelInScript } from './refs';
 export { storyFactNames } from './facts';
+export { panelFactKey, cleanPanelName, panelVisible, panelRule, panelItems, newBlock, panelFromTemplate, PANEL_TEMPLATES } from './panels';
+export type { PanelContext, PanelTemplate } from './panels';

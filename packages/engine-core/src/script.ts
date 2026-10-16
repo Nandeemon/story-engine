@@ -171,6 +171,9 @@ function parse(src: string, noteSources: boolean): ParseResult {
         pos++;
         const track = m[2].trim();
         steps.push(mark(/^(off|none|stop|silence)$/i.test(track) ? { t: 'music', track: '' } : { t: 'music', track, ...(m[1] ? { once: true } : {}) }, l));
+      } else if ((m = l.text.match(/^(show|hide)\s+panel\s+(.+)$/i))) {
+        pos++;
+        steps.push(mark({ t: 'panel', name: m[2].trim(), show: /^show$/i.test(m[1]) }, l));
       } else if ((m = l.text.match(/^stop\s+(?:all\s+)?sounds(\s+and\s+music)?$/i))) {
         pos++;
         steps.push(mark({ t: 'sound', name: '', stop: true, ...(m[1] ? { music: true } : {}) }, l));
@@ -367,6 +370,7 @@ function headerOf(s: Step): string | null {
     case 'loop': return `Loop ${cleanName(s.who)} with ${idleText(s.move)}`;
     case 'path': return `Path ${cleanName(s.who)} over ${s.secs}s${s.repeat === 'loop' ? ' loop' : s.repeat === 'pingpong' ? ' back and forth' : ''}${s.ease === 'steady' ? ' steady' : ''}: ${pathPointsText(s.points)}`;
     case 'music': return s.track ? `Music${s.once ? ' once' : ''}: ${oneLine(s.track)}` : 'Music: off';
+    case 'panel': return `${s.show ? 'Show' : 'Hide'} panel ${cleanName(s.name) || 'Panel'}`;
     case 'sound':
       if (s.stop) return s.name ? `Stop sound: ${cleanName(s.name)}` : `Stop sounds${s.music ? ' and music' : ''}`;
       return `Sound: ${cleanName(s.name) || '...'}${s.loop ? ' (loops)' : ''}`;

@@ -1,7 +1,7 @@
 import '@story-engine/runtime/game.css';
 import './editor.css';
-import { areaPoints, elementConds, setAreaShape, factsToReach, startFacts, pathAt, simplifyPath, walkSteps, characterOf, cleanLookName, cleanMarkName, cleanSoundName, factName, renameMarkInScript, renameSoundInScript, toValue, createProject, createRoom, findLook, findRoomByName, newId, normalizeProject, parseScript, renameLookInScript, renameRoomInScript, renameSpeakerInScript, uniqueLookName, writeScript, getStep } from '@story-engine/engine-core';
-import type { Character, CharacterLook, FactDef, Facts, Idle, MarkDef, PathStep, Step, Project, Room, StoryElement } from '@story-engine/engine-core';
+import { areaPoints, elementConds, setAreaShape, cleanPanelName, newBlock, panelFromTemplate, renamePanelInScript, factsToReach, startFacts, pathAt, simplifyPath, walkSteps, characterOf, cleanLookName, cleanMarkName, cleanSoundName, factName, renameMarkInScript, renameSoundInScript, toValue, createProject, createRoom, findLook, findRoomByName, newId, normalizeProject, parseScript, renameLookInScript, renameRoomInScript, renameSpeakerInScript, uniqueLookName, writeScript, getStep } from '@story-engine/engine-core';
+import type { Condition, Panel, PanelBlock, PanelTemplate, Character, CharacterLook, FactDef, Facts, Idle, MarkDef, PathStep, Step, Project, Room, StoryElement } from '@story-engine/engine-core';
 import { BACKDROPS, CHARACTERS, OBJECTS, STARTER_MARKS, findMark, backdropHTML, createPlayer, elementArt, elementStyle, areaArt, esc, fxVars, lookStyle, sayHTML } from '@story-engine/runtime';
 import type { Player, PlayState } from '@story-engine/runtime';
 import { addStory, deleteStory, duplicateStory, listStories, loadStory, sampleProject, saveStory, whenSaved } from './store';
@@ -63,9 +63,14 @@ let lookTab: LookTab = 'style';
 /** The character open in the Characters view; null shows the list. */
 let castSel: string | null = null;
 const hudWidget = (id: string | undefined) => project.hud?.find(w => w.id === id);
+/** The interface panel, and the block in it, picked in Look. */
+let panelSel: string | null = null;
+let blockSel: string | null = null;
+const panelOf = (id: string | null) => project.panels?.find(x => x.id === id);
+const blockOf = () => panelOf(panelSel)?.blocks.find(b => b.id === blockSel);
 function refreshLookStage(): void {
   const host = $('#lookstage');
-  if (host) host.innerHTML = lookStage(project, room(), hudSel, testFacts() ?? {});
+  if (host) host.innerHTML = lookStage(project, room(), hudSel, testFacts() ?? {}, { panel: panelSel, block: blockSel });
 }
 /** Set when a conversation is opened, so the map opens on its start. */
 let freshConvo = false;
@@ -298,7 +303,7 @@ function renderView(): void {
       freshConvo = false;
       break;
     }
-    case 'look': main.innerHTML = viewLook(project, r, hudSel, testFacts() ?? {}, lookTab); break;
+    case 'look': main.innerHTML = viewLook(project, r, hudSel, testFacts() ?? {}, lookTab, { panel: panelSel, block: blockSel }); break;
     case 'play': main.innerHTML = viewPlay(); break;
     case 'check': main.innerHTML = viewCheck(project, problems, test); break;
   }
@@ -611,7 +616,7 @@ let lookReturn: { elId: string | null; mapSel: string | null } | null = null;
 let lookCompare: 'see-through' | 'difference' = 'see-through';
 
 /** Actions that never change the project, so they are not recorded for Undo. */
-const NOT_RECORDED = new Set(['area-shape', 'shape-undo', 'map-fold', 'map-fold-all', 'snd-try', 'voice-play', 'voice-upload', 'voice-rec', 'upload-video', 'area-cancel', 'door-cancel', 'edit-enter', 'library', 'win', 'path-draw', 'path-play', 'mark-add', 'music-add', 'cast-sound-add', 'sound-add', 'sound-play', 'cast', 'cast-open', 'cast-back', 'cast-new', 'cast-promote', 'cast-add-looks', 'cast-goto-room', 'cast-goto-convo', 'fx-try', 'scene-toggle', 'home', 'open-story', 'new-story', 'new-sample', 'import-story', 'duplicate-story', 'delete-story', 'test-off', 'look-tab', 'make-game', 'hud-sel', 'play-here', 'check', 'goto-problem', 'test-clear', 'once-lineup', 'look-compare', 'undo', 'redo', 'save-file', 'open-file', 'upload', 'play', 'play-convo', 'stop', 'convo-mode', 'look', 'crumb', 'add-looks', 'look-replace', 'once-picture', 'look-open', 'look-done']);
+const NOT_RECORDED = new Set(['panel-sel', 'pblock-sel', 'area-shape', 'shape-undo', 'map-fold', 'map-fold-all', 'snd-try', 'voice-play', 'voice-upload', 'voice-rec', 'upload-video', 'area-cancel', 'door-cancel', 'edit-enter', 'library', 'win', 'path-draw', 'path-play', 'mark-add', 'music-add', 'cast-sound-add', 'sound-add', 'sound-play', 'cast', 'cast-open', 'cast-back', 'cast-new', 'cast-promote', 'cast-add-looks', 'cast-goto-room', 'cast-goto-convo', 'fx-try', 'scene-toggle', 'home', 'open-story', 'new-story', 'new-sample', 'import-story', 'duplicate-story', 'delete-story', 'test-off', 'look-tab', 'make-game', 'hud-sel', 'play-here', 'check', 'goto-problem', 'test-clear', 'once-lineup', 'look-compare', 'undo', 'redo', 'save-file', 'open-file', 'upload', 'play', 'play-convo', 'stop', 'convo-mode', 'look', 'crumb', 'add-looks', 'look-replace', 'once-picture', 'look-open', 'look-done']);
 
 const actions: Record<string, (k: string) => void> = {
   crumb(k) {
@@ -922,7 +927,8 @@ const actions: Record<string, (k: string) => void> = {
   'goto-problem'(k) {
     const pr = problems[Number(k)];
     if (!pr) return;
-    if (pr.hud) { hudSel = pr.hud; lookTab = 'hud'; go('look'); return; }
+    if (pr.hud) { hudSel = pr.hud; lookTab = 'hud'; panelSel = null; go('look'); return; }
+    if (pr.panel) { panelSel = pr.panel; blockSel = null; lookTab = 'hud'; go('look'); return; }
     ui.roomId = pr.roomId;
     if (!pr.elId) { ui.sel = null; go('room'); return; }
     if (pr.inRoom) { ui.sel = pr.elId; go('room'); const more = $<HTMLDetailsElement>('#el-more'); if (more) more.open = true; return; }
@@ -949,6 +955,54 @@ const actions: Record<string, (k: string) => void> = {
     hudSel = w.id;
     save(); render();
   },
+  'panel-add'(k) {
+    const pn = panelFromTemplate(k as PanelTemplate, (project.panels ?? []).map(x => x.name), project.characters[0]?.id);
+    (project.panels ??= []).push(pn);
+    panelSel = pn.id; blockSel = null; lookTab = 'hud';
+    save(); render();
+  },
+  'panel-sel'(k) { panelSel = k || null; blockSel = null; hudSel = null; render(); },
+  'panel-remove'() { project.panels = (project.panels ?? []).filter(x => x.id !== panelSel); if (!project.panels.length) delete project.panels; panelSel = null; blockSel = null; save(); render(); },
+  'panel-copy'() {
+    const pn = panelOf(panelSel);
+    if (!pn) return;
+    const copy: Panel = JSON.parse(JSON.stringify(pn));
+    copy.id = newId();
+    copy.blocks.forEach(b => { b.id = newId(); });
+    let name = `${pn.name} copy`, i = 2;
+    while ((project.panels ?? []).some(x => x.name.toLowerCase() === name.toLowerCase())) name = `${pn.name} copy ${i++}`;
+    copy.name = name; copy.x = Math.min(90, pn.x + 3); copy.y = Math.min(90, pn.y + 3);
+    project.panels!.push(copy);
+    panelSel = copy.id; blockSel = null; save(); render();
+  },
+  'pblock-sel'(k) { blockSel = blockSel === k ? null : k; render(); },
+  'pblock-add'(k) {
+    const pn = panelOf(panelSel);
+    if (!pn) return;
+    if (k === 'image') { pickImageFile(img => { const b: PanelBlock = { id: newId(), kind: 'image', img }; pn.blocks.push(b); blockSel = b.id; save(); render(); }); return; }
+    const b = newBlock(k as PanelBlock['kind'], project.characters[0]?.id);
+    if (!b) return;
+    pn.blocks.push(b); blockSel = b.id; save(); render();
+  },
+  'pblock-move'(k) {
+    const pn = panelOf(panelSel);
+    const [bid, d] = k.split('|');
+    const i = pn ? pn.blocks.findIndex(b => b.id === bid) : -1, j = i + Number(d);
+    if (!pn || i < 0 || j < 0 || j >= pn.blocks.length) return;
+    [pn.blocks[i], pn.blocks[j]] = [pn.blocks[j], pn.blocks[i]];
+    save(); render();
+  },
+  'pblock-remove'(k) { const pn = panelOf(panelSel); if (!pn) return; pn.blocks = pn.blocks.filter(b => b.id !== k); if (blockSel === k) blockSel = null; save(); render(); },
+  'pn-layout'(k) { const pn = panelOf(panelSel); if (pn) { pn.layout = k === 'row' ? 'row' : 'column'; save(); render(); } },
+  'pn-style'(k) {
+    const pn = panelOf(panelSel);
+    if (!pn) return;
+    if (k === 'frame' && !pn.frame) { pickImageFile(img => { pn.frame = { img, slice: 30, width: 1.5 }; pn.style = 'frame'; save(); render(); }, 1024); return; }
+    pn.style = k === 'none' ? 'none' : k === 'frame' ? 'frame' : 'theme'; save(); render();
+  },
+  'pn-frame'() { const pn = panelOf(panelSel); if (pn) pickImageFile(img => { pn.frame = { img, slice: pn.frame?.slice ?? 30, width: pn.frame?.width ?? 1.5 }; pn.style = 'frame'; save(); render(); }, 1024); },
+  'pb-image'() { const b = blockOf(); if (b?.kind === 'image') pickImageFile(img => { b.img = img; save(); render(); }); },
+  'pb-icon'(k) { const b = blockOf(); if (b?.kind === 'list') pickImageFile(img => { b.icons = { ...(b.icons ?? {}), [k]: img }; save(); render(); }, 160); },
   'look-tab'(k) { lookTab = k === 'hud' ? 'hud' : 'style'; render(); },
   'hud-sel'(k) { hudSel = hudSel === k ? null : k; render(); },
   'hud-remove'(k) { project.hud = (project.hud ?? []).filter(w => w.id !== k); if (!project.hud.length) delete project.hud; hudSel = null; save(); render(); },
@@ -1397,6 +1451,116 @@ document.addEventListener('pointerup', () => {
   shapeDotDrag = null;
   if (!d) return;
   save(); record(d.before); render();
+});
+
+/* ---------- Interface panels: fields, and dragging them in the Look picture ---------- */
+
+/** Asks for a picture file and hands it over, scaled down (transparency kept). */
+function pickImageFile(done: (img: string) => void, max = 512): void {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/*';
+  input.addEventListener('change', async () => {
+    const f = input.files?.[0];
+    if (!f) return;
+    const before = snapshot();
+    try {
+      // GIFs and SVGs are kept as they are, so animations and sharp lines survive.
+      const img = /gif|svg/.test(f.type) && f.size < 600_000 ? await new Promise<string>(res => { const r = new FileReader(); r.onload = () => res(String(r.result)); r.readAsDataURL(f); }) : await readImage(f, max, 'image/webp');
+      done(img);
+      record(before);
+    } catch { toast('That file could not be read as a picture.'); }
+  });
+  input.click();
+}
+
+function panelCond(target: { cond?: Condition }, field: string, value: string): boolean {
+  if (field.endsWith('-on')) { if (value) target.cond = { fact: storyFacts(project)[0] ?? 'has.key', op: 'truthy', value: true }; else delete target.cond; return true; }
+  const c = target.cond;
+  if (!c) return false;
+  if (field.endsWith('-fact')) c.fact = value.trim().replace(/[^\w.]/g, '_') || 'fact';
+  if (field.endsWith('-val')) c.value = toValue(value);
+  if (field.endsWith('-op')) { c.op = value as Condition['op']; if (c.op === 'truthy') c.value = true; else if (typeof c.value === 'boolean') c.value = 1; return true; }
+  return false;
+}
+
+document.addEventListener('input', ev => {
+  const t = ev.target as HTMLInputElement;
+  const k = t.dataset.in ?? '';
+  if (!k.startsWith('pn-') && !k.startsWith('pb-')) return;
+  const pn = panelOf(panelSel);
+  if (!pn) return;
+  const b = blockOf();
+  const v = t.type === 'checkbox' ? (t.checked ? 'yes' : '') : t.value;
+  let redraw = false;
+  if (k.startsWith('pn-cond')) redraw = panelCond(pn, k, v);
+  else if (k.startsWith('pb-cond')) { if (b) redraw = panelCond(b, k, v); }
+  else switch (k) {
+    case 'pn-when': pn.when = v as Panel['when']; if (pn.when === 'rooms') pn.rooms ??= [room().id]; else delete pn.rooms; redraw = true; break;
+    case 'pn-room': { const set = new Set(pn.rooms ?? []); if (v) set.add(t.dataset.k!); else set.delete(t.dataset.k!); pn.rooms = [...set]; break; }
+    case 'pn-slice': if (pn.frame) pn.frame.slice = Number(v); break;
+    case 'pn-fwidth': if (pn.frame) pn.frame.width = Number(v); break;
+    case 'pn-button': if (v) pn.button = true; else delete pn.button; break;
+    case 'pn-hidden': if (v) pn.startHidden = true; else delete pn.startHidden; break;
+    case 'pn-key': { const key = v.trim().toLowerCase(); if (/^[a-z0-9]$/.test(key)) pn.key = key; else delete pn.key; break; }
+    case 'pb-text': if (b?.kind === 'text') b.text = v; break;
+    case 'pb-fact': if (b?.kind === 'number' || b?.kind === 'meter') b.fact = v.trim().replace(/[^\w.]/g, '_') || 'fact'; break;
+    case 'pb-label': if (b?.kind === 'number' || b?.kind === 'meter' || b?.kind === 'button') b.label = v; break;
+    case 'pb-max': if (b?.kind === 'meter') b.max = Math.max(1, Number(v) || 1); break;
+    case 'pb-script': if (b?.kind === 'button') b.script = t.value; break;
+    case 'pb-empty': if (b?.kind === 'list') { if (v.trim()) b.empty = v; else delete b.empty; } break;
+    case 'pb-prefix': if (b?.kind === 'list') b.prefix = v.trim().replace(/[^\w.]/g, '_') || 'has.'; break;
+    case 'pb-char': if (b?.kind === 'portrait') { b.characterId = v; delete b.look; redraw = true; } break;
+    case 'pb-look': if (b?.kind === 'portrait') { if (v) b.look = v; else delete b.look; } break;
+  }
+  save();
+  if (redraw) render(); else refreshLookStage();
+});
+/* A panel's new name is checked when the field is left, and conversations follow it. */
+document.addEventListener('change', ev => {
+  const t = ev.target as HTMLInputElement;
+  if (t.dataset.in !== 'pn-name') return;
+  const pn = panelOf(panelSel);
+  if (!pn) return;
+  const old = pn.name;
+  let name = cleanPanelName(t.value || old);
+  if ((project.panels ?? []).some(x => x !== pn && x.name.toLowerCase() === name.toLowerCase())) { toast(`There is already a panel called "${name}".`); name = old; }
+  pn.name = name;
+  let n = 0;
+  for (const r of project.rooms) for (const e of r.els) { const next = renamePanelInScript(e.script, old, name); if (next !== e.script) { e.script = next; n++; } }
+  if (n) toast(`Updated Show panel and Hide panel in ${n} conversation${n === 1 ? '' : 's'}`);
+  save(); render();
+});
+
+let panelDrag: { pn: Panel; box: DOMRect; x: number; y: number; px: number; py: number; pw: number; ph: number; resize: boolean; moved: boolean; before: string } | null = null;
+document.addEventListener('pointerdown', ev => {
+  const t = ev.target as HTMLElement;
+  const node = t.closest<HTMLElement>('#lookstage [data-panel]');
+  const stage = node?.closest<HTMLElement>('[data-stage]');
+  const pn = node ? panelOf(node.dataset.panel!) : undefined;
+  if (!node || !stage || !pn || ev.button !== 0) return;
+  const block = t.closest<HTMLElement>('[data-pblock]')?.dataset.pblock ?? null;
+  const resize = !!t.closest('[data-presize]');
+  if (panelSel !== pn.id || (block && block !== blockSel)) { panelSel = pn.id; hudSel = null; lookTab = 'hud'; if (block) blockSel = block; else if (panelSel !== pn.id) blockSel = null; render(); }
+  panelDrag = { pn, box: stage.getBoundingClientRect(), x: ev.clientX, y: ev.clientY, px: pn.x, py: pn.y, pw: pn.w, ph: pn.h, resize, moved: false, before: snapshot() };
+  ev.preventDefault();
+});
+document.addEventListener('pointermove', ev => {
+  const d = panelDrag;
+  if (!d) return;
+  const dx = (ev.clientX - d.x) / d.box.width * 100, dy = (ev.clientY - d.y) / d.box.height * 100;
+  if (!d.moved && Math.hypot(ev.clientX - d.x, ev.clientY - d.y) < 4) return;
+  d.moved = true;
+  const r1 = (n: number) => Math.round(n * 10) / 10;
+  if (d.resize) { d.pn.w = r1(Math.min(100, Math.max(4, d.pw + dx))); d.pn.h = r1(Math.min(100, Math.max(4, d.ph + dy))); }
+  else { d.pn.x = r1(Math.min(100 - d.pn.w + 5, Math.max(-5, d.px + dx))); d.pn.y = r1(Math.min(100 - d.pn.h + 5, Math.max(-5, d.py + dy))); }
+  const node = document.querySelector<HTMLElement>(`#lookstage [data-panel="${CSS.escape(d.pn.id)}"]`);
+  if (node) { node.style.left = `${d.pn.x}%`; node.style.top = `${d.pn.y}%`; node.style.width = `${d.pn.w}%`; node.style.height = `${d.pn.h}%`; }
+});
+document.addEventListener('pointerup', () => {
+  const d = panelDrag;
+  panelDrag = null;
+  if (d?.moved) { save(); record(d.before); }
 });
 
 /* ---------- Drawing paths ---------- */

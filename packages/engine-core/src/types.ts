@@ -102,11 +102,13 @@ export interface MusicStep { t: 'music'; track: string; once?: boolean }
  * music too, when music).
  */
 export interface SoundStep { t: 'sound'; name: string; loop?: boolean; stop?: boolean; music?: boolean }
+/** Show or hide one of the game's interface panels, by name. */
+export interface PanelStep { t: 'panel'; name: string; show: boolean }
 /** An author's note (a line starting with #). The player never sees it. */
 export interface NoteStep { t: 'note'; text: string }
 
 /** One step of a conversation. */
-export type Step = SayStep | ChoiceStep | IfStep | ChangeStep | DoorStep | EndStep | PartStep | JumpStep | NoteStep | ShowStep | MoveStep | HideStep | MusicStep | MarkStep | LoopStep | PathStep | AskStep | EndingStep | CameraStep | SoundStep;
+export type Step = SayStep | ChoiceStep | IfStep | ChangeStep | DoorStep | EndStep | PartStep | JumpStep | NoteStep | ShowStep | MoveStep | HideStep | MusicStep | MarkStep | LoopStep | PathStep | AskStep | EndingStep | CameraStep | SoundStep | PanelStep;
 export type StageStep = ShowStep | MoveStep | HideStep | MarkStep | LoopStep | PathStep | CameraStep;
 
 export interface ScriptError {
@@ -341,8 +343,58 @@ export interface Project {
   characters: Character[];
   /** The on-screen display. */
   hud?: HudWidget[];
+  /** Interface panels the author designed: status bars, an inventory, buttons. */
+  panels?: Panel[];
   /** Sounds the author uploaded. */
   sounds?: Sound[];
   /** Marks the author added, or starter marks they changed. */
   marks?: MarkDef[];
+}
+
+/* ---------- Interface panels ---------- */
+
+/** One part of a panel. Every kind can be shown only while a condition holds. */
+export type PanelBlock = { id: string; cond?: Condition } & (
+  /** Words, with story facts in braces: "{gold} gold". */
+  | { kind: 'text'; text: string }
+  /** A story fact's value, large, with a small label. */
+  | { kind: 'number'; fact: string; label: string }
+  /** A bar filled by a number fact. */
+  | { kind: 'meter'; fact: string; label: string; max: number }
+  /** A picture or icon. */
+  | { kind: 'image'; img: string }
+  /** A button that runs a few lines of script: changes, lines, Go to, Show panel. */
+  | { kind: 'button'; label: string; script: string }
+  /** Everything the player has: each "has.<item>" fact that is yes, as an icon or a tile. */
+  | { kind: 'list'; prefix: string; icons?: Record<string, string>; empty?: string }
+  /** A character's picture: their base picture, or a look. */
+  | { kind: 'portrait'; characterId: string; look?: string }
+);
+export type PanelBlockKind = PanelBlock['kind'];
+
+export interface Panel {
+  id: string;
+  /** The name conversations use: "Show panel Inventory". */
+  name: string;
+  /** Top-left corner, width and height in percent of the stage. */
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  /** Blocks stacked top to bottom, or side by side. */
+  layout: 'column' | 'row';
+  /** The dialogue box's look, no background, or an uploaded frame that stretches without distorting its corners. */
+  style: 'theme' | 'none' | 'frame';
+  frame?: { img: string; slice: number; width: number };
+  /** When it shows: always, in some rooms, only during conversations, or only while the player looks around. */
+  when: 'always' | 'rooms' | 'talk' | 'explore';
+  rooms?: string[];
+  /** And only while this holds. */
+  cond?: Condition;
+  /** Hidden until a conversation (or the player) shows it. */
+  startHidden?: boolean;
+  /** The player can show and hide it: with a key such as "i", and with a small button. */
+  key?: string;
+  button?: boolean;
+  blocks: PanelBlock[];
 }

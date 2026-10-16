@@ -543,3 +543,28 @@ input[type=range] { accent-color: var(--violet); }
 .areadraw .sdot { position: absolute; width: 12px; height: 12px; margin: -6px 0 0 -6px; border: 2px solid #fff; border-radius: 50%; background: var(--violet); pointer-events: none; }
 .areadraw .sdot.first { width: 18px; height: 18px; margin: -9px 0 0 -9px; background: var(--tape); }
 .field > .and { display: block; margin: 2px 0; color: var(--muted); font-size: 12px; text-transform: none; letter-spacing: 0; }
+
+/* Look › Interface: panels in the picture and their settings */
+#lookstage .panels { pointer-events: none; }
+#lookstage [data-panel] { pointer-events: auto; cursor: move; outline: 1.5px dashed rgba(255, 255, 255, .45); outline-offset: 1px; }
+#lookstage [data-panel].on { outline: 2.5px solid var(--tape); }
+#lookstage .panel.hiddennow { opacity: .45; }
+#lookstage .pb { cursor: pointer; border-radius: 4px; }
+#lookstage .pb:hover { box-shadow: 0 0 0 2px color-mix(in srgb, var(--tape) 60%, transparent); }
+#lookstage .pb.on { box-shadow: 0 0 0 2px var(--tape); }
+#lookstage .pb.off { opacity: .4; }
+#lookstage .pb-button { pointer-events: auto; }
+#lookstage .prz { position: absolute; right: 0; bottom: 0; width: 14px; height: 14px; border: 2px solid #fff; border-radius: 3px; background: var(--tape); cursor: nwse-resize; touch-action: none; }
+.mkinds.two { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.pbrow { display: flex; align-items: stretch; gap: 4px; }
+.pbrow > .hudrow { flex: 1 1 auto; min-width: 0; }
+.pbtools { display: flex; align-items: center; gap: 2px; }
+.pbtools .btn { min-width: 28px; padding: 3px 6px; }
+.iconrow { display: flex; align-items: center; gap: 8px; margin: 3px 0; }
+.iconrow img, .iconrow i { width: 28px; height: 28px; border-radius: 6px; background: var(--line); object-fit: contain; }
+.iconrow span { flex: 1; text-transform: none; letter-spacing: 0; font: 400 14px/1.3 var(--body); color: var(--ink); }
+.roomchecks { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 4px; }
+.keybox { gap: 6px; }
+.check.keybox input { flex: none; width: 3.2em; padding: 4px 6px; border: 1.5px solid var(--line); border-radius: 6px; text-align: center; text-transform: uppercase; }
+.addblocks { display: flex; flex-direction: row; flex-wrap: wrap; gap: 6px; }
+.only-you b { color: var(--ink); }

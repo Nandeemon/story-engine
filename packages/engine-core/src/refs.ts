@@ -68,6 +68,16 @@ export function renameSoundInScript(script: string, oldName: string, newName: st
   }).join('\n');
 }
 
+/** Points "Show panel <old>" and "Hide panel <old>" at the panel's new name. */
+export function renamePanelInScript(script: string, oldName: string, newName: string): string {
+  const from = lower(oldName), to = newName.trim();
+  if (!from || !to || from === lower(to)) return script;
+  return script.split('\n').map(line => {
+    const m = line.match(/^(\s*(?:show|hide)\s+panel\s+)(.+?)\s*$/i);
+    return m && lower(m[2]) === from ? `${m[1]}${to}` : line;
+  }).join('\n');
+}
+
 /** Points "(mark <old>)" on lines and "Mark … with <old>" steps at the new mark name; an empty new name takes the mark off lines. */
 export function renameMarkInScript(script: string, oldName: string, newName: string): string {
   const from = lower(oldName), to = newName.trim().toLowerCase().replace(/[():,"]/g, ' ').trim();

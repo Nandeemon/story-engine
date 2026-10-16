@@ -1,10 +1,11 @@
-import { createRunner, fillText, findLook, findRoomByName, parseScript, pathAt, startFacts, stepsBefore, talkedFact } from '@story-engine/engine-core';
+import { createRunner, fillText, panelFactKey, panelVisible, findLook, findRoomByName, parseScript, pathAt, startFacts, stepsBefore, talkedFact } from '@story-engine/engine-core';
 import type { AskEvent, ChoiceEvent, DoorStep, Facts, PathStep, Project, Room, RunMemory, Runner, RunnerPlace, SayStep, Step, StoryElement } from '@story-engine/engine-core';
 import { applyToScene, fxVars, nextMoment, present, roomScene, staged, stagedAttrs, stagedKey, startScene } from './scene';
 import type { Scene } from './scene';
 import { areaArt, areaClip, backdropHTML, choicesHTML, elementArt, elementStyle, lookStyle, sayHTML } from './stage';
 import { esc } from './art';
 import { hudHTML } from './hud';
+import { panelsHTML } from './panels';
 
 export interface PlayState {
   roomId: string;
@@ -267,7 +268,7 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
     }
 
     const hud = stage.querySelector<HTMLElement>('.hudlayer');
-    if (hud) hud.innerHTML = hudHTML(project.hud, s.facts);
+    if (hud) hud.innerHTML = hudHTML(project.hud, s.facts) + panelsHTML(project, s.facts, { roomId: s.roomId, talking: !!(s.scene || s.event) });
     const ev = s.event;
     const showHint = !ev && !s.scene && !talked && !ending && !!opts.hint && r.els.some(canTalk);
     game.innerHTML = !ev ? (showHint ? `<div class="gamehint">${esc(opts.hint!)}</div>` : '')
@@ -455,6 +456,7 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
     runner = createRunner(steps, s.facts, step => {
       if (step.t === 'music') playMusic(step.track, step.once);
       else if (step.t === 'sound') { if (!step.stop) playSound(step.name, step.loop); else { stopSound(step.name); if (step.music) stopMusic(); } }
+      else if (step.t === 'panel') s.facts[panelFactKey(step.name)] = step.show;
       else if (s.scene) applyToScene(s.scene, step, project); }, startAt, s.memory, el.id);
     advance();
   }
@@ -635,6 +637,10 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
     if (t.closest('[data-next]')) { if (skipTyping()) return; return advance(); }
     const p = t.closest<HTMLElement>('[data-pick]');
     if (p && s.event?.t === 'choice') { if (tooSoon()) return; return pick(Number(p.dataset.pick)); }
+    const toggle = t.closest<HTMLElement>('[data-ptoggle]');
+    if (toggle) return togglePanel(toggle.dataset.ptoggle!);
+    const btn = t.closest<HTMLElement>('[data-pbtn]');
+    if (btn) return pressPanelButton(btn.dataset.pbtn!);
     const elNode = t.closest<HTMLElement>('[data-el]');
     if (elNode) {
       const el = room().els.find(x => x.id === elNode.dataset.el);
@@ -647,11 +653,32 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
     if (e.deltaY < 0 && !overlay && history.length && menuOn) { e.preventDefault(); openOverlay('history'); }
   }
 
+  /* ---------- Interface panels the player opens, and their buttons ---------- */
+  function togglePanel(id: string): void {
+    const pn = project.panels?.find(x => x.id === id);
+    if (!pn) return;
+    const on = panelVisible(pn, { roomId: s.roomId, talking: !!(s.scene || s.event), facts: s.facts });
+    s.facts[panelFactKey(pn.name)] = !on;
+    render();
+  }
+  /** A panel button runs its few lines like a conversation of its own, while the room stays as it is. */
+  function pressPanelButton(id: string): void {
+    if (s.event || s.scene || ending) return;
+    for (const pn of project.panels ?? []) {
+      const b = pn.blocks.find(x => x.id === id);
+      if (b?.kind !== 'button' || !b.script.trim()) continue;
+      talk({ id: `panel:${b.id}`, kind: 'object', name: b.label, x: 0, y: 0, size: 0, staging: 'room', script: b.script });
+      return;
+    }
+  }
+
   function onKey(e: KeyboardEvent): void {
     const inField = !!(e.target as HTMLElement).closest('input, textarea, select');
     if (e.key === 'Escape' && (overlay || ending)) { if (ending) return; overlay = null; render(); return; }
     if (overlay || ending || inField) return;
     if (!host.isConnected) return;
+    const keyed = !e.ctrlKey && !e.metaKey && !e.altKey && e.key.length === 1 ? project.panels?.find(pn => pn.key === e.key.toLowerCase()) : undefined;
+    if (keyed) { e.preventDefault(); togglePanel(keyed.id); return; }
     // Number keys pick an answer.
     if (s.event?.t === 'choice' && /^[1-9]$/.test(e.key)) {
       const k = Number(e.key) - 1;
