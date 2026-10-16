@@ -1,8 +1,8 @@
 import '@story-engine/runtime/game.css';
 import './editor.css';
-import { factsToReach, startFacts, pathAt, simplifyPath, walkSteps, characterOf, cleanLookName, cleanMarkName, cleanSoundName, factName, renameMarkInScript, renameSoundInScript, toValue, createProject, createRoom, findLook, findRoomByName, newId, normalizeProject, parseScript, renameLookInScript, renameRoomInScript, renameSpeakerInScript, uniqueLookName, writeScript, getStep } from '@story-engine/engine-core';
+import { areaPoints, elementConds, setAreaShape, factsToReach, startFacts, pathAt, simplifyPath, walkSteps, characterOf, cleanLookName, cleanMarkName, cleanSoundName, factName, renameMarkInScript, renameSoundInScript, toValue, createProject, createRoom, findLook, findRoomByName, newId, normalizeProject, parseScript, renameLookInScript, renameRoomInScript, renameSpeakerInScript, uniqueLookName, writeScript, getStep } from '@story-engine/engine-core';
 import type { Character, CharacterLook, FactDef, Facts, Idle, MarkDef, PathStep, Step, Project, Room, StoryElement } from '@story-engine/engine-core';
-import { BACKDROPS, CHARACTERS, OBJECTS, STARTER_MARKS, findMark, backdropHTML, createPlayer, elementArt, esc, fxVars, lookStyle, sayHTML } from '@story-engine/runtime';
+import { BACKDROPS, CHARACTERS, OBJECTS, STARTER_MARKS, findMark, backdropHTML, createPlayer, elementArt, elementStyle, areaArt, esc, fxVars, lookStyle, sayHTML } from '@story-engine/runtime';
 import type { Player, PlayState } from '@story-engine/runtime';
 import { addStory, deleteStory, duplicateStory, listStories, loadStory, sampleProject, saveStory, whenSaved } from './store';
 import type { StoryInfo } from './store';
@@ -278,9 +278,13 @@ function renderView(): void {
     case 'room':
       main.innerHTML = viewRoom(project, ui, r, e);
       if (ui.drawArea) {
-        $('.stage.edit')?.insertAdjacentHTML('beforeend', '<div class="pendraw areadraw" data-areadraw><span>Drag a box over the door, window or sign</span><i class="abox"></i></div>');
+        const reshape = !!shapeFor;
+        $('.stage.edit')?.insertAdjacentHTML('beforeend', `<div class="pendraw areadraw" data-areadraw><span>${reshape ? 'Click around the shape, point by point' : 'Drag a box, or click point by point around a shape'}</span><i class="abox"></i><svg class="ashape" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"></svg></div>`);
         const side = $('aside.side');
-        if (side) side.innerHTML = '<h2>Draw a clickable area</h2><p class="hint">Hold the mouse down at one corner and drag to the other, over the part of the picture players should click.</p><button class="btn small quiet" data-act="area-cancel">Cancel</button>';
+        if (side) side.innerHTML = `<h2>${reshape ? 'Draw the shape' : 'Draw a clickable area'}</h2>
+          <p class="hint">${reshape ? '' : 'Hold the mouse down at one corner and drag to the other for a box. Or '}${reshape ? 'C' : 'c'}lick point by point around the part of the picture players should click, and click the first point again (or press Enter) to close it.</p>
+          <div class="row"><button class="btn small ink" data-act="shape-done" id="shape-done" disabled>Done</button><button class="btn small quiet" data-act="shape-undo" id="shape-undo" disabled>Undo last point</button><button class="btn small quiet" data-act="area-cancel">Cancel</button></div>`;
+        drawShapeLine();
       }
       break;
     case 'convo': {
@@ -607,7 +611,7 @@ let lookReturn: { elId: string | null; mapSel: string | null } | null = null;
 let lookCompare: 'see-through' | 'difference' = 'see-through';
 
 /** Actions that never change the project, so they are not recorded for Undo. */
-const NOT_RECORDED = new Set(['map-fold', 'map-fold-all', 'snd-try', 'voice-play', 'voice-upload', 'voice-rec', 'upload-video', 'area-cancel', 'door-cancel', 'edit-enter', 'library', 'win', 'path-draw', 'path-play', 'mark-add', 'music-add', 'cast-sound-add', 'sound-add', 'sound-play', 'cast', 'cast-open', 'cast-back', 'cast-new', 'cast-promote', 'cast-add-looks', 'cast-goto-room', 'cast-goto-convo', 'fx-try', 'scene-toggle', 'home', 'open-story', 'new-story', 'new-sample', 'import-story', 'duplicate-story', 'delete-story', 'test-off', 'look-tab', 'make-game', 'hud-sel', 'play-here', 'check', 'goto-problem', 'test-clear', 'once-lineup', 'look-compare', 'undo', 'redo', 'save-file', 'open-file', 'upload', 'play', 'play-convo', 'stop', 'convo-mode', 'look', 'crumb', 'add-looks', 'look-replace', 'once-picture', 'look-open', 'look-done']);
+const NOT_RECORDED = new Set(['area-shape', 'shape-undo', 'map-fold', 'map-fold-all', 'snd-try', 'voice-play', 'voice-upload', 'voice-rec', 'upload-video', 'area-cancel', 'door-cancel', 'edit-enter', 'library', 'win', 'path-draw', 'path-play', 'mark-add', 'music-add', 'cast-sound-add', 'sound-add', 'sound-play', 'cast', 'cast-open', 'cast-back', 'cast-new', 'cast-promote', 'cast-add-looks', 'cast-goto-room', 'cast-goto-convo', 'fx-try', 'scene-toggle', 'home', 'open-story', 'new-story', 'new-sample', 'import-story', 'duplicate-story', 'delete-story', 'test-off', 'look-tab', 'make-game', 'hud-sel', 'play-here', 'check', 'goto-problem', 'test-clear', 'once-lineup', 'look-compare', 'undo', 'redo', 'save-file', 'open-file', 'upload', 'play', 'play-convo', 'stop', 'convo-mode', 'look', 'crumb', 'add-looks', 'look-replace', 'once-picture', 'look-open', 'look-done']);
 
 const actions: Record<string, (k: string) => void> = {
   crumb(k) {
@@ -802,8 +806,22 @@ const actions: Record<string, (k: string) => void> = {
   'map-fold-all'() { toggleFoldAll(); refreshMap(); },
   'snd-try'(k) { previewSound(k, true); },
   'scene-toggle'() { sceneOpen = !sceneOpen; try { localStorage.setItem(SCENE_KEY, sceneOpen ? 'yes' : 'no'); } catch { /* this session */ } refreshMap(); },
-  'add-area'() { ui.adding = null; ui.sel = null; ui.drawArea = true; render(); },
-  'area-cancel'() { ui.drawArea = false; render(); },
+  'cond-add'() { const e = selected(); if (!e?.cond) return; e.andConds = [...(e.andConds ?? []), { fact: e.cond.fact, op: '>=', value: 1 }]; save(); render(); },
+  'cond-remove'(k) {
+    const e = selected();
+    if (!e?.cond) return;
+    const all = elementConds(e).filter((_, i) => i !== Number(k));
+    e.cond = all[0];
+    if (all.length > 1) e.andConds = all.slice(1); else delete e.andConds;
+    if (!e.cond) delete e.cond;
+    save(); render();
+  },
+  'area-shape'() { const e = selected(); if (e?.kind !== 'area') return; shapeFor = e.id; shapePts = []; ui.drawArea = true; render(); },
+  'area-box'() { const e = selected(); if (!e) return; delete e.shape; save(); render(); },
+  'shape-done'() { finishShape(); },
+  'shape-undo'() { shapePts.pop(); drawShapeLine(); },
+  'add-area'() { ui.adding = null; ui.sel = null; ui.drawArea = true; shapeFor = null; shapePts = []; render(); },
+  'area-cancel'() { ui.drawArea = false; shapeFor = null; shapePts = []; render(); },
   'door-new'() {
     const e = selected(), input = $<HTMLInputElement>('#new-room-name');
     if (!e || !input) return;
@@ -1288,6 +1306,15 @@ document.addEventListener('pointerup', () => {
   areaDrag = null;
   if (!d) return;
   const w = Math.abs(d.x1 - d.x0), h = Math.abs(d.y1 - d.y0);
+  // A click (or any press once points are started) adds a point to the outline.
+  if (shapePts.length || shapeFor || (w < 1.5 && h < 1.5)) {
+    d.el.style.display = 'none';
+    const first = shapePts[0];
+    if (first && shapePts.length >= 3 && Math.hypot((d.x0 - first.x) * 16 / 9, d.y0 - first.y) < 2.5) return finishShape();
+    shapePts.push({ x: Math.round(d.x0 * 10) / 10, y: Math.round(d.y0 * 10) / 10 });
+    drawShapeLine();
+    return;
+  }
   if (w < 2 || h < 2) { toast('Drag a little further to make the box.'); return; }
   const r1 = (n: number) => Math.round(n * 10) / 10;
   const left = Math.min(d.x0, d.x1), bottom = Math.max(d.y0, d.y1);
@@ -1296,6 +1323,80 @@ document.addEventListener('pointerup', () => {
   const before = snapshot();
   place({ id: newId(), kind: 'area', name: n === 1 ? 'Clickable area' : `Clickable area ${n}`, x: r1(left + w / 2), y: r1(bottom), size: r1(h), w: r1(w), script: '' });
   record(before);
+});
+
+/* An outline drawn point by point: for a new area, or a new shape for the selected one. */
+let shapePts: { x: number; y: number }[] = [];
+let shapeFor: string | null = null;
+let shapeHover: { x: number; y: number } | null = null;
+function drawShapeLine(): void {
+  const svg = document.querySelector<SVGElement>('.areadraw .ashape');
+  if (svg) {
+    const pts = shapePts.map(p => `${p.x},${p.y}`).join(' ');
+    const live = shapeHover && shapePts.length ? `<polyline class="live" points="${shapePts[shapePts.length - 1].x},${shapePts[shapePts.length - 1].y} ${shapeHover.x},${shapeHover.y}"/>` : '';
+    svg.innerHTML = `${shapePts.length >= 3 ? `<polygon points="${pts}"/>` : `<polyline points="${pts}"/>`}${live}`;
+    const host = svg.parentElement!;
+    host.querySelectorAll('.sdot').forEach(n => n.remove());
+    host.insertAdjacentHTML('beforeend', shapePts.map((p, i) => `<i class="sdot${i === 0 && shapePts.length >= 3 ? ' first' : ''}" style="left:${p.x}%;top:${p.y}%"></i>`).join(''));
+  }
+  const done = $<HTMLButtonElement>('#shape-done'), undo = $<HTMLButtonElement>('#shape-undo');
+  if (done) done.disabled = shapePts.length < 3;
+  if (undo) undo.disabled = !shapePts.length;
+}
+document.addEventListener('pointermove', ev => {
+  const host = (ev.target as HTMLElement).closest<HTMLElement>('[data-areadraw]');
+  if (!host || !shapePts.length || areaDrag) return;
+  shapeHover = toStage(host.getBoundingClientRect(), ev);
+  drawShapeLine();
+});
+function finishShape(): void {
+  if (shapePts.length < 3) return;
+  const before = snapshot();
+  const pts = shapePts;
+  const target = shapeFor ? room().els.find(x => x.id === shapeFor) : undefined;
+  shapePts = []; shapeFor = null; shapeHover = null; ui.drawArea = false;
+  if (target) { setAreaShape(target, pts); save(); render(); }
+  else {
+    const n = room().els.filter(x => x.kind === 'area' && !x.offstage).length + 1;
+    const e: StoryElement = { id: newId(), kind: 'area', name: n === 1 ? 'Clickable area' : `Clickable area ${n}`, x: 50, y: 50, size: 10, w: 10, script: '' };
+    setAreaShape(e, pts);
+    place(e);
+  }
+  record(before);
+}
+document.addEventListener('keydown', ev => {
+  if (!ui.drawArea || !shapePts.length || (ev.target as HTMLElement).closest('input, textarea, select')) return;
+  if (ev.key === 'Enter') { ev.preventDefault(); finishShape(); }
+  if (ev.key === 'Backspace') { ev.preventDefault(); shapePts.pop(); drawShapeLine(); }
+});
+
+/* Dragging a dot of the selected area's outline. */
+let shapeDotDrag: { e: StoryElement; i: number; pts: { x: number; y: number }[]; box: DOMRect; node: HTMLElement; before: string } | null = null;
+document.addEventListener('pointerdown', ev => {
+  const dot = (ev.target as HTMLElement).closest<HTMLElement>('.stage.edit .adot');
+  const node = dot?.closest<HTMLElement>('.el');
+  const stage = dot?.closest<HTMLElement>('.stage');
+  const e = node && room().els.find(x => x.id === node.dataset.el);
+  const pts = e && areaPoints(e);
+  if (!dot || !node || !stage || !e || !pts || ev.button !== 0) return;
+  shapeDotDrag = { e, i: Number(dot.dataset.adot), pts, box: stage.getBoundingClientRect(), node, before: snapshot() };
+  try { dot.setPointerCapture(ev.pointerId); } catch { /* not supported */ }
+  ev.preventDefault();
+  ev.stopPropagation();
+}, true);
+document.addEventListener('pointermove', ev => {
+  const d = shapeDotDrag;
+  if (!d) return;
+  d.pts[d.i] = toStage(d.box, ev);
+  setAreaShape(d.e, d.pts);
+  d.node.style.cssText = elementStyle(d.e);
+  d.node.querySelector('.areabox')?.replaceWith(document.createRange().createContextualFragment(areaArt(d.e, true, true)));
+});
+document.addEventListener('pointerup', () => {
+  const d = shapeDotDrag;
+  shapeDotDrag = null;
+  if (!d) return;
+  save(); record(d.before); render();
 });
 
 /* ---------- Drawing paths ---------- */
@@ -1821,10 +1922,16 @@ document.addEventListener('input', ev => {
       save(); render(); toast(`${c.name} is now in ${r.name}.`); return;
     }
     case 'el-w': if (e) { e.w = Number(t.value); if (node) node.style.width = `${e.w}%`; } break;
-    case 'el-cond-on': if (e) { if (t.value) e.cond = { fact: storyFacts(project)[0] ?? 'met', op: '>=', value: 1 }; else delete e.cond; save(); render(); } return;
-    case 'el-cond-fact': if (e?.cond) e.cond.fact = t.value.trim().replace(/[^\w.]/g, '_') || 'fact'; break;
-    case 'el-cond-op': if (e?.cond) { e.cond.op = t.value as typeof e.cond.op; if (e.cond.op === 'truthy') e.cond.value = true; else if (typeof e.cond.value === 'boolean') e.cond.value = 1; save(); render(); } return;
-    case 'el-cond-val': if (e?.cond) e.cond.value = toValue(t.value); break;
+    case 'el-cond-on': if (e) { if (t.value) e.cond = { fact: storyFacts(project)[0] ?? 'met', op: '>=', value: 1 }; else { delete e.cond; delete e.andConds; } save(); render(); } return;
+    case 'el-cond-fact': case 'el-cond-op': case 'el-cond-val': {
+      const c = e ? elementConds(e)[Number(t.dataset.k ?? 0)] : undefined;
+      if (!c) break;
+      if (t.dataset.in === 'el-cond-fact') c.fact = t.value.trim().replace(/[^\w.]/g, '_') || 'fact';
+      if (t.dataset.in === 'el-cond-val') c.value = toValue(t.value);
+      if (t.dataset.in === 'el-cond-op') { c.op = t.value as typeof c.op; if (c.op === 'truthy') c.value = true; else if (typeof c.value === 'boolean') c.value = 1; save(); render(); return; }
+      break;
+    }
+    case 'el-hover': if (e) { if (t.value.trim()) e.hover = t.value.slice(0, 120); else delete e.hover; } break;
     case 'el-once': if (e) { if (t.value === 'stay' || t.value === 'hide') e.once = t.value; else delete e.once; } break;
     case 'el-sound': {
       if (!e) break;

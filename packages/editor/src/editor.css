@@ -341,7 +341,8 @@ input[type=color] { width: 44px; height: 32px; padding: 2px; border: 1.5px solid
 .thumb .pic.areapic { display: grid; place-items: center; background: #3a3350; }
 .thumb .pic.areapic .areabox { position: relative; width: 46%; height: 62%; border: 2px dashed rgba(255, 255, 255, .85); border-radius: 6px; background: rgba(255, 210, 80, .16); }
 .thumb .pic.areapic .areabox b { position: absolute; left: 4px; top: 3px; color: #fff; font-size: 10px; }
-.condrow { display: grid; grid-template-columns: 1.2fr 1.3fr .8fr; gap: 6px; }
+.condrow { display: flex; align-items: center; gap: 6px; }
+.condrow > input[list] { flex: 1.2 1 0; } .condrow > select { flex: 1.3 1 0; } .condrow > input:not([list]) { flex: .8 1 0; } .condrow > .btn { flex: none; }
 .condrow input, .condrow select { width: 100%; min-width: 0; padding: 7px 8px; border: 1.5px solid var(--line); border-radius: 8px; background: var(--surface); }
 
 /* The scene above the conversation map */
@@ -528,3 +529,17 @@ input[type=range] { accent-color: var(--violet); }
 .markpic { background: #8f88ab; }
 .mpreview [data-mark]::before { content: ''; position: absolute; inset: -12%; }
 .mrow .mini-tag { margin-left: 4px; padding: 0 5px; border-radius: 4px; background: var(--line); color: var(--muted); font-size: 11px; }
+
+/* Areas with an outline drawn point by point */
+.stage .el.area .areabox.shaped { border: 0; background: none; box-shadow: none; }
+.areabox.shaped svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+.areabox.shaped polygon { fill: rgba(255, 210, 80, .16); stroke: rgba(255, 255, 255, .9); stroke-width: 2px; stroke-dasharray: 6 4; vector-effect: non-scaling-stroke; }
+.stage.edit .el.area.sel .areabox.shaped polygon { fill: rgba(255, 210, 80, .28); stroke: var(--tape); }
+.areabox .adot { position: absolute; width: 14px; height: 14px; margin: -7px 0 0 -7px; border: 2px solid #fff; border-radius: 50%; background: var(--tape); box-shadow: 0 0 0 1px rgba(0, 0, 0, .4); cursor: grab; touch-action: none; }
+.stage .areadraw .ashape { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+.areadraw .ashape polyline, .areadraw .ashape polygon { fill: rgba(255, 210, 80, .2); stroke: #fff; stroke-width: 2px; vector-effect: non-scaling-stroke; }
+.areadraw .ashape polyline { fill: none; }
+.areadraw .ashape .live { stroke-dasharray: 5 4; opacity: .8; }
+.areadraw .sdot { position: absolute; width: 12px; height: 12px; margin: -6px 0 0 -6px; border: 2px solid #fff; border-radius: 50%; background: var(--violet); pointer-events: none; }
+.areadraw .sdot.first { width: 18px; height: 18px; margin: -9px 0 0 -9px; background: var(--tape); }
+.field > .and { display: block; margin: 2px 0; color: var(--muted); font-size: 12px; text-transform: none; letter-spacing: 0; }

@@ -128,6 +128,9 @@ export function normalizeProject(raw: unknown): Project | null {
       ...(e.kind === 'char' && normalizeIdle(e.idle) ? { idle: normalizeIdle(e.idle) } : {}),
       ...(e.offstage === true ? { offstage: true } : {}),
       ...(normalizeCondition(e.cond) ? { cond: normalizeCondition(e.cond) } : {}),
+      ...(normalizeCondition(e.cond) && Array.isArray(e.andConds) && e.andConds.some(normalizeCondition) ? { andConds: (e.andConds as unknown[]).map(normalizeCondition).filter((c): c is Condition => !!c) } : {}),
+      ...(typeof e.hover === 'string' && e.hover.trim() ? { hover: e.hover.slice(0, 120) } : {}),
+      ...(e.kind === 'area' && Array.isArray(e.shape) && e.shape.length >= 3 ? { shape: (e.shape as Record<string, unknown>[]).filter(p => p && typeof p === 'object').map(p => ({ x: clamp(num(p.x, 0), 0, 100), y: clamp(num(p.y, 0), 0, 100) })) } : {}),
       ...(e.once === 'stay' || e.once === 'hide' ? { once: e.once } : {}),
       ...(typeof e.sound === 'string' && e.sound ? { sound: e.sound } : {}),
       expr: typeof e.expr === 'string' ? e.expr : undefined,
@@ -233,6 +236,28 @@ export function normalizeProject(raw: unknown): Project | null {
 
 /** The name a line uses for a character's base picture. */
 export const DEFAULT_LOOK_NAME = 'default';
+
+/** All the conditions on a room thing: it is there (or clickable) only while every one holds. */
+export function elementConds(e: StoryElement): Condition[] {
+  return e.cond ? [e.cond, ...(e.andConds ?? [])] : [];
+}
+
+/** An area's outline in percent of the stage, or null for a plain box. */
+export function areaPoints(e: StoryElement): { x: number; y: number }[] | null {
+  if (e.kind !== 'area' || !e.shape || e.shape.length < 3) return null;
+  const w = e.w ?? 20, left = e.x - w / 2, top = e.y - e.size;
+  return e.shape.map(p => ({ x: left + p.x / 100 * w, y: top + p.y / 100 * e.size }));
+}
+
+/** Gives an area an outline from points on the stage: its box becomes the box around them. */
+export function setAreaShape(e: StoryElement, pts: { x: number; y: number }[]): void {
+  const r1 = (n: number) => Math.round(n * 10) / 10;
+  const xs = pts.map(p => Math.min(100, Math.max(0, p.x))), ys = pts.map(p => Math.min(100, Math.max(0, p.y)));
+  const l = Math.min(...xs), r = Math.max(...xs), t = Math.min(...ys), b = Math.max(...ys);
+  const w = Math.max(1, r - l), h = Math.max(1, b - t);
+  e.x = r1(l + w / 2); e.y = r1(b); e.w = r1(w); e.size = r1(h);
+  e.shape = xs.map((x, i) => ({ x: r1((x - l) / w * 100), y: r1((ys[i] - t) / h * 100) }));
+}
 
 /** Sound names sit inside "(sound laugh)" in the script, so they cannot hold ( ) : , or quotes. */
 export function cleanSoundName(name: string): string {

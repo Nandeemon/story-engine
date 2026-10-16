@@ -1,4 +1,4 @@
-import { CONDITION_WORDS, IDLE_MOVES, characterOf, findRoomByName, parseScript, summarize, valueText, walkSteps } from '@story-engine/engine-core';
+import { CONDITION_WORDS, IDLE_MOVES, characterOf, elementConds, findRoomByName, parseScript, summarize, valueText, walkSteps } from '@story-engine/engine-core';
 import { missingLook, unknownSpeaker } from './map';
 import { factKind, storyFacts } from './problems';
 import { musicSelect, soundRow, soundSelect } from './widgets';
@@ -226,15 +226,28 @@ export function idleField(id: string, idle: Idle | undefined, unsetLabel: string
 const OPS: [CompareOp, string][] = [...CONDITION_WORDS.map(([w, op]) => [op, w] as [CompareOp, string]), ['truthy', 'is yes']];
 
 /** Settings every room thing shares, under More: when it is there, how often it talks, its sound. */
-function moreFields(p: Project, e: StoryElement): string {
-  const c = e.cond;
-  const cond = `<div class="field"><span>In the room</span>
-      <select id="el-cond-on" data-in="el-cond-on"><option value=""${c ? '' : ' selected'}>Always</option><option value="on"${c ? ' selected' : ''}>Only if a story fact says so</option></select>
-      ${c ? `<div class="condrow"><input type="text" list="el-facts" id="el-cond-fact" data-in="el-cond-fact" value="${esc(c.fact)}" aria-label="Story fact">
-        <select id="el-cond-op" data-in="el-cond-op" aria-label="Test">${OPS.map(([op, w]) => `<option value="${op}"${op === c.op ? ' selected' : ''}>${w}</option>`).join('')}</select>
-        ${c.op === 'truthy' ? '' : `<input type="text" id="el-cond-val" data-in="el-cond-val" value="${esc(valueText(c.value))}" aria-label="Value">`}</div>
+/** When a room thing is there (or, for an area, can be clicked): always, or only while every condition holds. */
+function condsField(p: Project, e: StoryElement): string {
+  const all = elementConds(e);
+  const area = e.kind === 'area';
+  const rows = all.map((c, i) => `${i ? '<span class="and">and</span>' : ''}<div class="condrow"><input type="text" list="el-facts" id="el-cond-fact-${i}" data-in="el-cond-fact" data-k="${i}" value="${esc(c.fact)}" aria-label="Story fact">
+        <select id="el-cond-op-${i}" data-in="el-cond-op" data-k="${i}" aria-label="Test">${OPS.map(([op, w]) => `<option value="${op}"${op === c.op ? ' selected' : ''}>${w}</option>`).join('')}</select>
+        ${c.op === 'truthy' ? '' : `<input type="text" id="el-cond-val-${i}" data-in="el-cond-val" data-k="${i}" value="${esc(valueText(c.value))}" aria-label="Value">`}
+        ${all.length > 1 ? `<button class="btn small quiet" data-act="cond-remove" data-k="${i}" aria-label="Remove this condition">✕</button>` : ''}</div>`).join('');
+  return `<div class="field"><span>${area ? 'Clickable' : 'In the room'}</span>
+      <select id="el-cond-on" data-in="el-cond-on"><option value=""${all.length ? '' : ' selected'}>Always</option><option value="on"${all.length ? ' selected' : ''}>Only if…</option></select>
+      ${all.length ? `${rows}<button class="btn small quiet" data-act="cond-add">+ And another</button>
         <datalist id="el-facts">${storyFacts(p).map(f => `<option value="${esc(f)}">`).join('')}</datalist>
-        <p class="hint">${esc(e.name)} is only in the room while this is true, so a conversation can bring ${e.kind === 'char' ? 'them' : 'it'} in with a Change.</p>` : ''}</div>`;
+        <p class="hint">${area ? `The area can only be clicked while ${all.length > 1 ? 'all of these are' : 'this is'} true. To do different things depending on story facts, use Only if in what happens on click.` : `${esc(e.name)} is only in the room while ${all.length > 1 ? 'all of these are' : 'this is'} true, so a conversation can bring ${e.kind === 'char' ? 'them' : 'it'} in with a Change.`}</p>` : ''}</div>`;
+}
+
+/** Text by the mouse pointer while the player holds it over something clickable. */
+function hoverField(e: StoryElement): string {
+  return `<label class="field"><span>Text by the mouse</span><input type="text" id="el-hover" data-in="el-hover" value="${esc(e.hover ?? '')}" placeholder="For example: Kitchen door" maxlength="120"></label>`;
+}
+
+function moreFields(p: Project, e: StoryElement): string {
+  const cond = (e.kind === 'area' ? '' : hoverField(e) + condsField(p, e));
   const once = e.script.trim() ? `<label class="field"><span>How often it can be clicked</span><select id="el-once" data-in="el-once">
       <option value=""${e.once ? '' : ' selected'}>Every time</option>
       <option value="stay"${e.once === 'stay' ? ' selected' : ''}>Once, then it stays but cannot be clicked</option>
@@ -266,8 +279,12 @@ function areaPanel(p: Project, r: Room, e: StoryElement, naming = false): string
   return `<h2>${esc(e.name)}</h2>
     <button class="btn${simple ? '' : ' play'} block" data-act="convo">${e.script.trim() ? 'Edit what happens on click' : 'Make it say or do something'}</button>
     ${leads}
-    <label class="field"><span>Name (only you see it)</span><input type="text" id="el-name" data-in="el-name" value="${esc(e.name)}"></label>
+    ${hoverField(e)}
+    ${condsField(p, e)}
+    <div class="field"><span>Shape</span><div class="row">${e.shape ? '<button class="btn small" data-act="area-shape">Draw it again</button><button class="btn small quiet" data-act="area-box">Make it a box</button>' : '<button class="btn small" data-act="area-shape">✎ Draw the shape</button>'}</div>
+      <p class="hint">${e.shape ? 'Drag a dot in the picture to change the outline.' : 'Click around the part of the picture to make the area that exact shape.'}</p></div>
     <details class="more" id="el-more"><summary>More</summary><div>
+      <label class="field"><span>Name (only you see it)</span><input type="text" id="el-name" data-in="el-name" value="${esc(e.name)}"></label>
       <label class="field"><span>Width</span><input type="range" id="el-w" data-in="el-w" min="2" max="100" value="${e.w ?? 20}"></label>
       <label class="field"><span>Height</span><input type="range" id="el-size" data-in="el-size" min="2" max="110" value="${e.size}"></label>
       ${moreFields(p, e)}

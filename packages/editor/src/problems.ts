@@ -2,7 +2,7 @@
  * Checking the whole story: every problem the author would otherwise only find by
  * playing, with a way to jump straight to it.
  */
-import { storyFactNames, talkedFact, findRoomByName, getStep, parseScript, summarize, unreachableSteps, walkSteps, walkWithPaths, writeScript } from '@story-engine/engine-core';
+import { elementConds, storyFactNames, talkedFact, findRoomByName, getStep, parseScript, summarize, unreachableSteps, walkSteps, walkWithPaths, writeScript } from '@story-engine/engine-core';
 import type { FactValue, Project } from '@story-engine/engine-core';
 import { missingLook, stageText, unknownSpeaker } from './map';
 import { findMark } from '@story-engine/runtime';
@@ -67,7 +67,7 @@ export function findProblems(p: Project): Problem[] {
   for (const room of p.rooms) if (room.music && room.music !== 'off' && !sounds.has(room.music.toLowerCase())) out.push({ level: 'warning', roomId: room.id, where: room.name, text: `The room's music "${room.music}" is not among your music.` });
   for (const room of p.rooms) for (const el of room.els) {
     const base = { roomId: room.id, elId: el.id, where: `${room.name} › ${el.name}` };
-    if (el.cond && !scripted.has(el.cond.fact)) out.push({ ...base, inRoom: true, level: 'warning', text: `${el.name} is only in the room while "${el.cond.fact}" says so, but no conversation changes or checks "${el.cond.fact}", so ${el.name} may never show.` });
+    for (const c of elementConds(el)) if (!scripted.has(c.fact)) out.push({ ...base, inRoom: true, level: 'warning', text: `${el.name} is only ${el.kind === 'area' ? 'clickable' : 'in the room'} while "${c.fact}" says so, but no conversation changes or checks "${c.fact}", so ${el.name} may never ${el.kind === 'area' ? 'work' : 'show'}.` });
     if (el.sound && !sounds.has(el.sound.toLowerCase())) out.push({ ...base, inRoom: true, level: 'warning', text: `The sound "${el.sound}" played on click is not among your sounds.` });
     walkWithPaths(parseScript(el.script).steps, (st, path) => {
       if (st.t === 'say' && st.sound && !sounds.has(st.sound.toLowerCase())) out.push({ ...base, level: 'warning', path, text: `The sound "${st.sound}" is not among your sounds. Add it under Pictures & sounds, or pick another.` });
@@ -90,7 +90,8 @@ export function findProblems(p: Project): Problem[] {
   // Facts that are changed but never tested or shown.
   const changed = new Set<string>(), tested = new Set<string>();
   for (const r of p.rooms) for (const el of r.els) {
-    if (el.cond) tested.add(el.cond.fact);
+    for (const c of elementConds(el)) tested.add(c.fact);
+    if (el.hover) for (const m of el.hover.matchAll(/\{([\w.]+)\}/g)) tested.add(m[1]);
     for (const m of el.script.matchAll(/\{([\w.]+)\}/g)) tested.add(m[1]);
     walkSteps(parseScript(el.script).steps, st => {
       if (st.t === 'change') st.effects.forEach(e => changed.add(e.fact));

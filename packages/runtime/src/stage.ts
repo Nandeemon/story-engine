@@ -114,16 +114,24 @@ export function elementStyle(el: StoryElement): string {
   return `left:${el.x}%;top:${el.y}%;height:${el.size}%${el.kind === 'area' ? `;width:${el.w ?? 20}%` : ''}`;
 }
 
-/** An invisible area: nothing in the game, a dashed box with its name in the editor. */
-export function areaArt(el: StoryElement, editing: boolean): string {
-  return editing ? `<span class="areabox"><b>${esc(el.name)}</b></span>` : '';
+/** An invisible area: nothing in the game, a dashed outline with its name in the editor (and its points, when selected). */
+export function areaArt(el: StoryElement, editing: boolean, selected = false): string {
+  if (!editing) return '';
+  const pts = el.shape && el.shape.length >= 3 ? el.shape : null;
+  if (!pts) return `<span class="areabox"><b>${esc(el.name)}</b></span>`;
+  return `<span class="areabox shaped"><svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><polygon points="${pts.map(p => `${p.x},${p.y}`).join(' ')}"/></svg><b>${esc(el.name)}</b>${selected ? pts.map((p, i) => `<i class="adot" data-adot="${i}" style="left:${p.x}%;top:${p.y}%"></i>`).join('') : ''}</span>`;
+}
+
+/** In the game an area with an outline only takes clicks inside it. */
+export function areaClip(el: StoryElement): string {
+  return el.kind === 'area' && el.shape && el.shape.length >= 3 ? `;clip-path:polygon(${el.shape.map(p => `${p.x}% ${p.y}%`).join(',')})` : '';
 }
 
 export function stageHTML(room: Room, o: StageOptions): string {
   const els = room.els.filter(el => !el.offstage && (o.mode !== 'look' || el.kind !== 'area')).map(el => {
     if (el.kind === 'area') {
       const sel = o.mode === 'edit' && el.id === o.selected;
-      return `<button class="el area${sel ? ' sel' : ''}" data-el="${esc(el.id)}" style="${elementStyle(el)}" aria-label="${esc(el.name)}">${areaArt(el, o.mode === 'edit')}${sel ? '<span class="rz" data-resize aria-hidden="true"></span>' : ''}</button>`;
+      return `<button class="el area${sel ? ' sel' : ''}" data-el="${esc(el.id)}" style="${elementStyle(el)}${o.mode === 'edit' ? '' : areaClip(el)}" aria-label="${esc(el.name)}">${areaArt(el, o.mode === 'edit', sel)}${sel ? '<span class="rz" data-resize aria-hidden="true"></span>' : ''}</button>`;
     }
     const can = o.mode === 'play' && !!o.clickable?.(el);
     const cls = ['el', o.mode === 'edit' && el.id === o.selected ? 'sel' : '', can ? 'can' : ''].filter(Boolean).join(' ');

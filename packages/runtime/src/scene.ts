@@ -47,7 +47,7 @@ export interface Progress { facts: Facts; seen: string[] }
 /** Whether something is in the room right now: its condition holds, and a one-time conversation that hides it has not happened. */
 export function present(el: StoryElement, progress?: Progress): boolean {
   if (!progress) return true;
-  if (el.cond && !testCondition(progress.facts, el.cond)) return false;
+  if (el.cond && ![el.cond, ...(el.andConds ?? [])].every(c => testCondition(progress.facts, c))) return false;
   return !(el.once === 'hide' && progress.seen.includes(el.id));
 }
 

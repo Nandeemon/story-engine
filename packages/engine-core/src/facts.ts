@@ -1,5 +1,5 @@
 import { parseScript, summarize } from './script';
-import { talkedFact } from './project';
+import { elementConds, talkedFact } from './project';
 import type { Project } from './types';
 
 /**
@@ -12,7 +12,7 @@ export function storyFactNames(p: Project): string[] {
   for (const r of p.rooms) for (const e of r.els) {
     summarize(parseScript(e.script).steps).facts.forEach(f => set.add(f));
     if (e.kind === 'char' && e.script.trim()) set.add(talkedFact(e.name));
-    if (e.cond) set.add(e.cond.fact);
+    for (const c of elementConds(e)) set.add(c.fact);
   }
   for (const c of p.characters) for (const f of c.facts ?? []) set.add(f.fact);
   return [...set].sort();

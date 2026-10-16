@@ -1,8 +1,8 @@
-import { createRunner, findLook, findRoomByName, parseScript, pathAt, startFacts, stepsBefore, talkedFact } from '@story-engine/engine-core';
+import { createRunner, fillText, findLook, findRoomByName, parseScript, pathAt, startFacts, stepsBefore, talkedFact } from '@story-engine/engine-core';
 import type { AskEvent, ChoiceEvent, DoorStep, Facts, PathStep, Project, Room, RunMemory, Runner, RunnerPlace, SayStep, Step, StoryElement } from '@story-engine/engine-core';
 import { applyToScene, fxVars, nextMoment, present, roomScene, staged, stagedAttrs, stagedKey, startScene } from './scene';
 import type { Scene } from './scene';
-import { areaArt, backdropHTML, choicesHTML, elementArt, elementStyle, lookStyle, sayHTML } from './stage';
+import { areaArt, areaClip, backdropHTML, choicesHTML, elementArt, elementStyle, lookStyle, sayHTML } from './stage';
 import { esc } from './art';
 import { hudHTML } from './hud';
 
@@ -195,10 +195,10 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
   function build(): void {
     const r = room();
     const objects = r.els.filter(e => e.kind !== 'char' && !e.offstage).map(e =>
-      `<button class="el${e.kind === 'area' ? ' area' : ''}" data-el="${esc(e.id)}" style="${elementStyle(e)}" aria-label="${esc(e.name)}">${e.kind === 'area' ? areaArt(e, false) : elementArt(e, undefined, project.characters)}</button>`).join('');
+      `<button class="el${e.kind === 'area' ? ' area' : ''}" data-el="${esc(e.id)}" style="${elementStyle(e)}${areaClip(e)}" aria-label="${esc(e.name)}">${e.kind === 'area' ? areaArt(e, false) : elementArt(e, undefined, project.characters)}</button>`).join('');
     const menu = menuOn ? `<div class="gamemenu" role="toolbar" aria-label="Game menu">
         <button data-menu="back" title="Back a line" aria-label="Back a line">↶</button><button data-menu="history" title="History" aria-label="History">☰</button>${opts.saveKey ? '<button data-menu="saves" title="Save and load" aria-label="Save and load">⤓</button>' : ''}<button data-menu="settings" title="Settings" aria-label="Settings">⚙</button></div>` : '';
-    host.innerHTML = `<div class="stage play" data-stage style="${lookStyle(project.look)}"><div class="cam"><div class="bg">${backdropHTML(r.bg)}</div>${objects}</div><div class="hudlayer"></div><div class="game"></div>${menu}<div class="gameover"></div></div>`;
+    host.innerHTML = `<div class="stage play" data-stage style="${lookStyle(project.look)}"><div class="cam"><div class="bg">${backdropHTML(r.bg)}</div>${objects}</div><div class="hudlayer"></div><div class="game"></div><div class="hoverlabel" hidden></div>${menu}<div class="gameover"></div></div>`;
     builtRoom = r.id;
   }
 
@@ -241,6 +241,7 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
       }
     }
     startPaths(stage);
+    if (s.event || s.scene) onLeave();
     // Characters brought in for a conversation leave when it ends.
     stage.querySelectorAll<HTMLElement>('.el.staged').forEach(n => {
       if (kept.has(n.dataset.el ?? '')) return;
@@ -668,6 +669,30 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
     advance();
   }
 
+  /* The text by the pointer: what the player is holding the mouse over. */
+  function hoverText(node: HTMLElement | null): string {
+    const el = node && room().els.find(e => e.id === node.dataset.el);
+    return el?.hover && canTalk(el) ? fillText(el.hover, s.facts) : '';
+  }
+  function onMove(e: PointerEvent): void {
+    const stage = host.querySelector<HTMLElement>('[data-stage]');
+    const label = stage?.querySelector<HTMLElement>('.hoverlabel');
+    if (!stage || !label) return;
+    const text = e.pointerType === 'touch' ? '' : hoverText((e.target as HTMLElement).closest<HTMLElement>('.el.can'));
+    if (!text) { label.hidden = true; return; }
+    const box = stage.getBoundingClientRect();
+    const x = (e.clientX - box.left) / box.width * 100, y = (e.clientY - box.top) / box.height * 100;
+    label.textContent = text;
+    label.hidden = false;
+    // Kept inside the picture: flipped to the left of the pointer near the right edge, below it near the top.
+    label.style.left = `${x}%`;
+    label.style.top = `${y}%`;
+    label.classList.toggle('left', x > 70);
+    label.classList.toggle('below', y < 12);
+  }
+  function onLeave(): void { const l = host.querySelector<HTMLElement>('.hoverlabel'); if (l) l.hidden = true; }
+  host.addEventListener('pointermove', onMove);
+  host.addEventListener('pointerleave', onLeave);
   host.addEventListener('click', onClick);
   host.addEventListener('input', onInput);
   host.addEventListener('change', onInput);
@@ -691,6 +716,8 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
       if ('speechSynthesis' in window) speechSynthesis.cancel();
       keep(`${storeKey}:read`, [...read]);
       host.removeEventListener('click', onClick);
+      host.removeEventListener('pointermove', onMove);
+      host.removeEventListener('pointerleave', onLeave);
       host.removeEventListener('input', onInput);
       host.removeEventListener('change', onInput);
       host.removeEventListener('submit', onSubmit);

@@ -210,8 +210,14 @@ export interface StoryElement {
   size: number;
   /** For areas: width as a percentage of the stage width. */
   w?: number;
-  /** Only in the room while this is true; otherwise the player does not see it. */
+  /** Only in the room while this is true; otherwise the player does not see it (and an area cannot be clicked). */
   cond?: Condition;
+  /** More conditions that must all be true as well. */
+  andConds?: Condition[];
+  /** Text shown by the mouse pointer while the player holds it over this, such as "Kitchen door". */
+  hover?: string;
+  /** For areas: an outline drawn with points, in percent of the area's own box (x from the left, y from the top). */
+  shape?: { x: number; y: number }[];
   /** A conversation for one time only: afterwards it stays but cannot be clicked, or it is gone. */
   once?: 'stay' | 'hide';
   /** A sound from the story's sounds, by name, played when the player clicks it. */

@@ -40,7 +40,7 @@ In **Look**, under On-screen display, add a **Meter** (a bar, such as affection 
 
 ## Rooms that react
 
-- **Clickable area:** under Add an object, a clickable area is an invisible box you put over a door, a window or a sign in the backdrop. Drag it, drag its corner to resize it, and pick where clicking it goes (or give it a conversation of its own).
+- **Clickable area:** under Add an object, a clickable area is an invisible box you put over a door, a window or a sign in the backdrop. Drag it, drag its corner to resize it, and pick where clicking it goes (or give it a conversation of its own). Instead of a box you can click point by point around any shape (close it on the first point or press Enter); later, drag the dots to adjust it, or **Draw the shape** again. In the game only the inside of the shape takes clicks. **Text by the mouse** shows a short label next to the pointer while the player holds it over the area (or any clickable thing, under More), and it can hold story facts like `{gold}`. **Clickable: Only if…** takes one or more conditions that must all hold; characters and objects have the same under More, as **In the room**.
 - **Only if:** under More, anything in a room can be there only while a story fact says so, for example Jon only `if met_jon is yes`. A conversation brings him in with a Change.
 - **Once:** a conversation can happen every time, or once, after which the thing cannot be clicked or is gone.
 - **When the player enters:** a room can start a conversation straight away, on every visit or only the first.

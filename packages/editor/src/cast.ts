@@ -3,7 +3,7 @@
  * own pictures), with everything each one is part of, so a story with many
  * scenes stays easy to find your way around.
  */
-import { parseScript, talkedFact, valueText, walkSteps } from '@story-engine/engine-core';
+import { elementConds, parseScript, talkedFact, valueText, walkSteps } from '@story-engine/engine-core';
 import type { Character, FactDef, Project, Room, Step, StoryElement } from '@story-engine/engine-core';
 import { esc } from '@story-engine/runtime';
 import { soundRow } from './widgets';
@@ -85,7 +85,7 @@ function factUse(p: Project, fact: string): { changed: number; checked: number }
     factsOf(parseScript(e.script).steps, m);
     const v = m.get(fact);
     if (v) { out.changed += v.changed; out.checked += v.checked; }
-    if (e.cond?.fact === fact) out.checked++;
+    out.checked += elementConds(e).filter(c => c.fact === fact).length;
   }
   return out;
 }
