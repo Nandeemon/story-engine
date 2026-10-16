@@ -302,6 +302,16 @@ export interface HudWidget {
   hideUnset?: boolean;
 }
 
+/** Something the player can have. The story fact "has.<id>" is yes while the player has it. */
+export interface Item {
+  /** The part after "has." in the story fact, such as "old_key". */
+  id: string;
+  /** The name players see, such as "old key". */
+  name: string;
+  /** A small picture as a data URL, shown in inventory lists. */
+  icon?: string;
+}
+
 /** Where a mark sits on a character: its centre in percent of the character's picture, and its height in percent of it. */
 export interface MarkSpot { x: number; y: number; size: number }
 
@@ -341,8 +351,10 @@ export interface Project {
   rooms: Room[];
   look: Look;
   characters: Character[];
-  /** The on-screen display. */
+  /** The old on-screen display. Only read from older stories: loading turns each widget into a panel. */
   hud?: HudWidget[];
+  /** Things the player can have, such as an old key. Whether the player has one is kept in the story fact "has.<id>". */
+  items?: Item[];
   /** Interface panels the author designed: status bars, an inventory, buttons. */
   panels?: Panel[];
   /** Sounds the author uploaded. */

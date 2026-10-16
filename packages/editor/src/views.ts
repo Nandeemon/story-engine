@@ -1,12 +1,12 @@
-import { CONDITION_WORDS, IDLE_MOVES, characterOf, elementConds, findRoomByName, parseScript, summarize, valueText, walkSteps } from '@story-engine/engine-core';
+import { CONDITION_WORDS, IDLE_MOVES, storyItems, characterOf, elementConds, findRoomByName, parseScript, summarize, valueText, walkSteps } from '@story-engine/engine-core';
 import { missingLook, unknownSpeaker } from './map';
 import { factKind, storyFacts } from './problems';
 import { musicSelect, soundRow, soundSelect } from './widgets';
 import type { Problem } from './problems';
 import type { StoryInfo } from './store';
-import type { Character, CompareOp, FactValue, Idle, Project, Room, Sound, StoryElement } from '@story-engine/engine-core';
-import { BACKDROPS, CHARACTERS, EXPRESSIONS, FONTS, OBJECTS, THEMES, allMarks, markArt, backdropHTML, characterSVG, choicesHTML, esc, hudHTML, panelsHTML, sayHTML, stageHTML } from '@story-engine/runtime';
-import { panelSampleFacts, panelSection } from './panels';
+import type { Character, CompareOp, Idle, Project, Room, Sound, StoryElement } from '@story-engine/engine-core';
+import { BACKDROPS, CHARACTERS, EXPRESSIONS, FONTS, OBJECTS, THEMES, allMarks, markArt, backdropHTML, characterSVG, choicesHTML, esc, panelsHTML, sayHTML, stageHTML } from '@story-engine/runtime';
+import { itemsField, panelSampleFacts, panelSection } from './panels';
 import type { Preset } from '@story-engine/runtime';
 
 export type View = 'home' | 'cast' | 'library' | 'map' | 'room' | 'convo' | 'look' | 'play' | 'check';
@@ -86,7 +86,7 @@ function soundUses(p: Project, name: string): number {
 }
 
 /** The story's sounds and music: listen, rename, set the volume, remove, add. */
-function soundsSection(p: Project): string {
+function soundsSection(p: Project, filter = 'all'): string {
   const all = p.sounds ?? [];
   const row = (x: Sound) => {
     const n = soundUses(p, x.name);
@@ -94,33 +94,91 @@ function soundsSection(p: Project): string {
     return soundRow(x, '', `${who}${n ? `used ${n}×` : 'not used yet'}`);
   };
   const fx = all.filter(x => !x.music), music = all.filter(x => x.music);
-  return `<section class="soundsec"><div class="label">Sounds</div>
+  const fxSec = `<section class="soundsec"><div class="label">Sounds</div>
     ${fx.map(row).join('') || '<p class="hint">No sounds yet. Add your own, such as a laugh, a gasp or a door.</p>'}
     <div class="row"><button class="btn small" data-act="sound-add">+ Add a sound</button></div>
-    <p class="hint">A sound plays when something is clicked (under More on the thing) or with a line (in the line's Effect and sound).</p></section>
-  <section class="soundsec"><div class="label">Music</div>
+    <p class="hint">A sound plays when something is clicked (under More on the thing) or with a line (in the line's Effect and sound).</p></section>`;
+  const musicSec = `<section class="soundsec"><div class="label">Music</div>
     ${music.map(row).join('') || '<p class="hint">No music yet. Add a track, then pick it for a room or start it in a conversation.</p>'}
     <div class="row"><button class="btn small" data-act="music-add">+ Add music</button></div>
     <p class="hint">A room can start its own music (in the room's panel), and a conversation can change it with a Music step. Music loops unless you set it to play once.</p></section>`;
+  return (filter === 'music' ? '' : fxSec) + (filter === 'sounds' ? '' : musicSec);
 }
 
 const ANIM_WORDS: [string, string][] = [['none', 'Still'], ['pulse', 'Pulses'], ['float', 'Floats up'], ['drift', 'Glides out'], ['bob', 'Bobs'], ['spin', 'Spins'], ['pop', 'Pops in'], ['shake', 'Shakes'], ['drip', 'Drips down'], ['fade', 'Fades in']];
 
-/** Marks: starter marks and the author's own pictures, each with its animation, speed and size. */
-function marksSection(p: Project): string {
-  const cards = allMarks(p).map(m => {
-    const changed = !!m.preset && !!p.marks?.some(x => x.name === m.name);
-    return `<div class="markcard"><span class="markpic"><span class="mk an-${m.anim}" style="--mkd:${[1.8, 1.35, 1, 0.72, 0.5][(m.speed ?? 3) - 1]}">${markArt(m)}</span></span>
-      ${m.preset ? `<b>${esc(m.name)}</b>` : `<input type="text" id="mark-name-${esc(m.id)}" data-in="mark-name" data-k="${esc(m.name)}" value="${esc(m.name)}" aria-label="Name">`}
-      <select id="mark-anim-${esc(m.id)}" data-in="mark-anim" data-k="${esc(m.name)}" aria-label="Animation">${ANIM_WORDS.map(([k, w]) => `<option value="${k}"${k === m.anim ? ' selected' : ''}>${w}</option>`).join('')}</select>
-      <label class="mini"><span>Speed</span><input type="range" id="mark-speed-${esc(m.id)}" data-in="mark-speed" data-k="${esc(m.name)}" min="1" max="5" value="${m.speed ?? 3}"></label>
-      <label class="mini"><span>Size</span><input type="range" id="mark-size-${esc(m.id)}" data-in="mark-size" data-k="${esc(m.name)}" min="2" max="40" value="${Math.round(m.size)}"></label>
-      ${m.preset ? (changed ? `<button class="linkbtn" data-act="mark-reset" data-k="${esc(m.name)}">Back to how it was</button>` : '') : `<button class="linkbtn danger" data-act="mark-delete" data-k="${esc(m.name)}" data-confirm="Delete?">Delete</button>`}</div>`;
-  }).join('');
-  return `<section class="soundsec marksec"><div class="label">Marks</div>
-    <p class="hint">Small pictures shown on a character for a line or until taken off: pick them in a line's panel, or with "Put a mark on someone". Your own pictures can be GIFs that animate by themselves.</p>
-    <div class="markgrid">${cards}</div>
-    <div class="row"><button class="btn small" data-act="mark-add">+ Add your own mark</button></div></section>`;
+/** One mark's settings: name, animation, speed and size. Opens when the mark is clicked in the Library. */
+function markEdit(p: Project, name: string): string {
+  const m = allMarks(p).find(x => x.name === name);
+  if (!m) return '';
+  const changed = !!m.preset && !!p.marks?.some(x => x.name === m.name);
+  return `<div class="markedit"><div class="drillhead"><button class="linkbtn back" data-act="lib-mark" data-k="${esc(m.name)}">‹ Close</button><h3>${esc(m.name)}</h3></div>
+    <div class="markedit-body"><span class="markpic big"><span class="mk an-${m.anim}" style="--mkd:${[1.8, 1.35, 1, 0.72, 0.5][(m.speed ?? 3) - 1]}">${markArt(m)}</span></span>
+    <div class="markedit-fields">
+      ${m.preset ? '' : `<label class="field"><span>Name</span><input type="text" id="mark-name-${esc(m.id)}" data-in="mark-name" data-k="${esc(m.name)}" value="${esc(m.name)}"></label>`}
+      <label class="field"><span>Animation</span><select id="mark-anim-${esc(m.id)}" data-in="mark-anim" data-k="${esc(m.name)}">${ANIM_WORDS.map(([k, w]) => `<option value="${k}"${k === m.anim ? ' selected' : ''}>${w}</option>`).join('')}</select></label>
+      <label class="field"><span>Speed</span><input type="range" id="mark-speed-${esc(m.id)}" data-in="mark-speed" data-k="${esc(m.name)}" min="1" max="5" value="${m.speed ?? 3}"></label>
+      <label class="field"><span>Size on a character</span><input type="range" id="mark-size-${esc(m.id)}" data-in="mark-size" data-k="${esc(m.name)}" min="2" max="40" value="${Math.round(m.size)}"></label>
+      <div class="row">${m.preset ? (changed ? `<button class="btn small quiet" data-act="mark-reset" data-k="${esc(m.name)}">Back to how it was</button>` : '') : `<button class="btn small danger" data-act="mark-delete" data-k="${esc(m.name)}" data-confirm="Click again to delete">Delete this mark</button>`}</div>
+    </div></div></div>`;
+}
+
+const LIB_FILTERS: [string, string][] = [['all', 'All'], ['backdrops', 'Backdrops'], ['characters', 'Characters'], ['objects', 'Objects'], ['marks', 'Marks'], ['sounds', 'Sounds'], ['music', 'Music'], ['items', 'Items']];
+
+const tile = (act: string, k: string, pic: string, name: string, sub: string, on = false, cls = '') =>
+  `<button class="libtile${on ? ' on' : ''}" data-act="${act}" data-k="${esc(k)}"${on ? ' aria-pressed="true"' : ''}><span class="pic${cls ? ` ${cls}` : ''}">${pic}</span><b>${esc(name)}</b><span class="sub">${sub}</span></button>`;
+
+/** Every picture the story uses, by kind, as tiles. */
+function libraryTiles(p: Project, kind: string, markSel: string | null): string {
+  if (kind === 'backdrops') {
+    const seen = new Map<string, Room[]>();
+    for (const r of p.rooms) if (r.bg) { const key = r.bg.preset ?? r.bg.img ?? r.bg.video ?? ''; seen.set(key, [...(seen.get(key) ?? []), r]); }
+    return [...seen.values()].map(rs => tile('open-room', rs[0].id, backdropHTML(rs[0].bg), rs[0].bg?.preset ? BACKDROPS[rs[0].bg.preset]?.name ?? 'Backdrop' : rs[0].bg?.video ? 'Your video' : 'Your picture', `In ${rs.map(r => esc(r.name)).join(', ')}`, false, 'wide')).join('');
+  }
+  if (kind === 'characters') {
+    const own = p.characters.map(c => tile('cast-open', c.id, `<img src="${esc(c.base)}" alt="">`, c.name, `${c.looks.filter(l => !l.once).length + 1} looks`, false, 'tall'));
+    const starters = new Map<string, { r: Room; e: StoryElement }>();
+    for (const r of p.rooms) for (const e of r.els) if (e.kind === 'char' && !e.characterId && !starters.has(e.name.toLowerCase())) starters.set(e.name.toLowerCase(), { r, e });
+    return own.join('') + [...starters.values()].map(({ r, e }) => tile('cast-goto-room', `${r.id}|${e.id}`, characterSVG({ ...(CHARACTERS[e.preset ?? ''] ?? CHARACTERS.mara), name: e.name }, e.expr), e.name, "Starter figure", false, 'tall')).join('');
+  }
+  if (kind === 'objects') {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const r of p.rooms) for (const e of r.els) {
+      if (e.kind !== 'object') continue;
+      const key = e.img ?? e.preset ?? e.id;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(tile('cast-goto-room', `${r.id}|${e.id}`, e.img ? `<img src="${esc(e.img)}" alt="">` : (OBJECTS[e.preset ?? ''] ?? OBJECTS.cup).svg, e.name, `In ${esc(r.name)}`, false, 'obj'));
+    }
+    return out.join('');
+  }
+  if (kind === 'marks') return allMarks(p).map(m => tile('lib-mark', m.name, `<span class="mk an-${m.anim}" style="--mkd:${[1.8, 1.35, 1, 0.72, 0.5][(m.speed ?? 3) - 1]}">${markArt(m)}</span>`, m.name, m.preset ? 'Starter mark' : 'Your picture', m.name === markSel, 'obj')).join('');
+  if (kind === 'items') return storyItems(p).map(it => tile('item-icon', it.id, it.icon ? `<img src="${esc(it.icon)}" alt="">` : `<i class="initial">${esc(it.name.charAt(0).toUpperCase())}</i>`, it.name, it.icon ? 'Click to replace the icon' : 'Click to add an icon', false, 'obj')).join('');
+  return '';
+}
+
+/** Pictures and sounds the story uses: backdrops, characters, objects, marks, sounds, music and item icons. */
+export function viewLibrary(p: Project, filter = 'all', markSel: string | null = null): string {
+  const chips = `<div class="libchips" role="toolbar" aria-label="Show">${LIB_FILTERS.map(([k, n]) => `<button class="chip${filter === k ? ' on' : ''}" data-act="lib-filter" data-k="${k}" aria-pressed="${filter === k}">${n}</button>`).join('')}</div>`;
+  const pictures = ['backdrops', 'characters', 'objects', 'marks', 'items'];
+  const group = (k: string) => {
+    const tiles = libraryTiles(p, k, markSel);
+    const name = LIB_FILTERS.find(f => f[0] === k)![1];
+    const empty = { backdrops: 'No backdrops yet. Pick one in a room.', characters: 'No characters yet.', objects: 'No objects placed yet.', marks: '', items: 'No items yet.' }[k] ?? '';
+    const head = filter === 'all' ? `<div class="label">${name}</div>` : '';
+    const add = k === 'marks' ? '<button class="libtile add" data-act="mark-add"><span class="pic obj">+</span><b>Your own mark</b><span class="sub">A PNG or a GIF</span></button>' : '';
+    if (!tiles && !add && filter === 'all') return '';
+    return `<section class="libsec">${head}<div class="libgrid">${tiles}${add}</div>${tiles || add ? '' : `<p class="hint">${empty}</p>`}
+      ${k === 'marks' && markSel ? markEdit(p, markSel) : ''}${k === 'items' && filter === 'items' ? itemsField(p) : ''}</section>`;
+  };
+  const shown = filter === 'all' ? pictures : pictures.filter(k => k === filter);
+  const sounds = filter === 'all' || filter === 'sounds' || filter === 'music' ? soundsSection(p, filter) : '';
+  return `<div class="side home library"><div class="maphead"><div><h2>Pictures &amp; sounds</h2><p class="hint">Everything your story shows and plays. Click a picture to go where it is used; click a mark to change how it moves.</p></div>
+      <div class="row"><button class="btn small" data-act="mark-add">+ Mark</button><button class="btn small" data-act="sound-add">+ Sound</button><button class="btn small" data-act="music-add">+ Music</button></div></div>
+    ${chips}
+    ${shown.map(group).join('')}
+    ${sounds}</div>`;
 }
 
 export function viewMap(p: Project, ui: UI, fresh: ReadonlySet<string> = new Set()): string {
@@ -151,13 +209,6 @@ export function shareSheet(p: Project, errors = 0): string {
       <p class="hint">One file with your whole game. Open it in any browser, or upload it to itch.io (as an HTML game) or any website so others can play. Its typeface loads from the internet; offline a similar one shows.</p></div>
     <div class="sharego"><button class="btn small" data-act="save-file">Save to file</button>
       <p class="hint">A copy of the story itself, to back up or move to another computer. Open it again with Open a file on Your stories.</p></div>`;
-}
-
-/** Pictures and sounds the story uses: marks, sounds and music. */
-export function viewLibrary(p: Project): string {
-  return `<div class="side home"><div class="maphead"><div><h2>Pictures &amp; sounds</h2><p class="hint">Marks, sounds and music for the whole story. Pick them where you need them: in a line, on a thing in a room, or for a room.</p></div></div>
-    ${marksSection(p)}
-    ${soundsSection(p)}</div>`;
 }
 
 function emptyRoom(): string {
@@ -283,25 +334,31 @@ function doorField(p: Project, r: Room, e: StoryElement, naming: boolean): strin
     ${to ? `<button class="btn small quiet" data-act="open-room" data-k="${esc(to.id)}">Go to ${esc(to.name)} now →</button>` : ''}</div>`;
 }
 
+/** Box or drawn outline: one small tool row for an area's shape. */
+function shapeTools(e: StoryElement): string {
+  const drawn = !!e.shape;
+  return `<div class="field"><span>Shape</span><div class="seg-tools" role="group" aria-label="Shape">
+      <button class="btn small${drawn ? ' quiet' : ' ink'}" data-act="area-box" aria-pressed="${!drawn}">▭ Box</button>
+      <button class="btn small${drawn ? ' ink' : ' quiet'}" data-act="area-shape" aria-pressed="${drawn}">✎ Draw shape</button></div>
+    <p class="hint">${drawn ? 'Drag a dot in the picture to change the outline, or Draw shape to start again.' : 'Drag the box or its corner in the picture. Draw shape traces an exact outline.'}</p></div>`;
+}
+
 function areaPanel(p: Project, r: Room, e: StoryElement, naming = false): string {
-  const door = e.script.trim().match(/^go to\s+(.+)$/i);
-  const simple = !e.script.trim() || (door && !e.script.trim().includes('\n'));
   const leads = doorField(p, r, e, naming);
+  const action = leads
+    ? `<button class="linkbtn" data-act="convo">${e.script.trim() ? 'Make it say something on the way' : 'Or make it say or do something'}</button>`
+    : '<button class="btn block" data-act="convo">Edit what happens on click</button>';
   return `<h2>${esc(e.name)}</h2>
-    <button class="btn${simple ? '' : ' play'} block" data-act="convo">${e.script.trim() ? 'Edit what happens on click' : 'Make it say or do something'}</button>
-    ${leads}
+    ${leads}${action}
     ${hoverField(e)}
-    ${condsField(p, e)}
-    <div class="field"><span>Shape</span><div class="row">${e.shape ? '<button class="btn small" data-act="area-shape">Draw it again</button><button class="btn small quiet" data-act="area-box">Make it a box</button>' : '<button class="btn small" data-act="area-shape">✎ Draw the shape</button>'}</div>
-      <p class="hint">${e.shape ? 'Drag a dot in the picture to change the outline.' : 'Click around the part of the picture to make the area that exact shape.'}</p></div>
+    ${shapeTools(e)}
     <details class="more" id="el-more"><summary>More</summary><div>
       <label class="field"><span>Name (only you see it)</span><input type="text" id="el-name" data-in="el-name" value="${esc(e.name)}"></label>
-      <label class="field"><span>Width</span><input type="range" id="el-w" data-in="el-w" min="2" max="100" value="${e.w ?? 20}"></label>
-      <label class="field"><span>Height</span><input type="range" id="el-size" data-in="el-size" min="2" max="110" value="${e.size}"></label>
+      ${condsField(p, e)}
       ${moreFields(p, e)}
       <div class="row"><button class="btn small danger" data-act="remove" data-confirm="Click again to remove">Remove</button></div>
     </div></details>
-    <p class="hint">Invisible in the game; players see a hand pointer over it. Drag it to move, drag its corner to change its size.</p>`;
+    <p class="hint">Invisible in the game; players see a hand pointer over it.</p>`;
 }
 
 function elementPanel(p: Project, e: StoryElement, r?: Room, naming = false): string {
@@ -320,13 +377,13 @@ function elementPanel(p: Project, e: StoryElement, r?: Room, naming = false): st
   const builtIn = e.kind === 'char' && !c
     ? '<p class="hint">A starter figure with built-in expressions. To give a character looks of your own, add it with "Use your own picture".</p>'
     : '';
+  const door = e.kind === 'object' && r ? doorField(p, r, e, naming) : '';
   return `<h2>${name}</h2>
-    <button class="btn play block" data-act="convo">${label}</button>
-    ${e.kind === 'object' && r ? doorField(p, r, e, naming) : ''}
+    ${door ? `${door}<button class="linkbtn" data-act="convo">${e.script.trim() ? 'Make it say something on the way' : 'Or make it say or do something'}</button>` : `<button class="btn block" data-act="convo">${label}</button>`}
     <label class="field"><span>Name</span><input type="text" id="el-name" data-in="el-name" value="${name}"></label>
     <label class="field"><span>Size</span><input type="range" id="el-size" data-in="el-size" min="6" max="110" value="${e.size}"></label>
-    ${c ? looksStrip(c, e) : ''}
-    <details class="more" id="el-more"><summary>More</summary><div>${expr}${builtIn}
+    ${c ? looksStrip(c, e) : expr}
+    <details class="more" id="el-more"><summary>More</summary><div>${c ? expr : ''}${builtIn}
       ${e.kind === 'char' ? idleField('el-idle', e.idle, c?.idle ? `As ${esc(c.name)} usually does (${esc(c.idle.move)})` : 'Stands still') : ''}
       ${moreFields(p, e)}
       <div class="row"><button class="btn small quiet" data-act="front">Bring to front</button><button class="btn small danger" data-act="remove" data-confirm="Click again to remove">Remove</button></div>
@@ -347,7 +404,7 @@ function backdropField(r: Room): string {
       ? `<div class="row"><button class="btn small${bg.edge !== 'color' ? ' ink' : ' quiet'}" data-act="bg-edge" data-k="blur" aria-pressed="${bg.edge !== 'color'}">Soft edges</button><button class="btn small${bg.edge === 'color' ? ' ink' : ' quiet'}" data-act="bg-edge" data-k="color" aria-pressed="${bg.edge === 'color'}">Colour edges</button>
          ${bg.edge === 'color' ? `<input type="color" id="bg-color" data-in="bg-color" value="${esc(bg.color ?? '#000000')}" aria-label="Edge colour">` : ''}</div>`
       : '';
-  return `<div class="field"><span>Backdrop</span><div class="row">${modes.map(([k, n, d]) => `<button class="btn small${fit === k ? ' ink' : ' quiet'}" data-act="bg-fit" data-k="${k}" title="${d}" aria-pressed="${fit === k}">${n}</button>`).join('')}</div>${extra}</div>`;
+  return `<div class="field"><span>How the backdrop fills the picture</span><div class="row">${modes.map(([k, n, d]) => `<button class="btn small${fit === k ? ' ink' : ' quiet'}" data-act="bg-fit" data-k="${k}" title="${d}" aria-pressed="${fit === k}">${n}</button>`).join('')}</div>${extra}</div>`;
 }
 
 /** What happens when the player walks in: nothing, or a conversation, every visit or the first one. */
@@ -371,15 +428,22 @@ function musicField(p: Project, r: Room): string {
     ${track ? `<div class="row"><button class="btn small${r.musicOnce ? ' quiet' : ' ink'}" data-act="room-music-once" data-k="" aria-pressed="${!r.musicOnce}">Loop</button><button class="btn small${r.musicOnce ? ' ink' : ' quiet'}" data-act="room-music-once" data-k="1" aria-pressed="${!!r.musicOnce}">Play once</button></div>` : ''}</div>`;
 }
 
+/** The backdrop as a small picture with a way to change it; how it fills the stage is under More. */
+function backdropThumb(r: Room): string {
+  return `<div class="field"><span>Backdrop</span><div class="bgpick">
+      <button class="bgthumb" data-act="adding" data-k="bg" title="Change the backdrop">${r.bg ? backdropHTML(r.bg) : '<i>None yet</i>'}</button>
+      <button class="btn small" data-act="adding" data-k="bg">${r.bg ? 'Change' : 'Pick one'}</button></div></div>`;
+}
+
 function roomPanel(p: Project, r: Room): string {
-  return `<h2>${esc(r.name)}</h2>
-    <div class="row"><button class="btn ink" data-act="adding" data-k="char">Add a character</button><button class="btn" data-act="adding" data-k="object">Add an object</button></div>
-    <label class="field"><span>Room name</span><input type="text" id="room-name" data-in="room-name" value="${esc(r.name)}"></label>
+  return `<label class="titlefield"><span class="sr">Room name</span><input type="text" id="room-name" data-in="room-name" value="${esc(r.name)}" aria-label="Room name"></label>
+    ${backdropThumb(r)}
     ${enterField(r)}
-    ${musicField(p, r)}
-    ${r.bg ? backdropField(r) : ''}
+    <div class="addrow" role="group" aria-label="Add to the room"><span>Add</span>
+      <button class="btn small" data-act="adding" data-k="char">+ Character</button><button class="btn small" data-act="adding" data-k="object">+ Object</button><button class="btn small" data-act="add-area">+ Clickable area</button></div>
     <details class="more" id="room-more"><summary>More</summary><div>
-      <button class="btn small quiet" data-act="adding" data-k="bg">Change the backdrop</button>
+      ${musicField(p, r)}
+      ${r.bg ? backdropField(r) : ''}
       ${p.rooms.length > 1 ? '<button class="btn small danger" data-act="del-room" data-confirm="Click again to delete the room">Delete this room</button>' : ''}
     </div></details>
     <p class="hint">${r.els.length ? 'Click anything in the picture to change it.' : 'The room is ready. Add someone to talk to.'}</p>`;
@@ -508,7 +572,7 @@ export function scriptStatus(p: Project, r: Room, script: string): { text: strin
 /** The look stage, with the on-screen display drawn from test values or examples. */
 export interface PanelSel { panel: string | null; block: string | null }
 
-export function lookStage(p: Project, r: Room, hudSel: string | null, facts: Record<string, unknown>, ps: PanelSel = { panel: null, block: null }): string {
+export function lookStage(p: Project, r: Room, facts: Record<string, unknown>, ps: PanelSel = { panel: null, block: null }, tab: LookTab = 'style'): string {
   const L = p.look;
   const who = r.els.find(e => e.kind === 'char')?.name ?? p.characters[0]?.name ?? p.rooms.flatMap(x => x.els).find(e => e.kind === 'char')?.name ?? 'Someone';
   const box = (L.choices ?? 'box') === 'box';
@@ -516,32 +580,10 @@ export function lookStage(p: Project, r: Room, hudSel: string | null, facts: Rec
     ? choicesHTML([{ text: 'Answers look like this' }, { text: 'And another one' }], false, 'box', { who, text: 'This is how a question and its answers look in your game.' })
     : choicesHTML([{ text: 'A choice looks like this' }, { text: 'And another one' }], false).replace('class="choices"', 'class="choices demo"')
       + sayHTML(who, 'This is how a line of dialogue looks in your game.', false);
-  const sample: Record<string, FactValue> = {};
-  for (const w of p.hud ?? []) sample[w.fact] = (facts[w.fact] as FactValue | undefined) ?? (w.kind === 'meter' ? Math.round(w.max * 0.6) : 12);
   const panels = p.panels?.length ? panelsHTML(p, panelSampleFacts(p, facts), { roomId: r.id, talking: false, edit: ps }) : '';
-  return stageHTML(r, { mode: 'look', look: L, game: demo + hudHTML(p.hud, sample, { editable: true, selected: hudSel ?? undefined }) + panels, characters: p.characters });
-}
-
-function hudSection(p: Project, hudSel: string | null): string {
-  const list = (p.hud ?? []).map(w => {
-    const on = w.id === hudSel;
-    const head = `<button class="hudrow${on ? ' on' : ''}" data-act="hud-sel" data-k="${esc(w.id)}"><b>${w.kind === 'meter' ? 'Meter' : 'Number or word'}</b><span>${esc(w.text || w.fact)} · ${esc(w.fact)}</span></button>`;
-    if (!on) return head;
-    return `${head}<div class="hudedit">
-      <label class="field"><span>Story fact</span><input type="text" list="hud-facts" id="hud-fact" data-in="hud-fact" data-k="${esc(w.id)}" value="${esc(w.fact)}"></label>
-      <label class="field"><span>Words shown with it</span><input type="text" id="hud-text" data-in="hud-text" data-k="${esc(w.id)}" value="${esc(w.text)}" placeholder="For example: Affection"></label>
-      ${w.kind === 'meter' ? `<label class="field"><span>Full at</span><input type="number" id="hud-max" data-in="hud-max" data-k="${esc(w.id)}" value="${w.max}" min="1"></label>
-      <label class="field"><span>Width</span><input type="range" id="hud-w" data-in="hud-w" data-k="${esc(w.id)}" min="8" max="60" value="${w.w}"></label>` : ''}
-      <label class="check"><input type="checkbox" id="hud-hide" data-in="hud-hide" data-k="${esc(w.id)}"${w.hideUnset ? ' checked' : ''}><span>Hide until the story sets it</span></label>
-      <p class="hint">Drag it in the picture to place it. The picture shows an example value, or your test value when test values are on.</p>
-      <button class="btn small danger" data-act="hud-remove" data-k="${esc(w.id)}">Remove</button></div>`;
-  }).join('');
-  return `<div class="field"><span>Single values</span>
-    <p class="hint">Show one story fact over the game all the time, such as affection as a meter or money as a number. For more, use a panel above.</p>
-    ${storyFacts(p).length ? '' : '<p class="hint">Your story has no story facts yet. A conversation makes one with an answer like <code>"Thank you" affection + 1</code> or a line like <code>Change gold + 5</code>.</p>'}
-    <div class="row"><button class="btn small" data-act="hud-add" data-k="meter">+ Meter</button><button class="btn small" data-act="hud-add" data-k="label">+ Number or word</button></div>
-    <datalist id="hud-facts">${storyFacts(p).map(f => `<option value="${esc(f)}">`).join('')}</datalist>
-    <div class="hudlist">${list}</div></div>`;
+  // While panels are designed, the sample dialogue stays faint and lets clicks through to the panels.
+  const sample = tab === 'hud' ? `<div class="lookdemo faint" aria-hidden="true">${demo}</div>` : demo;
+  return stageHTML(r, { mode: 'look', look: L, game: sample + panels, characters: p.characters });
 }
 
 export type LookTab = 'style' | 'hud';
@@ -554,7 +596,7 @@ function toHex(c: string): string {
   return '#' + m[1].split(',').slice(0, 3).map(x => Math.round(Number(x)).toString(16).padStart(2, '0')).join('');
 }
 
-export function viewLook(p: Project, r: Room, hudSel: string | null = null, facts: Record<string, unknown> = {}, tab: LookTab = 'style', ps: PanelSel = { panel: null, block: null }): string {
+export function viewLook(p: Project, r: Room, facts: Record<string, unknown> = {}, tab: LookTab = 'style', ps: PanelSel = { panel: null, block: null }): string {
   const L = p.look;
   const box = (L.choices ?? 'box') === 'box';
   const seg = (t: LookTab, label: string) => `<button role="tab" class="seg${tab === t ? ' on' : ''}" aria-selected="${tab === t}" data-act="look-tab" data-k="${t}">${label}</button>`;
@@ -583,12 +625,12 @@ export function viewLook(p: Project, r: Room, hudSel: string | null = null, fact
           <p class="hint">Small buttons in the corner of the game: go back a line, read earlier lines, change text speed and volume, and save.</p></div>
       </div></details>
       <p class="hint">Changes show in the picture as you make them, and apply to the whole game.</p>`;
-  const n = (p.hud?.length ?? 0) + (p.panels?.length ?? 0);
+  const n = p.panels?.length ?? 0;
   const count = n ? ` (${n})` : '';
-  return `<div class="work"><div id="lookstage">${lookStage(p, r, hudSel, facts, ps)}</div><aside class="side"><h2>The look of your game</h2>
+  return `<div class="work"><div id="lookstage">${lookStage(p, r, facts, ps, tab)}</div><aside class="side"><h2>The look of your game</h2>
       <div class="segs" role="tablist" aria-label="What to change">${seg('style', 'Style')}${seg('hud', `Interface${count}`)}</div>
-      ${tab === 'style' ? style : panelSection(p, ps.panel, ps.block) + (ps.panel ? '' : hudSection(p, hudSel))}
-      <button class="btn block" data-act="crumb" data-k="room">Done</button></aside></div>`;
+      ${tab === 'style' ? style : panelSection(p, ps.panel, ps.block, panelSampleFacts(p, facts), r.id)}
+      ${tab === 'hud' && ps.panel ? '' : '<button class="btn block" data-act="crumb" data-k="room">Done</button>'}</aside></div>`;
 }
 
 export function viewPlay(): string {

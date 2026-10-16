@@ -12,6 +12,7 @@ import type { Character, ChoiceStep, CompareOp, DoorStep, Effect, Placement, Pro
 import { EXPRESSIONS, allMarks, markArt, applyToScene, esc, nextMoment, sayHTML, sceneHTML, startScene } from '@story-engine/runtime';
 import type { Scene } from '@story-engine/runtime';
 import { musicSelect, soundSelect } from './widgets';
+import { itemStepGive, itemStepInput, itemStepPanel, itemStepText, newItemStep } from './items';
 
 export interface MapCtx {
   /** The line tool window that is open. */
@@ -163,6 +164,7 @@ export function mapHTML(ctx: MapCtx): string {
     if (s.t === 'panel') return `<button ${attrs}><span class="tag">Interface</span><span class="txt">${s.show ? 'Show' : 'Hide'} ${esc(s.name)}</span></button>`;
     if (s.t === 'sound') return `<button ${attrs}><span class="tag">${s.stop ? 'Stop' : 'Sound'}</span><span class="txt">${esc(soundText(s))}</span></button>`;
     if (s.t === 'music') return `<button ${attrs}><span class="tag">Music</span><span class="txt">${s.track ? `♫ ${esc(s.track)}${s.once ? ' (once)' : ''}` : 'Silence'}</span></button>`;
+    if (itemStepText(ctx.project, s)) return `<button ${attrs}><span class="tag">Item</span><span class="txt">${esc(itemStepText(ctx.project, s)!)}</span></button>`;
     if (s.t === 'change') return `<button ${attrs}><span class="tag">Change</span><span class="txt">${esc(s.effects.map(effectText).join(', '))}</span></button>`;
     if (s.t === 'note') return `<button ${attrs}><span class="tag">Note</span><span class="txt">${esc(s.text)}</span></button>`;
     if (s.t === 'mark' || s.t === 'loop' || s.t === 'path') return `<button ${attrs}><span class="tag">Stage</span><span class="txt">${esc(stageText(s))}</span></button>`;
@@ -402,7 +404,7 @@ export function mapScene(ctx: MapCtx, open: boolean): string {
   const game = say ? sayHTML(say.who, say.text === '...' ? '' : say.text, false) : '';
   const isPath = step?.t === 'path';
   const where = isPath ? (ctx.pen ? 'Draw the path in the picture.' : 'Drag a dot to move it, click one to change things there.') : !step ? (sel.startsWith('add:') ? 'Pick a step to see the scene there.' : 'As the conversation starts.')
-    : say ? (say.who ? `At ${esc(say.who)}'s line.` : 'At this line of narration.') : `At this step: ${esc(stepLabel(step))}.`;
+    : say ? (say.who ? `At ${esc(say.who)}'s line.` : 'At this line of narration.') : `At this step: ${esc(stepLabel(step, ctx.project))}.`;
   const on = scene.chars.filter(c => c.visible).length;
   const head = `<div class="msceneh"><b>Scene</b><span class="hint">${where}${step && on && !isPath ? ' Drag anyone to place them from here on.' : ''}</span><button class="btn small quiet" data-act="scene-toggle">${open ? 'Hide' : 'Show the scene'}</button></div>`;
   if (!open) return `<div class="mscene closed">${head}</div>`;
@@ -410,12 +412,12 @@ export function mapScene(ctx: MapCtx, open: boolean): string {
     ${isPath ? `<div class="row"><button class="btn small" data-act="path-play">▶ Play the path</button><button class="btn small quiet" data-act="path-draw">✎ Draw again</button></div>` : ''}</div>`;
 }
 
-function stepLabel(s: Step): string {
+function stepLabel(s: Step, project: Project): string {
   switch (s.t) {
     case 'show': case 'move': case 'hide': case 'mark': case 'loop': case 'path': return stageText(s);
     case 'choice': return 'the player chooses';
     case 'if': return `only if ${conditionText(s.cond)}`;
-    case 'change': return `change ${s.effects.map(effectText).join(', ')}`;
+    case 'change': return itemStepText(project, s)?.toLowerCase() ?? `change ${s.effects.map(effectText).join(', ')}`;
     case 'music': return s.track ? `music ${s.track}` : 'the music stops';
     case 'sound': return soundText(s).replace(/^♪ /, 'sound ');
     case 'panel': return `${s.show ? 'show' : 'hide'} the ${s.name} panel`;
@@ -602,6 +604,7 @@ const kinds = (top: boolean, hasParts: boolean) => [
   ['choice', 'Choice', 'The player picks one of several answers'],
   ['if', 'Only if', 'Take one path or another depending on story facts'],
   ['change', 'Change something', 'Change a story fact without saying anything'],
+  ['item', 'Give or take an item', 'The player gets something, such as a key, or loses it'],
   ['music', 'Music', 'Start, change or stop the background music'],
   ['sound', 'Sound', 'Play a sound, or stop one sound or all of them'],
   ['panel', 'Show or hide a panel', 'An inventory, a status bar or another panel from Look › Interface'],
@@ -757,6 +760,7 @@ export function mapSide(ctx: MapCtx): string {
         ${del('Delete this condition and both paths')}`;
     }
     case 'change':
+      if (itemStepText(ctx.project, step)) return itemStepPanel(ctx.project, step, header, del());
       return `${header('Change something')}${facts}${effectRows(step.effects)}${del()}`;
     case 'music':
       return `${header('Music')}
@@ -840,6 +844,7 @@ function newStep(kind: string, ctx: MapCtx, parts: string[]): Step {
     case 'choice': return { t: 'choice', options: [{ text: 'First answer', effects: [], steps: [] }, { text: 'Second answer', effects: [], steps: [] }] };
     case 'if': return { t: 'if', cond: { fact: 'affection', op: '>=', value: 5 }, then: [], else: [] };
     case 'change': return { t: 'change', effects: [{ fact: 'affection', op: '+', value: 1 }] };
+    case 'item': return newItemStep(ctx.project);
     case 'music': return { t: 'music', track: (ctx.project.sounds ?? []).find(x => x.music)?.name ?? '' };
     case 'panel': return { t: 'panel', name: ctx.project.panels?.[0]?.name ?? 'Inventory', show: true };
     case 'sound': return { t: 'sound', name: (ctx.project.sounds ?? []).find(x => !x.music)?.name ?? '...' };
@@ -975,6 +980,7 @@ export function mapAction(ctx: MapCtx, act: string, k: string): MapResult | unde
       const wasSel = ctx.sel === from;
       return commit(wasSel || !ctx.sel ? stepPathOf(list, at) : ctx.sel);
     }
+    case 'item-give': return itemStepGive(getStep(steps, path), !!k) ? commit(ctx.sel) : undefined;
     case 'pnl-show': {
       const step = getStep(steps, path);
       if (step?.t !== 'panel') return undefined;
@@ -1136,6 +1142,7 @@ export function mapInput(ctx: MapCtx, field: string, k: string, value: string): 
   if (!step) return undefined;
   let panel = false;
   const text = value.replace(/\s*\n\s*/g, ' ');
+  if (field.startsWith('item-')) { if (!itemStepInput(ctx.project, step, field, value)) return undefined; ctx.el.script = writeScript(steps); return { sel: ctx.sel, panel: true }; }
 
   if (field.startsWith('eff-')) {
     const e = effectsAt(steps, path, opt)?.[Number(k)];
