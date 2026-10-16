@@ -60,7 +60,7 @@ export function viewHome(stories: StoryInfo[], currentId: string | null): string
       <div class="row"><button class="btn play" data-act="new-story">+ New story</button><button class="btn small" data-act="import-story">Open a file</button>${stories.length ? '<button class="btn small quiet" data-act="new-sample">Add the sample story</button>' : ''}</div></div>
     ${first}
     <div class="map stories">${cards}</div>
-    <p class="hint">To keep a backup or move a story to another computer, open it and use Save to file on its Story map. Open a file adds it here as a new story.</p></div>`;
+    <p class="hint">To keep a backup or move a story to another computer, open it and use Save to file under Share. Open a file adds it here as a new story.</p></div>`;
 }
 
 /** Which rooms each room leads to, through Go to in its conversations. */
@@ -123,24 +123,34 @@ function marksSection(p: Project): string {
     <div class="row"><button class="btn small" data-act="mark-add">+ Add your own mark</button></div></section>`;
 }
 
-export function viewMap(p: Project, ui: UI, errors = 0): string {
+export function viewMap(p: Project, ui: UI, fresh: ReadonlySet<string> = new Set()): string {
   const actions = ui.confirmReset
     ? `<span class="hint">Erase everything?</span><button class="btn small danger" data-act="reset">Yes, start over</button><button class="btn small quiet" data-act="cancel">Keep it</button>`
-    : `<button class="btn small" data-act="library">Pictures &amp; sounds</button><button class="btn small" data-act="save-file">Save to file</button><button class="btn small quiet" data-act="ask-reset">Start over</button>`;
+    : `<button class="btn small quiet" data-act="ask-reset">Start over</button>`;
   const links = roomLinks(p);
   const cards = p.rooms.map((r, i) => {
     const out = links.get(r.id) ?? [];
     const names = out.map(id => p.rooms.find(x => x.id === id)?.name).filter(Boolean) as string[];
     const stuck = p.rooms.length > 1 && !out.length;
-    return `<button class="card roomcard" data-act="open-room" data-k="${esc(r.id)}"><span class="pic">${backdropHTML(r.bg)}${i === 0 ? '<span class="badge start">Start</span>' : ''}${stuck ? '<span class="badge stuck" title="No conversation or area leads out of this room">No way out</span>' : ''}</span><span class="meta"><b>${esc(r.name)}</b><span>${r.els.filter(e => !e.offstage).length} ${r.els.length === 1 ? 'thing' : 'things'} placed${r.auto ? ' · starts talking right away' : ''}</span>${names.length ? `<span class="leads">→ ${names.map(esc).join(', ')}</span>` : ''}</span></button>`;
+    // A room changed in the last few minutes is still being built, not a mistake.
+    const badge = !stuck ? '' : fresh.has(r.id)
+      ? '<span class="badge unfinished" title="Nothing leads on from this room yet">Unfinished</span>'
+      : '<span class="badge stuck" title="No conversation or area leads out of this room">No way out</span>';
+    return `<button class="card roomcard" data-act="open-room" data-k="${esc(r.id)}"><span class="pic">${backdropHTML(r.bg)}${i === 0 ? '<span class="badge start">Start</span>' : ''}${badge}</span><span class="meta"><b>${esc(r.name)}</b><span>${r.els.filter(e => !e.offstage).length} ${r.els.length === 1 ? 'thing' : 'things'} placed${r.auto ? ' · starts talking right away' : ''}</span>${names.length ? `<span class="leads">→ ${names.map(esc).join(', ')}</span>` : ''}</span></button>`;
   }).join('');
-  const publish = `<div class="publish">
-      <label class="field"><span>Name of your story</span><input type="text" id="story-title" data-in="story-title" value="${esc(p.title ?? '')}" placeholder="Untitled story"></label>
-      <div class="publishgo"><button class="btn play" data-act="make-game"${errors ? ` data-confirm="Check found ${errors} ${errors === 1 ? 'error' : 'errors'}. Make it anyway?"` : ''}>Make a game file</button><p class="hint">One file with your whole game. Open it in any browser, or upload it to itch.io (as an HTML game) or any website so others can play. Its typeface loads from the internet; offline a similar one shows.</p></div></div>`;
-  return `<div class="side"><div class="maphead"><div><h2>Story map</h2><p class="hint">Every room in this story. Click one to work in it. Save to file keeps a copy you can move or back up.</p></div><div class="row">${actions}</div></div>
-    ${publish}
+  return `<div class="side"><div class="maphead"><div><h2>Story map</h2><p class="hint">Every room in this story. Click one to work in it.</p></div><div class="row">${actions}</div></div>
     <div class="map">${cards}<button class="card new" data-act="new-room">+ New room</button></div>
     <svg class="roomlinks" id="roomlinks" aria-hidden="true"></svg></div>`;
+}
+
+/** The Share sheet: the story's name, the game file, and a copy to keep. */
+export function shareSheet(p: Project, errors = 0): string {
+  return `<div class="sheethead"><h2 id="sheet-title">Share your story</h2><button class="btn small quiet" data-act="share-close">Close</button></div>
+    <label class="field"><span>Name of your story</span><input type="text" id="story-title" data-in="story-title" value="${esc(p.title ?? '')}" placeholder="Untitled story"></label>
+    <div class="sharego"><button class="btn ink" data-act="make-game"${errors ? ` data-confirm="Check found ${errors} ${errors === 1 ? 'error' : 'errors'}. Make it anyway?"` : ''}>Make a game file</button>
+      <p class="hint">One file with your whole game. Open it in any browser, or upload it to itch.io (as an HTML game) or any website so others can play. Its typeface loads from the internet; offline a similar one shows.</p></div>
+    <div class="sharego"><button class="btn small" data-act="save-file">Save to file</button>
+      <p class="hint">A copy of the story itself, to back up or move to another computer. Open it again with Open a file on Your stories.</p></div>`;
 }
 
 /** Pictures and sounds the story uses: marks, sounds and music. */
@@ -445,7 +455,7 @@ Go to part Later
 function convoBar(mode: ConvoMode): string {
   const tab = (m: ConvoMode, label: string) => `<button role="tab" class="seg${mode === m ? ' on' : ''}" aria-selected="${mode === m}" data-act="convo-mode" data-k="${m}">${label}</button>`;
   return `<div class="convobar"><div class="segs" role="tablist" aria-label="How to show the conversation">${tab('map', 'Map')}${tab('script', 'Script')}</div>
-    <div class="row"><button class="btn small" id="play-from" data-act="play-here" title="Play from the step marked in the map"${mode === 'map' ? '' : ' hidden'} disabled>Play from the marked step</button><button class="btn small play" data-act="play-convo">Play this conversation</button></div></div>`;
+    <div class="row"><button class="btn small" id="play-from" data-act="play-here" title="Play from the step marked in the map"${mode === 'map' ? '' : ' hidden'} disabled>Play from the marked step</button><button class="btn small" data-act="play-convo">Play this conversation</button></div></div>`;
 }
 
 export function viewConvo(p: Project, r: Room, e: StoryElement, mode: ConvoMode, map: { canvas: string; side: string; scene: string; sceneOpen?: boolean }): string {
@@ -589,10 +599,29 @@ export function viewPlay(): string {
 
 const LEVEL_WORDS = { error: 'Needs fixing', warning: 'Probably a mistake', note: 'Note' } as const;
 
+/** One problem on the Check page, with Show (or Open the room) and any one-click fix. */
+function probCard(p: Project, x: Problem, i: number): string {
+  const roomOnly = !x.elId && !x.hud && !x.panel;
+  let fix = '';
+  if (x.fix === 'door-in') {
+    const from = p.rooms.filter(r => r.id !== x.roomId);
+    const at = p.rooms.findIndex(r => r.id === x.roomId);
+    // The room just before it in the list is the likeliest way in.
+    const guess = p.rooms[Math.max(0, at - 1)]?.id;
+    if (from.length) fix = `<div class="probfix"><label for="fix-from-${i}">Make a door here from</label><select id="fix-from-${i}">${from.map(r => `<option value="${esc(r.id)}"${r.id === guess ? ' selected' : ''}>${esc(r.name)}</option>`).join('')}</select><button class="btn small" data-act="fix-door" data-k="${i}">Make the door</button></div>`;
+  }
+  return `<div class="prob ${x.unfinished ? 'unfinished' : x.level}"><div class="probhead"><span class="lvl">${x.unfinished ? 'Unfinished' : LEVEL_WORDS[x.level]}</span><b>${esc(x.where)}</b></div><p>${esc(x.text)}</p><button class="btn small${x.unfinished ? ' quiet' : ''}" data-act="goto-problem" data-k="${i}">${roomOnly ? 'Open the room' : 'Show'}</button>${fix}</div>`;
+}
+
 export function viewCheck(p: Project, problems: Problem[], test: { use: boolean; values: Record<string, string> }): string {
-  const list = problems.length
-    ? problems.map((x, i) => `<div class="prob ${x.level}"><div class="probhead"><span class="lvl">${LEVEL_WORDS[x.level]}</span><b>${esc(x.where)}</b></div><p>${esc(x.text)}</p><button class="btn small" data-act="goto-problem" data-k="${i}">Show</button></div>`).join('')
-    : '<p class="allgood">No problems found. Every door leads somewhere, every look exists, and every step can be reached.</p>';
+  const cards = problems.map((x, i) => [x, i] as const);
+  const real = cards.filter(([x]) => !x.unfinished), building = cards.filter(([x]) => x.unfinished);
+  const list = real.length
+    ? real.map(([x, i]) => probCard(p, x, i)).join('')
+    : `<p class="allgood">${building.length ? 'No problems found outside the rooms still being built.' : 'No problems found. Every door leads somewhere, every look exists, and every step can be reached.'}</p>`;
+  const unfinished = building.length
+    ? `<section class="probgroup"><div class="label">Still being built</div><p class="hint">Rooms you changed in the last few minutes. They are not counted as problems yet.</p><div class="probs">${building.map(([x, i]) => probCard(p, x, i)).join('')}</div></section>`
+    : '';
   const facts = storyFacts(p);
   const rows = facts.map(f => {
     const kind = factKind(p, f), v = test.values[f] ?? '';
@@ -601,12 +630,13 @@ export function viewCheck(p: Project, problems: Problem[], test: { use: boolean;
       : `<input type="${kind === 'number' ? 'number' : 'text'}" id="tf-${esc(f)}" data-in="test-fact" data-k="${esc(f)}" value="${esc(v)}" placeholder="not set">`;
     return `<label class="tfact"><span>${esc(f)}</span>${input}</label>`;
   }).join('');
-  return `<div class="work"><div class="side"><div class="maphead"><div><h2>Check your story</h2><p class="hint">Everything here would otherwise only show up while playing. Click Show to go to the step.</p></div></div>
-      <div class="probs">${list}</div></div>
-    <aside class="side"><h2>Test values</h2>
-      <p class="hint">Try the story with story facts already set, for example to test a line that needs affection 10. Players start with the start values set on characters, and every other fact unset.</p>
-      ${facts.length ? `<label class="check"><input type="checkbox" id="test-use" data-in="test-use"${test.use ? ' checked' : ''}><span>Use these values when I press Play</span></label>
-      <div class="tfacts">${rows}</div>
-      <button class="btn small quiet" data-act="test-clear">Clear test values</button>` : '<p class="hint">Your story has no story facts yet.</p>'}
-    </aside></div>`;
+  return `<div class="side checkpage"><div class="maphead"><div><h2>Check your story</h2><p class="hint">Things players would otherwise only run into while playing. Click Show to go there.</p></div></div>
+      <div class="probs">${list}</div>
+      ${unfinished}
+      <details class="more testvals" id="test-values"${test.use ? ' open' : ''}><summary>Test values${test.use ? ' (on)' : ''}</summary><div>
+        <p class="hint">Try the story with story facts already set, for example to test a line that needs affection 10. Players start with the start values set on characters, and every other fact unset.</p>
+        ${facts.length ? `<label class="check"><input type="checkbox" id="test-use" data-in="test-use"${test.use ? ' checked' : ''}><span>Use these values when I press Play</span></label>
+        <div class="tfacts">${rows}</div>
+        <div class="row"><button class="btn small quiet" data-act="test-clear">Clear test values</button></div>` : '<p class="hint">Your story has no story facts yet.</p>'}
+      </div></details></div>`;
 }

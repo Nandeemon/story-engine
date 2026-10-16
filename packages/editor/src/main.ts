@@ -1,12 +1,13 @@
 import '@story-engine/runtime/game.css';
 import './editor.css';
+import './frame.css';
 import { areaPoints, elementConds, setAreaShape, cleanPanelName, newBlock, panelFromTemplate, renamePanelInScript, factsToReach, startFacts, pathAt, simplifyPath, walkSteps, characterOf, cleanLookName, cleanMarkName, cleanSoundName, factName, renameMarkInScript, renameSoundInScript, toValue, createProject, createRoom, findLook, findRoomByName, newId, normalizeProject, parseScript, renameLookInScript, renameRoomInScript, renameSpeakerInScript, uniqueLookName, writeScript, getStep } from '@story-engine/engine-core';
 import type { Condition, Panel, PanelBlock, PanelTemplate, Character, CharacterLook, FactDef, Facts, Idle, MarkDef, PathStep, Step, Project, Room, StoryElement } from '@story-engine/engine-core';
 import { BACKDROPS, CHARACTERS, OBJECTS, STARTER_MARKS, findMark, backdropHTML, createPlayer, elementArt, elementStyle, areaArt, esc, fxVars, lookStyle, sayHTML } from '@story-engine/runtime';
 import type { Player, PlayState } from '@story-engine/runtime';
 import { addStory, deleteStory, duplicateStory, listStories, loadStory, sampleProject, saveStory, whenSaved } from './store';
 import type { StoryInfo } from './store';
-import { inserts, lookStage, roomLinks, scriptStatus, viewCheck, viewConvo, viewHome, viewLibrary, viewLook, viewMap, viewPlay, viewRoom } from './views';
+import { inserts, lookStage, roomLinks, scriptStatus, shareSheet, viewCheck, viewConvo, viewHome, viewLibrary, viewLook, viewMap, viewPlay, viewRoom } from './views';
 import { factKind, findProblems, storyFacts } from './problems';
 import type { Problem } from './problems';
 import type { Adding, ConvoMode, LookTab, UI, View } from './views';
@@ -112,7 +113,29 @@ function toast(text: string): void {
   t.textContent = text;
   t.hidden = false;
   clearTimeout(toastTimer);
-  toastTimer = window.setTimeout(() => { t.hidden = true; }, 2600);
+  toastTimer = window.setTimeout(() => { t.hidden = true; }, 3000);
+}
+/** Toasts belong to the view they were shown in. */
+function clearToast(): void {
+  clearTimeout(toastTimer);
+  const t = $('#toast');
+  if (t) t.hidden = true;
+}
+
+/* Rooms changed in the last few minutes are still being built: Check lists them as
+   unfinished instead of flagging them for having no way in or on yet. */
+const FRESH_MS = 5 * 60 * 1000;
+const touched = new Map<string, number>();
+let knownRooms = new Set<string>();
+function noteTouched(): void {
+  const now = Date.now();
+  if (ui.view === 'room' || ui.view === 'convo') touched.set(ui.roomId, now);
+  for (const r of project.rooms) if (!knownRooms.has(r.id)) touched.set(r.id, now);
+  knownRooms = new Set(project.rooms.map(r => r.id));
+}
+function freshRooms(): Set<string> {
+  const now = Date.now();
+  return new Set([...touched].filter(([id, t]) => now - t < FRESH_MS && project.rooms.some(r => r.id === id)).map(([id]) => id));
 }
 
 /* ---------- Undo and redo, for the whole project ----------
@@ -135,6 +158,7 @@ const fromSnapshot = (json: string) => JSON.parse(json, (_k, v) => (typeof v ===
 function record(before: string | null): void {
   if (before === null || before === snapshot()) return;
   past.push(before);
+  noteTouched();
   if (past.length > 80) past.shift();
   future.length = 0;
   syncUndo();
@@ -182,6 +206,8 @@ function redo(): void {
 
 /* ---------- Rendering ---------- */
 
+/** Where you are: Story › Room › Conversation. Story-wide places (Look, Check,
+    Characters, Pictures & sounds) sit under the story, never under a room. */
 function crumbs(): [string, string][] {
   const r = room(), e = selected();
   if (ui.view === 'play') {
@@ -189,36 +215,139 @@ function crumbs(): [string, string][] {
     return [['play', `Playing: ${playing.name}`]];
   }
   if (ui.view === 'home') return [['home', 'Your stories']];
-  const list: [string, string][] = [['home', 'Your stories'], ['map', project.title?.trim() || 'Story map']];
-  if (ui.view !== 'map') list.push(['room', r.name]);
-  if (ui.view === 'convo' && e) list.push(['el', e.name], ['convo', 'Conversation']);
+  const list: [string, string][] = [['map', project.title?.trim() || 'Story map']];
+  if (ui.view === 'room' || ui.view === 'convo') list.push(['room', r.name]);
+  if (ui.view === 'convo' && e) list.push(['convo', `Conversation · ${e.name}`]);
   if (ui.view === 'look') list.push(['look', 'Look']);
-  if (ui.view === 'library') { list.splice(2); list.push(['library', 'Pictures & sounds']); }
-  if (ui.view === 'cast') { list.splice(2); list.push(['cast', 'Characters']); const c = project.characters.find(x => x.id === castSel); if (c) list.push(['cast-one', c.name]); }
+  if (ui.view === 'library') list.push(['library', 'Pictures & sounds']);
+  if (ui.view === 'cast') { list.push(['cast', 'Characters']); const c = project.characters.find(x => x.id === castSel); if (c) list.push(['cast-one', c.name]); }
   if (ui.view === 'check') list.push(['check', 'Check']);
   return list;
 }
 
+/** Errors and warnings Check found, for its badge: red only when something needs fixing. */
+function checkCount(): { n: number; errors: number } {
+  problems = findProblems(project, freshRooms());
+  const errors = problems.filter(x => x.level === 'error').length;
+  return { n: errors + problems.filter(x => x.level === 'warning').length, errors };
+}
+const checkBadge = (c: { n: number; errors: number }) => c.n ? ` <span class="badge${c.errors ? '' : ' warn'}" title="${c.errors ? `${c.errors} to fix` : `${c.n} to look at`}">${c.n}</span>` : '';
+
 /** The Check button shows how many problems need a look. */
-function checkButton(): string {
-  problems = findProblems(project);
-  const n = problems.filter(x => x.level !== 'note').length;
+function checkButton(c = checkCount()): string {
   const t = testFacts();
   const testing = t && Object.keys(t).length ? `<button class="btn testpill" data-act="test-off" title="Play uses your test values. Click to play with every fact unset again.">Test values on <span aria-hidden="true">×</span></button>` : '';
-  return `${testing}<button class="btn${ui.view === 'check' ? ' ink' : ''}" data-act="check" title="Check your story for problems">Check${n ? ` <span class="badge">${n}</span>` : ''}</button>`;
+  return `${testing}<button class="btn small quiet${ui.view === 'check' ? ' on' : ''}" data-act="check" title="Check your story for problems">Check${checkBadge(c)}</button>`;
+}
+
+const RAIL_KEY = 'story-engine:rail';
+let railIcons = false;
+try { railIcons = localStorage.getItem(RAIL_KEY) === 'icons'; } catch { /* labels shown */ }
+
+const ICON: Record<string, string> = {
+  map: '<rect x="3" y="4" width="7" height="6" rx="1.5"/><rect x="14" y="14" width="7" height="6" rx="1.5"/><rect x="14" y="4" width="7" height="6" rx="1.5"/><path d="M10 7h4M17.5 10v4"/>',
+  cast: '<circle cx="12" cy="8" r="3.5"/><path d="M5 20c.8-4 3.6-6 7-6s6.2 2 7 6"/>',
+  library: '<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="m4 17 5-4 4 3 3-2 4 3"/>',
+  look: '<path d="M12 3a9 9 0 1 0 0 18c1.2 0 1.8-.8 1.8-1.7 0-1.3-1.1-1.6-1.1-2.7 0-1 .8-1.6 1.8-1.6H17a4 4 0 0 0 4-4C21 6.6 17 3 12 3Z"/><circle cx="7.5" cy="11" r="1.1"/><circle cx="10" cy="7.2" r="1.1"/><circle cx="14.5" cy="7.2" r="1.1"/>',
+  check: '<circle cx="12" cy="12" r="9"/><path d="m8 12.3 2.7 2.7L16 9.6"/>',
+  fold: '<path d="m14 7-5 5 5 5"/>'
+};
+const icon = (k: string) => `<svg class="ico" viewBox="0 0 24 24" aria-hidden="true">${ICON[k]}</svg>`;
+
+/** Story-wide places: the rail on wide screens, the ⋯ menu on phones. */
+function places(c: { n: number; errors: number }): [string, string, string, string][] {
+  return [['story-map', 'map', 'Story map', ''], ['cast', 'cast', 'Characters', ''], ['library', 'library', 'Pictures & sounds', ''], ['look', 'look', 'Look', ''], ['check', 'check', 'Check', checkBadge(c)]];
+}
+const placeView: Record<string, View> = { 'story-map': 'map', cast: 'cast', library: 'library', look: 'look', check: 'check' };
+
+/** What "From here" plays while editing, or null where only the start makes sense. */
+function playHere(): { label: string; run: () => void } | null {
+  const r = room(), e = selected();
+  if (ui.view === 'convo' && e) {
+    if (mapSel && !mapSel.startsWith('add:') && convoMode === 'map') { const path = mapSel.split('#')[0]; return { label: `${e.name}, from the marked step`, run: () => startPlay(e, path) }; }
+    return { label: `${e.name}'s conversation`, run: () => startPlay(e) };
+  }
+  if ((ui.view === 'room' || ui.view === 'look') && r !== project.rooms[0]) return { label: r.name, run: () => startPlay(undefined, undefined, r.id) };
+  return null;
+}
+
+function playButton(): string {
+  const here = playHere();
+  if (!here) return `<button class="btn play" data-act="play" title="Play from the start">Play</button>`;
+  return `<div class="popwrap"><button class="btn play" data-act="play-menu" aria-haspopup="menu" aria-expanded="false" aria-controls="playmenu">Play <span class="caret" aria-hidden="true">▾</span></button>
+    <div class="popmenu" id="playmenu" role="menu" hidden>
+      <button role="menuitem" data-act="play-here-top"><b>From here</b><span>${esc(here.label)}</span></button>
+      <button role="menuitem" data-act="play"><b>From the start</b><span>${esc(project.rooms[0].name)}</span></button>
+    </div></div>`;
 }
 
 function renderBar(): void {
   const list = crumbs();
   $('#crumbs')!.innerHTML = list.map(([k, n], i) =>
     `${i ? '<i>›</i>' : ''}<button data-act="crumb" data-k="${k}"${i === list.length - 1 ? ' aria-current="page"' : ''}>${esc(n)}</button>`).join('');
+  const editing = ui.view !== 'home' && ui.view !== 'play';
+  $('#backbtn')!.hidden = ui.view === 'home';
+  const c = editing ? checkCount() : { n: 0, errors: 0 };
+  const more = editing ? `<div class="popwrap phoneonly"><button class="btn small quiet morebtn" data-act="more-menu" aria-haspopup="menu" aria-expanded="false" aria-controls="moremenu" aria-label="More" title="More">⋯${c.errors ? '<i class="dot" aria-hidden="true"></i>' : ''}</button>
+      <div class="popmenu" id="moremenu" role="menu" hidden>
+        ${places(c).map(([act, ic, label, badge]) => `<button role="menuitem" data-act="${act}"${placeView[act] === ui.view ? ' aria-current="page"' : ''}>${icon(ic)}<b>${label}${badge}</b></button>`).join('')}
+        <hr>
+        <button role="menuitem" data-act="undo"${past.length ? '' : ' disabled'}><b>Undo</b></button>
+        <button role="menuitem" data-act="redo"${future.length ? '' : ' disabled'}><b>Redo</b></button>
+        <button role="menuitem" data-act="share"><b>Share</b></button>
+      </div></div>` : '';
   $('#tools')!.innerHTML = ui.view === 'home' ? ''
     : ui.view === 'play'
     ? '<button class="btn ink" data-act="stop">Stop</button>'
-    : `<button class="btn small quiet" data-act="undo" title="Undo (Ctrl+Z)"${past.length ? '' : ' disabled'}>Undo</button>
+    : `<span class="widetools"><button class="btn small quiet" data-act="undo" title="Undo (Ctrl+Z)"${past.length ? '' : ' disabled'}>Undo</button>
        <button class="btn small quiet" data-act="redo" title="Redo (Ctrl+Shift+Z)"${future.length ? '' : ' disabled'}>Redo</button>
-       ${checkButton()}<button class="btn${ui.view === 'cast' ? ' ink' : ''}" data-act="cast">Characters</button><button class="btn${ui.view === 'look' ? ' ink' : ''}" data-act="look">Look</button><button class="btn play" data-act="play">Play</button>`;
+       ${checkButton(c)}<button class="btn small quiet" data-act="share" title="Name your story and make a game file">Share</button></span>${more}${playButton()}`;
+  const rail = $('#rail')!;
+  rail.hidden = !editing;
+  document.body.classList.toggle('rail-icons', railIcons);
+  if (editing) rail.innerHTML = `<ul>${places(c).map(([act, ic, label, badge]) =>
+      `<li><button data-act="${act}"${placeView[act] === ui.view ? ' aria-current="page"' : ''} title="${label}">${icon(ic)}<span class="lbl">${label}</span>${badge}</button></li>`).join('')}</ul>
+    <button class="railfold" data-act="rail-toggle" aria-pressed="${railIcons}" title="${railIcons ? 'Show labels' : 'Icons only'}">${icon('fold')}<span class="lbl">Icons only</span></button>`;
 }
+
+function closeMenus(except?: Element | null): void {
+  document.querySelectorAll<HTMLElement>('.popmenu:not([hidden])').forEach(m => {
+    if (m === except) return;
+    m.hidden = true;
+    m.parentElement?.querySelector('[aria-expanded]')?.setAttribute('aria-expanded', 'false');
+  });
+}
+function toggleMenu(id: string): void {
+  const m = document.getElementById(id);
+  if (!m) return;
+  closeMenus(m);
+  m.hidden = !m.hidden;
+  m.parentElement?.querySelector('[aria-expanded]')?.setAttribute('aria-expanded', String(!m.hidden));
+  if (!m.hidden) m.querySelector<HTMLElement>('[role=menuitem]:not(:disabled)')?.focus();
+}
+document.addEventListener('click', ev => {
+  const t = ev.target as HTMLElement;
+  if (!t.closest('.popwrap')) closeMenus();
+}, true);
+document.addEventListener('keydown', ev => {
+  const open = document.querySelector<HTMLElement>('.popmenu:not([hidden])');
+  if (!open) return;
+  if (ev.key === 'Escape') { ev.stopImmediatePropagation(); closeMenus(); open.parentElement?.querySelector<HTMLElement>('[aria-haspopup]')?.focus(); return; }
+  if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
+    ev.preventDefault();
+    const items = [...open.querySelectorAll<HTMLElement>('[role=menuitem]:not(:disabled)')];
+    const i = items.indexOf(document.activeElement as HTMLElement);
+    items[(i + (ev.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length]?.focus();
+  }
+}, true);
+
+function openShare(): void {
+  const d = $<HTMLDialogElement>('#sheet')!;
+  d.innerHTML = `<div class="sheetbody">${shareSheet(project, problems.filter(x => x.level === 'error').length)}</div>`;
+  if (!d.open) d.showModal();
+}
+// A click on the backdrop closes the sheet.
+$('#sheet')!.addEventListener('click', ev => { if (ev.target === ev.currentTarget) ($('#sheet') as HTMLDialogElement).close(); });
 
 /** Arrows between room cards on the Story map, for every Go to from one room to another. */
 function drawRoomLinks(): void {
@@ -266,8 +395,12 @@ function keepOpenDetails(draw: () => void): void {
 
 function render(): void { keepOpenDetails(renderView); rememberPlace(); }
 
+let shownView: View | null = null;
 function renderView(): void {
   document.body.classList.toggle('compare-difference', lookCompare === 'difference');
+  // One app frame: the view is named on the body, and toasts end with the view they belong to.
+  document.body.dataset.view = ui.view;
+  if (shownView !== ui.view) { if (shownView !== null) clearToast(); shownView = ui.view; }
   // The conversation view stretches to the whole window; other views keep a reading width.
   document.body.classList.toggle('wide', ui.view === 'convo');
   if (ui.view !== 'play' && player) { player.destroy(); player = null; }
@@ -279,7 +412,7 @@ function renderView(): void {
     case 'home': main.innerHTML = viewHome(stories, storyId); break;
     case 'cast': main.innerHTML = viewCast(project, castSel); break;
     case 'library': main.innerHTML = viewLibrary(project); break;
-    case 'map': main.innerHTML = viewMap(project, ui, problems.filter(x => x.level === 'error').length); requestAnimationFrame(drawRoomLinks); break;
+    case 'map': main.innerHTML = viewMap(project, ui, freshRooms()); requestAnimationFrame(drawRoomLinks); break;
     case 'room':
       main.innerHTML = viewRoom(project, ui, r, e);
       if (ui.drawArea) {
@@ -443,7 +576,7 @@ function updateStrip(s: Readonly<PlayState>): void {
   renderBar();
 }
 
-function startPlay(fromElement?: StoryElement, startPath?: string): void {
+function startPlay(fromElement?: StoryElement, startPath?: string, fromRoom?: string): void {
   ui.back = ui.view === 'play' ? ui.back : ui.view;
   ui.view = 'play';
   render();
@@ -457,7 +590,7 @@ function startPlay(fromElement?: StoryElement, startPath?: string): void {
     }
   }
   player = createPlayer($('#player')!, project, {
-    roomId: fromElement ? room().id : undefined,
+    roomId: fromElement ? room().id : fromRoom,
     elementId: fromElement?.id,
     startPath,
     facts,
@@ -514,6 +647,7 @@ function enterProject(p: Project, id: string, view: View): void {
   storyId = id;
   past.length = 0; future.length = 0; images.clear(); imageKeys.clear();
   fieldSnapshot = null;
+  touched.clear(); knownRooms = new Set(p.rooms.map(r => r.id));
   ui.roomId = project.rooms[0].id;
   ui.sel = null;
   mapSel = null;
@@ -617,6 +751,8 @@ let lookCompare: 'see-through' | 'difference' = 'see-through';
 
 /** Actions that never change the project, so they are not recorded for Undo. */
 const NOT_RECORDED = new Set(['panel-sel', 'pblock-sel', 'area-shape', 'shape-undo', 'map-fold', 'map-fold-all', 'snd-try', 'voice-play', 'voice-upload', 'voice-rec', 'upload-video', 'area-cancel', 'door-cancel', 'edit-enter', 'library', 'win', 'path-draw', 'path-play', 'mark-add', 'music-add', 'cast-sound-add', 'sound-add', 'sound-play', 'cast', 'cast-open', 'cast-back', 'cast-new', 'cast-promote', 'cast-add-looks', 'cast-goto-room', 'cast-goto-convo', 'fx-try', 'scene-toggle', 'home', 'open-story', 'new-story', 'new-sample', 'import-story', 'duplicate-story', 'delete-story', 'test-off', 'look-tab', 'make-game', 'hud-sel', 'play-here', 'check', 'goto-problem', 'test-clear', 'once-lineup', 'look-compare', 'undo', 'redo', 'save-file', 'open-file', 'upload', 'play', 'play-convo', 'stop', 'convo-mode', 'look', 'crumb', 'add-looks', 'look-replace', 'once-picture', 'look-open', 'look-done']);
+
+for (const a of ['story-map', 'play-menu', 'play-here-top', 'more-menu', 'share', 'share-close', 'rail-toggle', 'go-back']) NOT_RECORDED.add(a);
 
 const actions: Record<string, (k: string) => void> = {
   crumb(k) {
@@ -744,7 +880,7 @@ const actions: Record<string, (k: string) => void> = {
     for (const r of project.rooms) if (r.music === x.name) { delete r.music; delete r.musicOnce; }
     save(); render();
   },
-  cast() { castSel = null; go(ui.view === 'cast' ? 'room' : 'cast'); },
+  cast() { castSel = null; go('cast'); },
   'cast-open'(k) { castSel = k; render(); window.scrollTo(0, 0); },
   'cast-back'() { castSel = null; render(); },
   'cast-new'() { pickCharacter(c => { castSel = c.id; go('cast'); toast(`${c.name} is ready. Add looks, or place ${c.name} in a room.`); }); },
@@ -872,7 +1008,7 @@ const actions: Record<string, (k: string) => void> = {
   },
   front() { const r = room(), e = selected(); if (!e) return; r.els = r.els.filter(x => x !== e).concat(e); save(); render(); },
   remove() { const r = room(); r.els = r.els.filter(x => x.id !== ui.sel); ui.sel = null; save(); render(); },
-  look() { go(ui.view === 'look' ? 'room' : 'look'); },
+  look() { go('look'); },
   'convo-mode'(k) {
     convoMode = k === 'script' ? 'script' : 'map';
     try { localStorage.setItem(MODE_KEY, convoMode); } catch { /* remembered for this session only */ }
@@ -923,7 +1059,19 @@ const actions: Record<string, (k: string) => void> = {
   play() { startPlay(); },
   'play-convo'() { startPlay(selected()); },
   'play-here'() { const e = selected(); if (e && mapSel && !mapSel.startsWith('add:')) startPlay(e, mapSel.split('#')[0]); },
-  check() { go(ui.view === 'check' ? 'room' : 'check'); },
+  check() { go('check'); },
+  'fix-door'(k) {
+    const pr = problems[Number(k)];
+    const to = pr && project.rooms.find(r => r.id === pr.roomId);
+    const from = project.rooms.find(r => r.id === $<HTMLSelectElement>(`#fix-from-${k}`)?.value);
+    if (!to || !from) return;
+    let name = `Door to ${to.name}`, n = 2;
+    while (from.els.some(e => e.name === name)) name = `Door to ${to.name} ${n++}`;
+    // A tall clickable area at the right edge of the picture, ready to be dragged over the real door.
+    from.els.push({ id: newId(), kind: 'area', name, x: 88, y: 86, size: 56, w: 14, hover: to.name, script: `Go to ${to.name}` });
+    save(); render();
+    toast(`Made a door in ${from.name} that goes to ${to.name}. Open ${from.name} to move it over the right spot.`);
+  },
   'goto-problem'(k) {
     const pr = problems[Number(k)];
     if (!pr) return;
@@ -1006,6 +1154,27 @@ const actions: Record<string, (k: string) => void> = {
   'look-tab'(k) { lookTab = k === 'hud' ? 'hud' : 'style'; render(); },
   'hud-sel'(k) { hudSel = hudSel === k ? null : k; render(); },
   'hud-remove'(k) { project.hud = (project.hud ?? []).filter(w => w.id !== k); if (!project.hud.length) delete project.hud; hudSel = null; save(); render(); },
+  'story-map'() { ui.sel = null; go('map'); },
+  'play-menu'() { const open = !$('#playmenu')?.hidden; renderBar(); if (!open) toggleMenu('playmenu'); },
+  'play-here-top'() { closeMenus(); const here = playHere(); if (here) here.run(); else startPlay(); },
+  'more-menu'() { toggleMenu('moremenu'); },
+  share() { closeMenus(); openShare(); },
+  'share-close'() { $<HTMLDialogElement>('#sheet')?.close(); },
+  'rail-toggle'() {
+    railIcons = !railIcons;
+    try { localStorage.setItem(RAIL_KEY, railIcons ? 'icons' : 'labels'); } catch { /* not remembered */ }
+    renderBar();
+    if (ui.view === 'map') requestAnimationFrame(drawRoomLinks);
+  },
+  'go-back'() {
+    if (ui.view === 'play') return actions.stop('');
+    if (ui.view === 'convo') return go('room');
+    if (ui.view === 'cast' && castSel) { castSel = null; return render(); }
+    if (ui.view === 'look') return go('room');
+    if (ui.view === 'map') return goHome();
+    ui.sel = null;
+    go('map');
+  },
   stop() {
     const back = ui.back === 'convo' && selected() ? 'convo' : ui.back === 'map' ? 'map' : 'room';
     if (back === 'convo') freshConvo = false;
@@ -1905,7 +2074,7 @@ document.addEventListener('click', ev => {
    that point at the old name when the field is left. */
 let fieldSnapshot: string | null = null;
 let renameFrom = '';
-const isField = (el: HTMLElement) => !!el.closest?.('#main') && /^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName);
+const isField = (el: HTMLElement) => !!el.closest?.('#main, #sheet') && /^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName);
 document.addEventListener('focusin', ev => {
   const t = ev.target as HTMLInputElement;
   if (!isField(t)) return;
@@ -2109,7 +2278,7 @@ document.addEventListener('input', ev => {
       e.script = t.value ? `Go to ${t.value}` : '';
       save(); render(); return;
     }
-    case 'story-title': { const v = t.value.replace(/\s+/g, ' '); if (v.trim()) project.title = v; else delete project.title; break; }
+    case 'story-title': { const v = t.value.replace(/\s+/g, ' '); if (v.trim()) project.title = v; else delete project.title; const c = $('#crumbs [data-k="map"]'); if (c) c.textContent = project.title?.trim() || 'Story map'; break; }
     case 'test-use': test.use = t.checked; saveTest(); renderBar(); return;
     case 'hud-fact': { const w = hudWidget(t.dataset.k); if (w) { w.fact = t.value.trim().replace(/[^\w.]/g, '_') || 'fact'; refreshLookStage(); } break; }
     case 'hud-text': { const w = hudWidget(t.dataset.k); if (w) { w.text = t.value; refreshLookStage(); } break; }

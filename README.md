@@ -18,17 +18,19 @@ npm run check    # type-check, tests and build
 
 ## Your work
 
-The editor opens where you left off, or on **Your stories**: every story kept in this browser, each saved on its own. Make a **New story**, open one, **Duplicate** it to try something out, or **Delete** it. Click Story Engine at the top left (or Your stories in the path) to get back. The editor warns you if the browser stops being able to save. **Save to file** on a story's Story map downloads it, images included, as one `.story.json` file, and **Open a file** on Your stories adds such a file as a new story. Undo and Redo (Ctrl+Z, Ctrl+Shift+Z) cover every change to the project. Renaming a room updates every `Go to` that points at it, and renaming a character updates their lines.
+The editor opens where you left off, or on **Your stories**: every story kept in this browser, each saved on its own. Make a **New story**, open one, **Duplicate** it to try something out, or **Delete** it. Click Story Engine at the top left to get back. Inside a story, the rail on the left goes to the story-wide places (Story map, Characters, Pictures & sounds, Look and Check; it folds to icons only), and the path at the top shows where you are: Story › Room › Conversation. On a phone the header is one row (back, title, ⋯ and Play) and the ⋯ menu holds the rail. The editor warns you if the browser stops being able to save. **Save to file** under **Share** downloads the story, images included, as one `.story.json` file, and **Open a file** on Your stories adds such a file as a new story. Undo and Redo (Ctrl+Z, Ctrl+Shift+Z) cover every change to the project. Renaming a room updates every `Go to` that points at it, and renaming a character updates their lines.
 
 ## Sharing your game
 
-Give the story a name on the Story map and press **Make a game file**. You get one `.html` file with the whole game inside: the story, the pictures and the player, behind a start screen. Open it in any browser, send it to someone, or upload it to itch.io or any web host. Nothing of the editor is in it. (A link that plays the game straight from the editor would need a server, and is not built yet.)
+Press **Share** in the top bar, give the story a name and press **Make a game file**. You get one `.html` file with the whole game inside: the story, the pictures and the player, behind a start screen. Open it in any browser, send it to someone, or upload it to itch.io or any web host. Nothing of the editor is in it. (A link that plays the game straight from the editor would need a server, and is not built yet.)
 
 ## Testing your story
 
-**Check** in the top bar lists what would otherwise only show up while playing: doors to rooms that do not exist, looks a character does not have, names that are on no stage, steps that can never be reached, and rooms that nothing leads to. **Show** takes you to the step. The badge counts errors and warnings.
+**Check** lists what would otherwise only show up while playing: doors to rooms that do not exist, looks a character does not have, names that are on no stage, steps that can never be reached, and rooms that nothing leads to. **Show** takes you to the step (**Open the room** for a room). Errors are red, warnings amber; the badge counts both and is red only when something needs fixing. Rooms changed in the last few minutes are listed in grey as still being built, not as problems. A room nothing leads to offers **Make a door here from …**: it adds a clickable area in the room you pick that goes to this room, ready to drag into place.
 
-Under **Test values** in Check you can set story facts before playing, for example `affection = 12` to test a line that needs affection 10. Play says when it is using test values. In the conversation map, **Play from here** starts at the selected line, with the scene as it stands at that point.
+**Play** in the top bar opens a small menu: **From here** (the room you are in, or the conversation, from the marked step when one is marked) and **From the start**. On the Story map and in the start room it simply plays from the start.
+
+Under **Test values** (folded away at the bottom of Check) you can set story facts before playing, for example `affection = 12` to test a line that needs affection 10. Play says when it is using test values. In the conversation map, **Play from here** starts at the selected line, with the scene as it stands at that point.
 
 ## Script view
 
@@ -84,7 +86,7 @@ A line can give the speaker an effect: shake, tremble, pulse, pop, bounce, jump 
 
 ## Characters
 
-**Characters** in the top bar lists your main characters (made from your own pictures). Open one to see and rename their looks, which lines use each look, the rooms they are in, every conversation they take part in, and the story facts used there, with notes of your own. Make a new character there, give a starter figure or a voice your own picture, or pick **+ New character from a picture** when bringing someone in during a conversation.
+**Characters** in the rail lists your main characters (made from your own pictures). Open one to see and rename their looks, which lines use each look, the rooms they are in, every conversation they take part in, and the story facts used there, with notes of your own. Make a new character there, give a starter figure or a voice your own picture, or pick **+ New character from a picture** when bringing someone in during a conversation.
 
 ## The dialogue box
 

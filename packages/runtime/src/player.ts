@@ -198,7 +198,7 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
     const objects = r.els.filter(e => e.kind !== 'char' && !e.offstage).map(e =>
       `<button class="el${e.kind === 'area' ? ' area' : ''}" data-el="${esc(e.id)}" style="${elementStyle(e)}${areaClip(e)}" aria-label="${esc(e.name)}">${e.kind === 'area' ? areaArt(e, false) : elementArt(e, undefined, project.characters)}</button>`).join('');
     const menu = menuOn ? `<div class="gamemenu" role="toolbar" aria-label="Game menu">
-        <button data-menu="back" title="Back a line" aria-label="Back a line">↶</button><button data-menu="history" title="History" aria-label="History">☰</button>${opts.saveKey ? '<button data-menu="saves" title="Save and load" aria-label="Save and load">⤓</button>' : ''}<button data-menu="settings" title="Settings" aria-label="Settings">⚙</button></div>` : '';
+        <button data-menu="back" title="Back a line" aria-label="Back a line">↶</button><button data-menu="history" title="History" aria-label="History"><svg class="gm-ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg></button>${opts.saveKey ? '<button data-menu="saves" title="Save and load" aria-label="Save and load">⤓</button>' : ''}<button data-menu="settings" title="Settings" aria-label="Settings">⚙</button></div>` : '';
     host.innerHTML = `<div class="stage play" data-stage style="${lookStyle(project.look)}"><div class="cam"><div class="bg">${backdropHTML(r.bg)}</div>${objects}</div><div class="hudlayer"></div><div class="game"></div><div class="hoverlabel" hidden></div>${menu}<div class="gameover"></div></div>`;
     builtRoom = r.id;
   }

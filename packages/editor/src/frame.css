@@ -1,0 +1,114 @@
+/* The app frame: header, rail, menus, Share sheet, Check, and the global button rules.
+   Loaded after editor.css, so the rules here win where they overlap. */
+
+:root { --amber: #F0AE1B; --amber-ink: #7A4A00; --quiet-edge: var(--muted); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --amber-ink: #F5C451; } }
+:root[data-theme="dark"] { --amber-ink: #F5C451; }
+
+/* ---------- One frame ----------
+   The header always spans the window, so it never shifts between views. Every editing
+   screen uses the full width beside the rail; only Home keeps a centred column. */
+.wrap, body.wide .wrap { max-width: none; }
+.frame { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 20px; align-items: start; }
+body[data-view="home"] .frame, body[data-view="play"] .frame { display: block; }
+body[data-view="home"] #main { max-width: 1180px; margin-inline: auto; }
+#main { min-width: 0; }
+/* On very wide windows the room's picture stops growing once it fills the height. */
+body[data-view="room"] .work > div:first-child > .stage.edit { max-width: max(480px, calc((100dvh - 120px) * 16 / 9)); margin-inline: auto; }
+
+/* ---------- Header ---------- */
+.bar { flex-wrap: nowrap; }
+.tools { flex-wrap: nowrap; align-items: center; }
+.widetools { display: contents; }
+.backbtn { display: none; width: 40px; height: 40px; flex: none; place-items: center; padding: 0; border: 0; border-radius: 50%; background: none; color: inherit; font: 400 30px/1 var(--body); cursor: pointer; }
+.backbtn:hover { background: var(--surface); }
+.btn.play .caret { font-size: .8em; margin-left: 2px; }
+
+/* ---------- Rail: story-wide places ---------- */
+.rail { position: sticky; top: 12px; display: flex; flex-direction: column; gap: 10px; width: 188px; }
+.rail ul { display: flex; flex-direction: column; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.rail button { position: relative; display: flex; align-items: center; gap: 10px; width: 100%; padding: 9px 10px; border: 0; border-radius: 10px; background: none; color: var(--muted); font-weight: 600; text-align: left; cursor: pointer; }
+.rail button:hover { background: var(--surface); color: var(--ink); }
+.rail button[aria-current] { background: var(--ink); color: var(--ground); }
+.rail .badge { margin-left: auto; }
+.rail .railfold { padding-block: 6px; border-top: 1.5px solid var(--line); border-radius: 0 0 10px 10px; font-size: 13px; font-weight: 500; }
+.ico { width: 20px; height: 20px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+body.rail-icons .rail { width: 44px; }
+body.rail-icons .rail button { justify-content: center; padding-inline: 0; }
+body.rail-icons .rail .lbl { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+body.rail-icons .rail .badge { position: absolute; top: 0; right: -4px; margin: 0; }
+body.rail-icons .railfold .ico { transform: rotate(180deg); }
+
+/* ---------- Pop-up menus: Play, and ⋯ on phones ---------- */
+.popwrap { position: relative; display: inline-flex; }
+.popmenu { position: absolute; top: calc(100% + 6px); right: 0; z-index: 30; display: flex; flex-direction: column; min-width: 250px; padding: 6px; border: 2px solid var(--ink); border-radius: 12px; background: var(--surface); box-shadow: 0 12px 32px rgba(0, 0, 0, .2); }
+.popmenu button { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; padding: 9px 12px; border: 0; border-radius: 8px; background: none; color: var(--ink); text-align: left; cursor: pointer; }
+.popmenu button:hover, .popmenu button:focus-visible { background: var(--ground); outline-offset: -2px; }
+.popmenu button b { font-weight: 600; }
+.popmenu button span { color: var(--muted); font-size: 13px; }
+.popmenu button:disabled { color: var(--muted); cursor: not-allowed; }
+.popmenu button:disabled:hover { background: none; }
+.popmenu button[aria-current] { background: var(--ground); }
+#moremenu button { flex-direction: row; align-items: center; gap: 10px; min-height: 44px; }
+.popmenu hr { width: 100%; margin: 4px 0; border: 0; border-top: 1.5px solid var(--line); }
+.morebtn { position: relative; min-width: 44px; font-size: 18px; line-height: 1; }
+.morebtn .dot { position: absolute; top: 1px; right: 1px; width: 9px; height: 9px; border-radius: 50%; background: var(--bad); }
+
+/* ---------- Buttons: one primary per screen ----------
+   Only the top bar's Play is yellow; play buttons inside a view are secondary.
+   Quiet buttons keep a border of at least 3:1, and disabled is dashed and faded. */
+body:not([data-view="home"]) #main .btn.play { border-color: var(--ink); background: transparent; color: var(--ink); }
+body:not([data-view="home"]) #main .btn.play:hover { background: var(--surface); }
+.btn.quiet { border-width: 1.5px; border-color: var(--quiet-edge); }
+.btn.quiet.danger { border-color: var(--bad); }
+.btn:disabled, .btn:disabled:hover { opacity: 1; border-style: dashed; border-color: var(--line); background: transparent; color: color-mix(in srgb, var(--muted) 75%, transparent); cursor: not-allowed; }
+
+/* ---------- Badges ---------- */
+.badge.warn { background: var(--amber); color: #1E1936; }
+.roomcard .badge.stuck { background: var(--amber); color: #1E1936; }
+.roomcard .badge.unfinished { left: auto; right: 6px; background: var(--surface); color: var(--muted); border: 1px solid var(--line); }
+
+/* ---------- Share sheet ---------- */
+.sheet { width: min(520px, calc(100vw - 32px)); padding: 0; border: 2px solid var(--ink); border-radius: 16px; background: var(--surface); color: var(--ink); box-shadow: 0 20px 60px rgba(0, 0, 0, .3); }
+.sheet::backdrop { background: rgba(20, 16, 40, .45); }
+.sheetbody { display: flex; flex-direction: column; gap: 18px; padding: 20px 22px 22px; }
+.sheethead { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.sheethead h2 { margin: 0; font: 700 24px/1.1 var(--display); letter-spacing: -.02em; }
+.sheet .field input[type=text] { background: var(--ground); }
+.sharego { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+
+/* ---------- Check: a helper, not an alarm ---------- */
+.checkpage { max-width: 900px; }
+.prob.warning { border-left-color: var(--amber); }
+.prob.warning .lvl { color: var(--amber-ink); }
+.prob.unfinished { border-left-color: var(--line); background: transparent; }
+.prob.unfinished .lvl, .prob.unfinished p { color: var(--muted); }
+.probfix { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 6px; padding-top: 8px; border-top: 1px dashed var(--line); font-size: 14px; }
+.probfix select { padding: 5px 8px; border: 1.5px solid var(--quiet-edge); border-radius: 8px; background: var(--ground); }
+.probgroup { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.testvals { margin-top: 12px; }
+.testvals summary { color: var(--ink); }
+
+/* ---------- Phones and narrow windows ---------- */
+@media (min-width: 821px) {
+  .phoneonly { display: none !important; }
+  .backbtn { display: none !important; }
+}
+@media (max-width: 820px) {
+  .frame { display: block; }
+  .rail { display: none !important; }
+  .bar { gap: 4px; padding-block: 8px; }
+  body:not([data-view="home"]) .brand { display: none; }
+  .backbtn:not([hidden]) { display: grid; margin-left: -8px; }
+  .crumbs { flex: 1 1 auto; flex-wrap: nowrap; overflow: hidden; }
+  .crumbs > :not([aria-current]) { display: none; }
+  .crumbs button[aria-current] { max-width: 100%; overflow: hidden; padding-inline: 2px; font: 700 17px/1.2 var(--display); white-space: nowrap; text-overflow: ellipsis; }
+  body[data-view="home"] .crumbs { display: none; }
+  .tools { gap: 6px; margin-left: auto; }
+  .widetools { display: none; }
+  .tools .btn.play, .tools .btn.ink { padding: 7px 14px; }
+  /* Play: the picture spans the screen, with no empty space under it when no one is talking. */
+  body[data-view="play"] #player { margin-inline: -16px; }
+  body[data-view="play"] .stage.play { max-width: none; border-width: 3px 0; border-radius: 0; }
+  body[data-view="play"] .stage.play:not(:has(.say:not(.bubble):not(.screen))) { margin-bottom: 0; }
+}

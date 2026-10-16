@@ -12,12 +12,16 @@
   <body>
     <div class="wrap">
       <header class="bar">
+        <button class="backbtn" id="backbtn" data-act="go-back" aria-label="Back" title="Back" hidden><span aria-hidden="true">‹</span></button>
         <button class="brand" data-act="home" title="Your stories">Story Engine <small>prototype</small></button>
         <nav class="crumbs" id="crumbs" aria-label="Where you are"></nav>
         <div class="tools" id="tools"></div>
       </header>
       <div class="savewarn" id="savewarn" role="alert" hidden>This browser has stopped saving your story, because its storage is full. Save to file to keep your work. <button class="btn small" data-act="save-file">Save to file</button></div>
-      <main id="main"></main>
+      <div class="frame">
+        <nav class="rail" id="rail" aria-label="Story-wide places" hidden></nav>
+        <main id="main"></main>
+      </div>
       <input type="file" id="file" accept="image/*" hidden>
       <input type="file" id="projectfile" accept=".json,application/json" hidden>
       <input type="file" id="lookfile" accept="image/*" multiple hidden>
@@ -26,6 +30,7 @@
       <input type="file" id="videofile" accept="video/mp4,video/webm" hidden>
       <input type="file" id="markfile" accept="image/gif,image/png,image/webp,image/svg+xml" hidden>
       <div class="toast" id="toast" role="status" hidden></div>
+      <dialog class="sheet" id="sheet" aria-labelledby="sheet-title"></dialog>
     </div>
     <script type="module" src="/src/main.ts"></script>
   </body>

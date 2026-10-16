@@ -163,10 +163,12 @@
 .say.ask button { padding: .4em 1em; border: 0; border-radius: calc(var(--g-radius) * .6); background: var(--g-accent); color: var(--g-on); font: inherit; font-weight: 700; cursor: pointer; }
 
 /* The game's own menu and its windows */
-.gamemenu { position: absolute; top: 2%; right: 1.5%; z-index: 20; display: flex; gap: .35em; font-family: var(--g-font); font-size: max(13px, calc(var(--g-size) * .75cqw)); opacity: .55; transition: opacity .2s; }
+.gamemenu { position: absolute; top: 2%; right: 1.5%; z-index: 20; display: flex; gap: .35em; font-family: var(--g-font); font-size: max(13px, calc(var(--g-size) * .75cqw)); opacity: .8; transition: opacity .2s; }
 .gamemenu:hover, .gamemenu:focus-within { opacity: 1; }
 .gamemenu button { width: 2em; height: 2em; display: grid; place-items: center; padding: 0; border: 0; border-radius: 50%; background: var(--g-box); color: var(--g-fg); font: inherit; font-size: 1.05em; cursor: pointer; }
 .gamemenu button:hover { background: var(--g-accent); color: var(--g-on); }
+.gamemenu .gm-ico { width: 1em; height: 1em; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+@media (pointer: coarse) { .gamemenu button { width: max(44px, 2em); height: max(44px, 2em); } }
 .gamemenu button:disabled { opacity: .35; cursor: default; background: var(--g-box); color: var(--g-fg); }
 .gameover { position: absolute; inset: 0; z-index: 25; display: none; place-items: center; background: rgba(8, 6, 14, .55); font-family: var(--g-font); font-size: max(13px, calc(var(--g-size) * .85cqw)); }
 .gameover.on { display: grid; }

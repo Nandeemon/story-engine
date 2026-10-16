@@ -24,9 +24,14 @@ export interface Problem {
   panel?: string;
   where: string;
   text: string;
+  /** A room still being built (changed in the last few minutes): shown as a grey note, not a problem. */
+  unfinished?: boolean;
+  /** A one-click fix the Check page can offer. door-in: make a door to this room from another room. */
+  fix?: 'door-in';
 }
 
-export function findProblems(p: Project): Problem[] {
+/** fresh: ids of rooms changed in the last few minutes, which are not flagged for having no way in or on yet. */
+export function findProblems(p: Project, fresh: ReadonlySet<string> = new Set()): Problem[] {
   const out: Problem[] = [];
   const problemsOut: Problem[] = [];
   const doorsTo = new Set<string>();
@@ -57,7 +62,10 @@ export function findProblems(p: Project): Problem[] {
     }
   }
   p.rooms.forEach((room, i) => {
-    if (i > 0 && !doorsTo.has(room.name.trim().toLowerCase())) out.push({ level: 'warning', roomId: room.id, where: room.name, text: 'No conversation leads here, so the player cannot reach this room.' });
+    if (i > 0 && !doorsTo.has(room.name.trim().toLowerCase())) {
+      const unfinished = fresh.has(room.id);
+      out.push({ level: unfinished ? 'note' : 'warning', unfinished: unfinished || undefined, fix: 'door-in', roomId: room.id, where: room.name, text: 'Nothing leads here yet (no door, area or conversation).' });
+    }
   });
   const used = new Set(storyFacts(p));
   const sounds = new Set((p.sounds ?? []).map(x => x.name.toLowerCase()));
@@ -74,7 +82,7 @@ export function findProblems(p: Project): Problem[] {
     walkWithPaths(parseScript(el.script).steps, (st, path) => {
       if (st.t === 'say' && st.sound && !sounds.has(st.sound.toLowerCase())) out.push({ ...base, level: 'warning', path, text: `The sound "${st.sound}" is not among your sounds. Add it under Pictures & sounds, or pick another.` });
       for (const mk of st.t === 'say' ? st.marks ?? [] : st.t === 'mark' && st.mark ? [st.mark] : []) {
-        if (!findMark(p, mk)) out.push({ ...base, level: 'warning', path, text: `There is no mark called "${mk}". Add it under Marks on the Story map, or pick another.` });
+        if (!findMark(p, mk)) out.push({ ...base, level: 'warning', path, text: `There is no mark called "${mk}". Add it under Pictures & sounds, or pick another.` });
       }
       if (st.t === 'panel' && !(p.panels ?? []).some(x => x.name.toLowerCase() === st.name.trim().toLowerCase())) out.push({ ...base, level: 'warning', path, text: `There is no panel called "${st.name}". Make it under Look › Interface, or pick another.` });
       if (st.t === 'sound' && st.name && !sounds.has(st.name.toLowerCase())) out.push({ ...base, level: 'warning', path, text: `The sound "${st.name}" is not among your sounds. Add it under Pictures & sounds, or pick another.` });
@@ -97,7 +105,9 @@ export function findProblems(p: Project): Problem[] {
   if (p.rooms.length > 1) for (const room of p.rooms) {
     let out = false;
     for (const el of room.els) walkSteps(parseScript(el.script).steps, st => { if ((st.t === 'door' && findRoomByName(p, st.room) !== room) || st.t === 'ending') out = true; });
-    if (!out) problemsOut.push({ level: 'warning', roomId: room.id, where: room.name, text: 'Nothing here leads to another room or to an ending, so a player who gets here is stuck.' });
+    if (!out) problemsOut.push(fresh.has(room.id)
+      ? { level: 'note', unfinished: true, roomId: room.id, where: room.name, text: 'Nothing here leads on yet (no door, area or conversation goes to another room or an ending).' }
+      : { level: 'warning', roomId: room.id, where: room.name, text: 'Nothing here leads to another room or to an ending, so a player who gets here is stuck.' });
   }
   // Facts that are changed but never tested or shown.
   const changed = new Set<string>(), tested = new Set<string>();
