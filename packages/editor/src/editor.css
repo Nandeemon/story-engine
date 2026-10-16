@@ -151,7 +151,7 @@ details.more > div { display: flex; flex-direction: column; gap: 12px; padding-t
 /* Conversation map. Laid out by flexbox; lines are drawn on top in SVG once boxes have settled. */
 .mbanner { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 12px; border: 1.5px solid var(--bad); border-radius: 10px; color: var(--bad); font-size: 14px; }
 .mview { position: relative; }
-.mzoom { position: absolute; top: 10px; right: 14px; z-index: 3; display: flex; gap: 4px; padding: 4px; border: 1.5px solid var(--line); border-radius: 999px; background: var(--ground); }
+.mzoom { position: absolute; bottom: 12px; left: 12px; z-index: 3; display: flex; gap: 4px; padding: 4px; border: 1.5px solid var(--line); border-radius: 999px; background: var(--ground); }
 .mzoom .btn { min-width: 34px; padding: 4px 10px; border: 0; }
 #mzoomlabel { min-width: 56px; font-variant-numeric: tabular-nums; }
 .msizer { position: relative; margin-inline: auto; }
@@ -204,11 +204,11 @@ button.mnode:hover, .mrow:hover { box-shadow: 0 0 0 3px color-mix(in srgb, var(-
 .mnode.part .tag { color: var(--violet); }
 .mnode.dim, .mnode.dim .mrow { opacity: .45; }
 /* Smaller boxes, and the button that folds a box */
-.mfold { position: absolute; top: -11px; right: -11px; z-index: 1; display: grid; place-items: center; width: 22px; height: 22px; padding: 0; border: 1.5px solid var(--line); border-radius: 50%; background: var(--surface); color: var(--muted); font-size: 11px; line-height: 1; cursor: pointer; opacity: 0; transition: opacity .12s; }
+.mfold { position: absolute; top: -13px; right: -13px; z-index: 1; display: grid; place-items: center; width: 26px; height: 26px; padding: 0; border: 1.5px solid var(--line); border-radius: 50%; background: var(--surface); color: var(--muted); font-size: 11px; line-height: 1; cursor: pointer; opacity: 0; transition: opacity .12s; }
 .mcard:hover .mfold, .mcard.small .mfold, .mfold:focus-visible { opacity: 1; }
 .mfold:hover { border-color: var(--ink); color: var(--ink); }
 .mnode.mcard.small { width: 220px; padding: 4px; gap: 0; }
-.mcard.small .mrow { flex-wrap: nowrap; padding: 3px 6px; font-size: 12.5px; }
+.mcard.small .mrow { flex-wrap: nowrap; padding: 4px 8px; font-size: 13px; }
 .mcard.small .mrow .txt { flex: 1 1 auto; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .mcard.small .mrow .expr, .mcard.small .mrow .mini-tag { display: none; }
 .mmore { align-self: flex-start; margin: 2px 6px; padding: 0; border: 0; background: none; color: var(--muted); font-size: 12px; cursor: pointer; }
@@ -224,7 +224,7 @@ button.mnode:hover, .mrow:hover { box-shadow: 0 0 0 3px color-mix(in srgb, var(-
 .mnode.on, .mrow.on { outline: 3px solid var(--tape); outline-offset: 2px; }
 .mrow.on { outline-offset: 0; background: color-mix(in srgb, var(--tape) 18%, transparent); }
 
-.madd { display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 1.5px solid var(--line); border-radius: 50%; background: var(--surface); color: var(--muted); font-weight: 700; line-height: 1; cursor: pointer; }
+.madd { display: grid; place-items: center; width: 26px; height: 26px; padding: 0; border: 1.5px solid var(--line); border-radius: 50%; background: var(--surface); color: var(--muted); font-weight: 700; line-height: 1; cursor: pointer; }
 .madd:hover, .madd.on { border-color: var(--ink); color: var(--ink); background: var(--tape); }
 .madd.wide { width: auto; height: auto; padding: 10px 18px; border: 2px dashed var(--ink); border-radius: 10px; color: var(--ink); font-weight: 600; }
 
@@ -479,22 +479,6 @@ body.wide .wrap { max-width: min(100%, 2200px); }
 .stage .pendraw { position: absolute; inset: 0; z-index: 6; display: grid; place-items: start center; padding-top: 3%; background: rgba(20, 16, 32, .25); cursor: crosshair; touch-action: none; }
 .stage .pendraw > span { padding: 4px 12px; border-radius: 999px; background: rgba(20,16,32,.8); color: #fff; font: 600 13px/1.4 var(--body); pointer-events: none; }
 
-/* Line tools: chips that say what is set, each opening a small window */
-.tools4 { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 6px; }
-.tool { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; min-width: 0; padding: 6px 9px; border: 1.5px solid var(--line); border-radius: 10px; background: var(--surface); text-align: left; cursor: pointer; }
-.tool b { font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
-.tool span { max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 13px; color: var(--muted); }
-.tool.set span { color: var(--ink); font-weight: 600; }
-.tool:hover { border-color: var(--ink); }
-.tool.open { border-color: var(--ink); background: var(--tape); }
-.tool.open b, .tool.open span { color: var(--tape-ink); }
-.win { position: fixed; z-index: 40; right: 24px; top: 96px; width: min(380px, calc(100vw - 32px)); max-height: calc(100dvh - 120px); display: flex; flex-direction: column; border: 2px solid var(--ink); border-radius: 14px; background: var(--ground); box-shadow: 0 18px 50px rgba(20, 16, 32, .35); animation: win-in .14s ease-out; }
-@keyframes win-in { from { opacity: 0; translate: 0 6px; } }
-@media (min-width: 821px) { body.wide .win { right: calc(340px + 44px); } }
-@media (max-width: 820px) { .win { left: 8px; right: 8px; top: auto; bottom: 8px; width: auto; max-height: 70dvh; } }
-.winh { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 12px; border-bottom: 1.5px solid var(--line); }
-.winh b { font: 700 16px/1.2 var(--display); }
-.winb { display: flex; flex-direction: column; gap: 12px; padding: 12px; overflow-y: auto; }
 .fxpick { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
 .fxopt { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 7px 9px; border: 1.5px solid var(--line); border-radius: 10px; background: var(--surface); text-align: left; cursor: pointer; }
 .fxopt b { font-size: 14px; text-transform: capitalize; }
