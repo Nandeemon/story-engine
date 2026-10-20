@@ -13,6 +13,7 @@ Requires Node 20 or newer.
 ```sh
 npm install
 npm run dev      # editor at http://localhost:5173
+npm run dev:phone  # the same, and reachable from a phone on the same Wi-Fi (open the Network address it prints)
 npm run check    # type-check, tests and build
 ```
 

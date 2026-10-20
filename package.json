@@ -5,6 +5,7 @@
   "workspaces": ["packages/*"],
   "scripts": {
     "dev": "npm run dev -w @story-engine/editor",
+    "dev:phone": "npm run dev -w @story-engine/editor -- --host",
     "build": "npm run build -w @story-engine/editor",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit",
