@@ -17,7 +17,7 @@ export interface PanelDraw {
 }
 
 function blockHTML(p: Project, b: PanelBlock, facts: Facts, edit: boolean, selected: boolean): string {
-  const off = b.cond && !testCondition(facts, b.cond);
+  const off = b.cond && !testCondition(facts, b.cond, p);
   if (off && !edit) return '';
   const attrs = `${edit ? ` data-pblock="${esc(b.id)}"` : ''} class="pb pb-${b.kind}${off ? ' off' : ''}${selected ? ' on' : ''}"`;
   switch (b.kind) {
@@ -62,7 +62,7 @@ export function panelsHTML(p: Project, facts: Facts, d: PanelDraw): string {
   if (!list.length) return '';
   const edit = !!d.edit;
   const out = list.map(pn => {
-    const vis = panelVisible(pn, { roomId: d.roomId, talking: d.talking, facts });
+    const vis = panelVisible(pn, { roomId: d.roomId, talking: d.talking, facts, quests: p.quests });
     if (!vis && !edit) return '';
     const sel = d.edit?.panel === pn.id;
     const cls = `panel ps-${pn.style} pl-${pn.layout}${vis ? '' : ' hiddennow'}${sel ? ' on' : ''}`;
@@ -71,7 +71,7 @@ export function panelsHTML(p: Project, facts: Facts, d: PanelDraw): string {
     return `<div class="${cls}" style="${style}"${edit ? ` data-panel="${esc(pn.id)}"` : ''} role="group" aria-label="${esc(pn.name)}">${blocks}${sel ? '<span class="prz" data-presize aria-hidden="true"></span>' : ''}</div>`;
   }).join('');
   const toggles = edit ? '' : list.filter(pn => pn.button).map(pn => {
-    const on = panelVisible(pn, { roomId: d.roomId, talking: d.talking, facts });
+    const on = panelVisible(pn, { roomId: d.roomId, talking: d.talking, facts, quests: p.quests });
     return `<button type="button" class="ptoggle${on ? ' on' : ''}" data-ptoggle="${esc(pn.id)}" aria-pressed="${on}" title="${esc(pn.name)}${pn.key ? ` (${pn.key.toUpperCase()})` : ''}">${esc(pn.name.charAt(0).toUpperCase())}</button>`;
   }).join('');
   return `<div class="panels">${out}${toggles ? `<div class="ptoggles">${toggles}</div>` : ''}</div>`;

@@ -174,6 +174,7 @@ export function mapHTML(ctx: MapCtx): string {
     if (s.t === 'music') return `${open}<span class="tag">Music</span><span class="txt">${s.track ? `♫ ${esc(s.track)}${s.once ? ' (once)' : ''}` : 'Silence'}</span></button>`;
     if (itemStepText(ctx.project, s)) return `${open}<span class="tag">Item</span><span class="txt">${esc(itemStepText(ctx.project, s)!)}</span></button>`;
     if (s.t === 'change') return `${open}<span class="tag">Change</span><span class="txt">${esc(s.effects.map(effectText).join(', '))}</span></button>`;
+    if (s.t === 'quest') return `${open}<span class="tag">Quest</span><span class="txt">${esc(s.quest)} → ${esc(s.stage)}</span></button>`;
     if (s.t === 'note') return `${open}<span class="tag">Note</span><span class="txt">${esc(s.text)}</span></button>`;
     if (s.t === 'mark' || s.t === 'loop' || s.t === 'path') return `${open}<span class="tag">Stage</span><span class="txt">${esc(stageText(s))}</span></button>`;
     if (s.t === 'show' || s.t === 'move' || s.t === 'hide') {
@@ -538,6 +539,7 @@ function stepLabel(s: Step, project: Project): string {
     case 'door': return `go to ${s.room}`;
     case 'ask': return `ask "${s.prompt}"`;
     case 'ending': return `ending: ${s.name}`;
+    case 'quest': return `Quest: ${s.quest} → ${s.stage}`;
     case 'camera': return `camera ${s.action}`;
     case 'end': return 'the end';
     case 'part': return `part ${s.name}`;

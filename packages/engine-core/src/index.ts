@@ -1,9 +1,9 @@
 export * from './types';
-export { parseScript, writeScript, summarize, walkSteps, toValue, valueText, effectText, conditionText, CONDITION_WORDS } from './script';
+export { parseScript, writeScript, summarize, walkSteps, toValue, valueText, effectText, conditionText, parseCondition, CONDITION_WORDS, QUEST_CONDITION_WORDS } from './script';
 export type { ScriptSummary } from './script';
 export { createRunner, applyEffects, testCondition, getFact, fillText, lineText } from './runner';
 export type { Runner, RunEvent, ChoiceEvent, EndEvent, AskEvent, RunMemory, RunnerPlace } from './runner';
-export { createProject, createRoom, newId, normalizeProject, findRoomByName, DEFAULT_LOOK, DEFAULT_LOOK_NAME, cleanLookName, cleanSoundName, cleanMarkName, factName, talkedFact, startFacts, characterOf, elementConds, areaPoints, setAreaShape, findLook, hasLook, uniqueLookName } from './project';
+export { createProject, createRoom, newId, normalizeProject, findRoomByName, DEFAULT_LOOK, DEFAULT_LOOK_NAME, cleanLookName, cleanSoundName, cleanMarkName, cleanQuestName, factName, talkedFact, startFacts, characterOf, elementConds, areaPoints, setAreaShape, findLook, hasLook, uniqueLookName } from './project';
 export { getList, getStep, splitPath, stepPathOf, stepsBefore, walkWithPaths, unreachableSteps, factsToReach } from './paths';
 export { SPOTS, ENTER_EFFECTS, EXIT_EFFECTS, LINE_EFFECTS, FX_NORMAL, IDLE_MOVES, parseIdle, idleText, parsePathPoints, pathPointsText, pathAt, simplifyPath, isLineEffect, parseLineFx, lineFxText, parsePlace, placeText, snapToSpot } from './staging';
 export type { FxOptions, PathState } from './staging';
@@ -13,3 +13,6 @@ export { storyFactNames } from './facts';
 export { panelFactKey, cleanPanelName, panelVisible, panelRule, panelItems, newBlock, panelFromTemplate, PANEL_TEMPLATES } from './panels';
 export type { PanelContext, PanelTemplate } from './panels';
 export { ITEM_PREFIX, itemIdOf, itemFact, itemName, itemOfStep, storyItems, addItem, normalizeItems } from './items';
+export { DEFAULT_STAGES, questSlug, questFact, findQuest, stageIndex, questStage, newQuest, questCondition, testQuestCondition, renameQuestInScript, renameStageInScript, renameQuestInCondition, renameStageInCondition } from './quests';
+export type { CondContext } from './quests';
+export { elementScripts, mapElementScripts, conversationKey, scriptByKey, pickConversation, activeSituations, inSituation, roomSetting, forEachStoredCondition, mapProjectScripts, renameQuest, renameStage } from './situations';

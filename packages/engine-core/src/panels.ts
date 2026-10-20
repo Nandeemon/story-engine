@@ -4,7 +4,7 @@
  * when one shows, what an inventory holds) and the ready-made templates.
  */
 import { testCondition } from './runner';
-import type { Condition, Facts, Panel, PanelBlock } from './types';
+import type { Condition, Facts, Panel, PanelBlock, Quest } from './types';
 
 const num = (v: unknown, fallback: number): number => (typeof v === 'number' && Number.isFinite(v) ? v : fallback);
 const str = (v: unknown, fallback: string): string => (typeof v === 'string' ? v : fallback);
@@ -23,14 +23,14 @@ export function cleanPanelName(name: string): string {
   return name.replace(/[^\p{L}\p{N} '-]/gu, ' ').replace(/\s+/g, ' ').trim().slice(0, 30) || 'Panel';
 }
 
-export interface PanelContext { roomId: string; talking: boolean; facts: Facts }
+export interface PanelContext { roomId: string; talking: boolean; facts: Facts; quests?: Quest[] }
 
 /** Whether a panel shows right now. */
 export function panelVisible(p: Panel, ctx: PanelContext): boolean {
   if (p.when === 'rooms' && !(p.rooms ?? []).includes(ctx.roomId)) return false;
   if (p.when === 'talk' && !ctx.talking) return false;
   if (p.when === 'explore' && ctx.talking) return false;
-  if (p.cond && !testCondition(ctx.facts, p.cond)) return false;
+  if (p.cond && !testCondition(ctx.facts, p.cond, ctx)) return false;
   const set = ctx.facts[panelFactKey(p.name)];
   return typeof set === 'boolean' ? set : !p.startHidden;
 }
@@ -59,7 +59,8 @@ function normalizeCond(raw: unknown): Condition | undefined {
   const ops = ['>=', '<=', '>', '<', '!=', '=', 'truthy'];
   if (typeof c.fact !== 'string' || !ops.includes(c.op as string)) return undefined;
   const v = c.value;
-  return { fact: factOf(c.fact, 'fact'), op: c.op as Condition['op'], value: typeof v === 'number' || typeof v === 'boolean' || typeof v === 'string' ? v : true };
+  const quest = typeof c.quest === 'string' && c.quest.trim() && typeof v === 'string' ? c.quest.trim() : '';
+  return { fact: factOf(c.fact, 'fact'), op: c.op as Condition['op'], value: typeof v === 'number' || typeof v === 'boolean' || typeof v === 'string' ? v : true, ...(quest ? { quest } : {}) };
 }
 
 function normalizeBlock(raw: unknown, characters: string[]): PanelBlock | null {

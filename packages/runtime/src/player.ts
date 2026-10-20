@@ -1,4 +1,4 @@
-import { createRunner, fillText, panelFactKey, panelVisible, findLook, findRoomByName, parseScript, pathAt, startFacts, stepsBefore, talkedFact } from '@story-engine/engine-core';
+import { activeSituations, createRunner, fillText, pickConversation, roomSetting, scriptByKey, panelFactKey, panelVisible, findLook, findRoomByName, parseScript, pathAt, startFacts, stepsBefore, talkedFact } from '@story-engine/engine-core';
 import type { AskEvent, ChoiceEvent, DoorStep, Facts, PathStep, Project, Room, RunMemory, Runner, RunnerPlace, SayStep, Step, StoryElement } from '@story-engine/engine-core';
 import { applyToScene, fxVars, nextMoment, present, roomScene, staged, stagedAttrs, stagedKey, startScene } from './scene';
 import type { Scene } from './scene';
@@ -29,6 +29,8 @@ export interface PlayerOptions {
   roomId?: string;
   /** Start by running this element's conversation. */
   elementId?: string;
+  /** Start with this one of the element's conversations (its id in convos) instead of the one its conditions pick. */
+  convoId?: string;
   /** Start the element's conversation at this step instead of its first line (for testing). */
   startPath?: string;
   /** Story facts to start with (for testing, or a saved game); otherwise every fact starts at its start value or unset. */
@@ -100,7 +102,9 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
   let talking: StoryElement | null = null;
   /** Conversations are read once, so going back can return to the very same steps. */
   const parsed = new Map<string, Step[]>();
-  const stepsOf = (el: StoryElement) => { let st = parsed.get(el.id); if (!st) { st = parseScript(el.script).steps; parsed.set(el.id, st); } return st; };
+  const stepsOf = (key: string, script: string) => { let st = parsed.get(key); if (!st) { st = parseScript(script).steps; parsed.set(key, st); } return st; };
+  /** What quest conditions need. */
+  const ctx = { quests: project.quests };
 
   /* ---------- Sound, voices and music ---------- */
   const sounds = new Map<string, HTMLAudioElement>();
@@ -187,28 +191,41 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
   let ending: string | null = null;
 
   const room = (): Room => project.rooms.find(r => r.id === s.roomId) ?? project.rooms[0];
-  const here = (el: StoryElement) => present(el, s);
-  const canTalk = (el: StoryElement) => !s.event && !s.scene && !ending && el.script.trim() !== '' && here(el) && !(el.once && s.seen.includes(el.id));
+  const progress = () => ({ facts: s.facts, seen: s.seen, quests: project.quests });
+  const here = (el: StoryElement) => present(el, progress(), room());
+  const canTalk = (el: StoryElement) => !s.event && !s.scene && !ending && !!pickConversation(el, s.facts, ctx) && here(el) && !(el.once && s.seen.includes(el.id));
+  /** The room's backdrop and music now, after its active situations. */
+  const setting = (r: Room) => roomSetting(r, activeSituations(r, s.facts, ctx));
+  /** The backdrop drawn, and the music the room last asked for. */
+  let builtBg: Room['bg'] | undefined;
+  let roomMusic: string | undefined;
   const menuOn = project.look.gameMenu !== false;
 
   /** Draws the room's backdrop and objects once per room; characters are kept up to date by render. */
   function build(): void {
     const r = room();
+    builtBg = setting(r).bg;
     const objects = r.els.filter(e => e.kind !== 'char' && !e.offstage).map(e =>
       `<button class="el${e.kind === 'area' ? ' area' : ''}" data-el="${esc(e.id)}" style="${elementStyle(e)}${areaClip(e)}" aria-label="${esc(e.name)}">${e.kind === 'area' ? areaArt(e, false) : elementArt(e, undefined, project.characters)}</button>`).join('');
     const menu = menuOn ? `<div class="gamemenu" role="toolbar" aria-label="Game menu">
         <button data-menu="back" title="Back a line" aria-label="Back a line">↶</button><button data-menu="history" title="History" aria-label="History"><svg class="gm-ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg></button>${opts.saveKey ? '<button data-menu="saves" title="Save and load" aria-label="Save and load">⤓</button>' : ''}<button data-menu="settings" title="Settings" aria-label="Settings">⚙</button></div>` : '';
-    host.innerHTML = `<div class="stage play" data-stage style="${lookStyle(project.look)}"><div class="cam"><div class="bg">${backdropHTML(r.bg)}</div>${objects}</div><div class="hudlayer"></div><div class="game"></div><div class="hoverlabel" hidden></div>${menu}<div class="gameover"></div></div>`;
+    host.innerHTML = `<div class="stage play" data-stage style="${lookStyle(project.look)}"><div class="cam"><div class="bg">${backdropHTML(builtBg)}</div>${objects}</div><div class="hudlayer"></div><div class="game"></div><div class="hoverlabel" hidden></div>${menu}<div class="gameover"></div></div>`;
     builtRoom = r.id;
   }
 
   function render(): void {
     if (builtRoom !== s.roomId) build();
+    else if (!s.scene && !s.event && setting(room()).bg !== builtBg) {
+      // A situation changed the backdrop: swap the picture only.
+      builtBg = setting(room()).bg;
+      const bg = host.querySelector<HTMLElement>('.cam > .bg');
+      if (bg) bg.innerHTML = backdropHTML(builtBg);
+    }
     const stage = host.querySelector<HTMLElement>('[data-stage]')!;
     const cam = stage.querySelector<HTMLElement>('.cam')!;
     const game = stage.querySelector<HTMLElement>('.game')!;
     const r = room();
-    const scene = s.scene ?? roomScene(r, s);
+    const scene = s.scene ?? roomScene(r, progress());
     const kept = new Set<string>();
 
     for (const c of scene.chars) {
@@ -394,13 +411,22 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
     s.event = null;
     s.scene = null;
     runner = null;
-    if (r.music === 'off') stopMusic(); else if (r.music) playMusic(r.music, r.musicOnce);
+    roomMusic = undefined;
+    applyRoomMusic(r);
     const visit = `room:${r.id}`;
     const firstVisit = !s.seen.includes(visit);
     if (firstVisit) s.seen.push(visit);
-    const chosen = r.autoEl ? r.els.find(el => el.id === r.autoEl) : r.els.find(el => el.script.trim() && canTalk(el));
+    const chosen = r.autoEl ? r.els.find(el => el.id === r.autoEl) : r.els.find(el => canTalk(el));
     const auto = r.auto && (firstVisit || !r.autoOnce) && chosen && canTalk(chosen) ? chosen : undefined;
     if (auto) talk(auto); else render();
+  }
+
+  /** Plays the music the room (or its latest active situation) sets, when it is not what the room asked for already. */
+  function applyRoomMusic(r: Room): void {
+    const track = setting(r).music;
+    if (track === roomMusic) return;
+    roomMusic = track;
+    if (track === 'off') stopMusic(); else if (track) playMusic(track, track === r.music && r.musicOnce);
   }
 
   /** Changes room with the door's transition: a fade, a moment of black, or a slide. */
@@ -435,7 +461,7 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
     talking = null;
   }
 
-  function talk(el: StoryElement, startAt?: string): void {
+  function talk(el: StoryElement, startAt?: string, convoId?: string): void {
     lastLine = null;
     talked = true;
     talking = el;
@@ -443,8 +469,11 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
     // The clicked character keeps focus otherwise, and keys on a button would not reach the dialogue.
     const focused = document.activeElement as HTMLElement | null;
     if (focused && host.contains(focused)) focused.blur();
-    const steps = stepsOf(el);
-    const scene = startScene(room(), el, steps, s);
+    // The conversation its conditions pick now, or the one asked for; saves and memory know it by its key.
+    const asked = convoId ? scriptByKey(el, `${el.id}:${convoId}`) : undefined;
+    const convo = asked !== undefined ? { id: `${el.id}:${convoId}`, script: asked } : pickConversation(el, s.facts, ctx) ?? { id: el.id, script: el.script };
+    const steps = stepsOf(convo.id, convo.script);
+    const scene = startScene(room(), el, steps, progress());
     // Starting partway: the scene is set as it would stand by then.
     if (startAt) {
       let track: { track: string; once?: boolean } | null = null;
@@ -456,7 +485,7 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
       if (step.t === 'music') playMusic(step.track, step.once);
       else if (step.t === 'sound') { if (!step.stop) playSound(step.name, step.loop); else { stopSound(step.name); if (step.music) stopMusic(); } }
       else if (step.t === 'panel') s.facts[panelFactKey(step.name)] = step.show;
-      else if (s.scene) applyToScene(s.scene, step, project); }, startAt, s.memory, el.id);
+      else if (s.scene) applyToScene(s.scene, step, project); }, startAt, s.memory, convo.id, ctx);
     advance();
   }
 
@@ -466,6 +495,8 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
     s.event = null;
     s.scene = null;
     s.problem = problem;
+    // The conversation may have changed the room: its situations, backdrop and music.
+    applyRoomMusic(room());
     render();
   }
 
@@ -656,7 +687,7 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
   function togglePanel(id: string): void {
     const pn = project.panels?.find(x => x.id === id);
     if (!pn) return;
-    const on = panelVisible(pn, { roomId: s.roomId, talking: !!(s.scene || s.event), facts: s.facts });
+    const on = panelVisible(pn, { roomId: s.roomId, talking: !!(s.scene || s.event), facts: s.facts, quests: project.quests });
     s.facts[panelFactKey(pn.name)] = !on;
     render();
   }
@@ -727,7 +758,7 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
   document.addEventListener('keydown', onKey);
 
   const startEl = opts.elementId ? first.els.find(el => el.id === opts.elementId) : undefined;
-  if (startEl) { render(); talk(startEl, opts.startPath); } else enter(first);
+  if (startEl) { render(); talk(startEl, opts.startPath, opts.convoId); } else enter(first);
 
   return {
     state: () => s,

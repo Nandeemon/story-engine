@@ -1,8 +1,10 @@
-import type { Idle, MarkDef, MarkSpot, Backdrop, Character, CharacterLook, CompareOp, Condition, FactDef, FactValue, Facts, Look, Project, Room, Sound, StoryElement } from './types';
+import type { Conversation, Quest, Situation, Idle, MarkDef, MarkSpot, Backdrop, Character, CharacterLook, CompareOp, Condition, FactDef, FactValue, Facts, Look, Project, Room, Sound, StoryElement } from './types';
 import { IDLE_MOVES, isLineEffect } from './staging';
 import { renameLookInScript } from './refs';
 import { normalizePanels } from './panels';
 import { normalizeItems } from './items';
+import { mapElementScripts } from './situations';
+import { DEFAULT_STAGES, questFact, questSlug } from './quests';
 
 export const DEFAULT_LOOK: Look = { theme: 'velvet', font: 'Lora', radius: 14, size: 2 };
 
@@ -85,7 +87,50 @@ function normalizeCondition(raw: unknown): Condition | undefined {
   if (!fact) return undefined;
   const op = OPS.includes(c.op as CompareOp) ? c.op as CompareOp : 'truthy';
   const value = typeof c.value === 'number' || typeof c.value === 'boolean' || typeof c.value === 'string' ? c.value : true;
+  // A quest condition: the stage is a word, and the fact follows the quest's name.
+  const quest = typeof c.quest === 'string' ? cleanQuestName(c.quest) : '';
+  if (quest && typeof value === 'string' && QUEST_OPS.includes(op)) return { fact: questFact(quest), op, value, quest };
   return { fact, op, value };
+}
+const QUEST_OPS: CompareOp[] = ['=', '!=', '>=', '<'];
+
+function normalizeConds(raw: unknown): Condition[] {
+  return (Array.isArray(raw) ? raw : []).map(normalizeCondition).filter((c): c is Condition => !!c);
+}
+
+/** Quest names sit in "Quest <name>: <stage>", so they cannot hold : ( ) or quotes. */
+export function cleanQuestName(name: string): string {
+  return name.replace(/[:"()\n\r]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60);
+}
+
+function normalizeQuests(raw: unknown): Quest[] {
+  const seen = new Set<string>();
+  return (Array.isArray(raw) ? raw : []).filter(q => q && typeof q === 'object').map((q: Record<string, unknown>) => {
+    const stages: string[] = [];
+    for (const st of Array.isArray(q.stages) ? q.stages : []) {
+      const name = typeof st === 'string' ? st.replace(/\s+/g, ' ').trim().slice(0, 60) : '';
+      if (name && !stages.some(x => x.toLowerCase() === name.toLowerCase())) stages.push(name);
+    }
+    return { id: str(q.id, newId()), name: cleanQuestName(str(q.name, '')), stages: stages.length ? stages : [...DEFAULT_STAGES] };
+  }).filter(q => q.name && !seen.has(questSlug(q.name)) && !!seen.add(questSlug(q.name)));
+}
+
+function normalizeSituations(raw: unknown): Situation[] {
+  const ids = new Set<string>();
+  return (Array.isArray(raw) ? raw : []).filter(x => x && typeof x === 'object').map((x: Record<string, unknown>): Situation => {
+    const bg = normalizeBackdrop(x.bg);
+    return {
+      id: str(x.id, newId()), name: str(x.name, 'Situation').trim() || 'Situation', conds: normalizeConds(x.conds),
+      ...(bg ? { bg } : {}), ...(typeof x.music === 'string' && x.music ? { music: x.music } : {})
+    };
+  }).filter(x => !ids.has(x.id) && !!ids.add(x.id));
+}
+
+function normalizeConvos(raw: unknown): Conversation[] {
+  const ids = new Set<string>();
+  return (Array.isArray(raw) ? raw : []).filter(x => x && typeof x === 'object').map((x: Record<string, unknown>): Conversation => ({
+    id: str(x.id, newId()), label: str(x.label, ''), conds: normalizeConds(x.conds), script: str(x.script, '')
+  })).filter(x => x.id && !x.id.includes(':') && !ids.has(x.id) && !!ids.add(x.id));
 }
 
 function normalizeBackdrop(raw: unknown): Backdrop | null {
@@ -116,6 +161,7 @@ export function normalizeProject(raw: unknown): Project | null {
   if (!Array.isArray(r.rooms) || !r.rooms.length) return null;
   const rooms: Room[] = r.rooms.filter(x => x && typeof x === 'object').map((x: Record<string, unknown>) => {
     const bg = normalizeBackdrop(x.bg);
+    const situations = normalizeSituations(x.situations);
     const els: StoryElement[] = (Array.isArray(x.els) ? x.els : []).filter(e => e && typeof e === 'object').map((e: Record<string, unknown>) => ({
       id: str(e.id, newId()),
       kind: e.kind === 'char' ? 'char' : e.kind === 'area' ? 'area' : 'object',
@@ -137,7 +183,11 @@ export function normalizeProject(raw: unknown): Project | null {
       ...(typeof e.sound === 'string' && e.sound ? { sound: e.sound } : {}),
       expr: typeof e.expr === 'string' ? e.expr : undefined,
       staging: e.staging === 'room' ? 'room' : undefined,
-      script: str(e.script, '')
+      script: str(e.script, ''),
+      ...(normalizeConvos(e.convos).length ? { convos: normalizeConvos(e.convos) } : {}),
+      // Kept when its situation is gone, so Check can point it out.
+      ...(typeof e.situation === 'string' && e.situation ? { situation: e.situation } : {}),
+      ...(Array.isArray(e.hideIn) && e.hideIn.some(id => situations.some(st => st.id === id)) ? { hideIn: [...new Set((e.hideIn as unknown[]).filter((id): id is string => situations.some(st => st.id === id)))] } : {})
     }));
     return {
       id: str(x.id, newId()), name: str(x.name, 'Room'), bg, auto: x.auto === true,
@@ -145,6 +195,7 @@ export function normalizeProject(raw: unknown): Project | null {
       ...(x.autoOnce === true ? { autoOnce: true } : {}),
       ...(typeof x.music === 'string' && x.music ? { music: x.music } : {}),
       ...(x.musicOnce === true ? { musicOnce: true } : {}),
+      ...(situations.length ? { situations } : {}),
       els
     };
   });
@@ -170,7 +221,7 @@ export function normalizeProject(raw: unknown): Project | null {
   // A look whose name is now an effect word was renamed above: its lines follow.
   for (const c of characters) for (const l of c.looks) {
     if (!/ look$/.test(l.name) || !isLineEffect(l.name.replace(/ look$/, ''))) continue;
-    for (const room of rooms) for (const el of room.els) el.script = renameLookInScript(el.script, c.name, l.name.replace(/ look$/, ''), l.name);
+    for (const room of rooms) for (const el of room.els) mapElementScripts(el, sc => renameLookInScript(sc, c.name, l.name.replace(/ look$/, ''), l.name));
   }
   // Characters made from one uploaded picture, from before characters had looks.
   for (const room of rooms) for (const el of room.els) {
@@ -200,6 +251,7 @@ export function normalizeProject(raw: unknown): Project | null {
   });
   const panels = normalizePanels([...(Array.isArray(r.panels) ? r.panels : []), ...oldHud], rooms.map(x => x.id), characters.map(c => c.id));
   const items = normalizeItems(r.items);
+  const quests = normalizeQuests(r.quests);
   const sounds: Sound[] = (Array.isArray(r.sounds) ? r.sounds : []).filter(x => x && typeof x === 'object' && typeof (x as Record<string, unknown>).data === 'string')
     .map((x: Record<string, unknown>) => ({ id: str(x.id, newId()), name: cleanSoundName(str(x.name, 'sound')), data: x.data as string, ...(typeof x.owner === 'string' && characters.some(c => c.id === x.owner) ? { owner: x.owner } : {}),
       ...(typeof x.volume === 'number' && x.volume !== 100 ? { volume: clamp(Math.round(x.volume), 0, 100) } : {}),
@@ -220,6 +272,7 @@ export function normalizeProject(raw: unknown): Project | null {
     ...(panels.length ? { panels } : {}),
     ...(sounds.length ? { sounds } : {}),
     ...(marks.length ? { marks } : {}),
+    ...(quests.length ? { quests } : {}),
     look: {
       theme: str(look.theme, DEFAULT_LOOK.theme),
       font: str(look.font, DEFAULT_LOOK.font),

@@ -27,7 +27,7 @@ export function renameSpeakerInScript(script: string, oldName: string, newName: 
   if (!from || !to || from === lower(to) || RESERVED.has(from) || RESERVED.has(lower(to))) return script;
   return script.split('\n').map(line => {
     const m = line.match(/^(\s*)([^:"()#]{1,40}?)(\s*(?:\([^)]*\))?\s*:.*)$/);
-    if (!m || lower(m[2]) !== from) return line;
+    if (!m || lower(m[2]) !== from || /^quest\s/i.test(m[2])) return line;
     return `${m[1]}${to}${m[3]}`;
   }).join('\n');
 }

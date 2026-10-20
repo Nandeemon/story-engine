@@ -3,7 +3,7 @@
  * own pictures), with everything each one is part of, so a story with many
  * scenes stays easy to find your way around.
  */
-import { elementConds, parseScript, talkedFact, valueText, walkSteps } from '@story-engine/engine-core';
+import { elementConds, elementScripts, parseScript, talkedFact, valueText, walkSteps } from '@story-engine/engine-core';
 import type { Character, FactDef, Project, Room, Step, StoryElement } from '@story-engine/engine-core';
 import { CHARACTERS, characterSVG, esc } from '@story-engine/runtime';
 import { soundRow } from './widgets';
@@ -11,7 +11,8 @@ import { idleField } from './views';
 
 const lower = (s: string) => s.trim().toLowerCase();
 
-export interface Convo { room: Room; el: StoryElement; lines: number }
+/** convo: one of the thing's conversations (its id in convos), or left out for its own script. */
+export interface Convo { room: Room; el: StoryElement; lines: number; convo?: string; label?: string }
 export interface CastInfo {
   /** Where the character is placed. */
   placed: { room: Room; el: StoryElement }[];
@@ -38,8 +39,9 @@ export function castInfo(p: Project, name: string, characterId?: string): CastIn
   const info: CastInfo = { placed: [], convos: [], lookUse: new Map(), facts: new Map() };
   for (const room of p.rooms) for (const el of room.els) {
     if (el.kind === 'char' && (characterId ? el.characterId === characterId : !el.characterId && lower(el.name) === key)) info.placed.push({ room, el });
-    if (!el.script.trim()) continue;
-    const { steps } = parseScript(el.script);
+    for (const cv of [...(el.convos ?? []).map(c => ({ id: c.id, label: c.label || 'Conversation', script: c.script })), { id: '', label: el.convos?.length ? 'Otherwise' : '', script: el.script }]) {
+    if (!cv.script.trim()) continue;
+    const { steps } = parseScript(cv.script);
     let lines = 0, present = el.kind === 'char' && lower(el.name) === key;
     walkSteps(steps, s => {
       if ((s.t === 'show' || s.t === 'move' || s.t === 'hide') && lower(s.who) === key) present = true;
@@ -50,8 +52,9 @@ export function castInfo(p: Project, name: string, characterId?: string): CastIn
       }
     });
     if (lines || present) {
-      info.convos.push({ room, el, lines });
+      info.convos.push({ room, el, lines, ...(cv.id ? { convo: cv.id } : {}), ...(cv.label ? { label: cv.label } : {}) });
       factsOf(steps, info.facts);
+    }
     }
   }
   return info;
@@ -67,7 +70,7 @@ export function otherSpeakers(p: Project): { name: string; starter: boolean; lin
       o.starter = true;
       out.set(lower(el.name), o);
     }
-    walkSteps(parseScript(el.script).steps, s => {
+    for (const sc of elementScripts(el)) walkSteps(parseScript(sc).steps, s => {
       if (s.t !== 'say' || !s.who.trim() || main.has(lower(s.who))) return;
       const o = out.get(lower(s.who)) ?? { name: s.who.trim(), starter: false, lines: 0 };
       o.lines++;
@@ -82,10 +85,10 @@ function factUse(p: Project, fact: string): { changed: number; checked: number }
   const out = { changed: 0, checked: 0 };
   for (const r of p.rooms) for (const e of r.els) {
     const m = new Map<string, { changed: number; checked: number }>();
-    factsOf(parseScript(e.script).steps, m);
+    for (const sc of elementScripts(e)) factsOf(parseScript(sc).steps, m);
     const v = m.get(fact);
     if (v) { out.changed += v.changed; out.checked += v.checked; }
-    out.checked += elementConds(e).filter(c => c.fact === fact).length;
+    out.checked += [...elementConds(e), ...(e.convos ?? []).flatMap(c => c.conds)].filter(c => c.fact === fact).length;
   }
   return out;
 }
@@ -201,7 +204,7 @@ function castDetail(p: Project, c: Character): string {
   const free = p.rooms.filter(r => !info.placed.some(x => x.room === r));
   const placeIn = free.length ? `<select id="cast-place" data-in="cast-place" aria-label="Place in a room"><option value="">Place in a room…</option>${free.map(r => `<option value="${esc(r.id)}">${esc(r.name)}</option>`).join('')}</select>` : '';
   const convos = info.convos.length
-    ? info.convos.map(x => `<li><span>${esc(x.room.name)} › ${esc(x.el.name)}${x.lines ? ` <i>${plural(x.lines, 'line')}</i>` : ' <i>brought in</i>'}</span><button class="btn small quiet" data-act="cast-goto-convo" data-k="${esc(x.room.id)}|${esc(x.el.id)}">Open</button></li>`).join('')
+    ? info.convos.map(x => `<li><span>${esc(x.room.name)} › ${esc(x.el.name)}${x.label ? ` › ${esc(x.label)}` : ''}${x.lines ? ` <i>${plural(x.lines, 'line')}</i>` : ' <i>brought in</i>'}</span><button class="btn small quiet" data-act="cast-goto-convo" data-k="${esc(x.room.id)}|${esc(x.el.id)}">Open</button></li>`).join('')
     : '<li class="hint">No lines yet.</li>';
   return `<div class="castpage">
     <div class="casthead"><button class="btn small quiet" data-act="cast-back">← All characters</button><h2>${esc(c.name)}</h2></div>

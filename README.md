@@ -168,6 +168,15 @@ Otherwise
 - `Part: Stay` names a point at the left edge, and `Go to part Stay` continues from there, forwards or back.
 - `# text` is a note only the author sees. `Narration: text` forces a line to be narration when it would otherwise read as a command.
 
+## Quests and situations
+
+One room can serve many moments of the story without copies.
+
+- **Quests** have a name and stages in order; a new quest starts with Not started, Started and Done. `Quest Lost cat: Started` moves a quest to a stage. The stage is kept as the story fact `quest.lost_cat`, and an unset quest is at its first stage.
+- Anywhere a condition goes, quests can be tested: `Only if quest Lost cat is Started`, `is not Done`, `is at least Started` or `is before Done`. "At least" and "before" follow the order of the stages. Check points out quest and stage names that do not exist.
+- **More than one conversation** per character or thing: each has its own conditions, and they are tried in order. The first one whose conditions all hold runs, and the thing's own conversation is used otherwise.
+- **Situations** of a room (night, after the fire) are active while their conditions hold, and several can be active at once. A situation can have its own backdrop and music; when several are active, the one latest in the list wins. A thing can belong to a situation, so it is there only while that situation is active, or it can hide while certain situations are active. The room updates after each conversation.
+
 ## Status
 
 Step 1 of the v1 build order is in place: rooms, characters and objects, the conversation map and writing mode, Play, the look of the game, and the story map. Characters with looks, staged conversations, choices in the dialogue box, backdrop framing, game files, the problem list and test values, and the on-screen display are in place too. Next up: built looks from parts, saving progress in published games, and simulation.

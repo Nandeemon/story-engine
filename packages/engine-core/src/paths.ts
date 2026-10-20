@@ -1,4 +1,5 @@
 import { testCondition } from './runner';
+import { findQuest, type CondContext } from './quests';
 import type { FactValue, Step } from './types';
 
 /**
@@ -124,7 +125,7 @@ export function unreachableSteps(root: Step[]): StepPath[] {
  * Story facts that make a step reachable: for every "Only if" the step sits under,
  * a value that takes the path it is on. Facts that already do so are left as they are.
  */
-export function factsToReach(root: Step[], path: StepPath, facts: Record<string, FactValue>): Record<string, FactValue> {
+export function factsToReach(root: Step[], path: StepPath, facts: Record<string, FactValue>, ctx?: CondContext): Record<string, FactValue> {
   const out: Record<string, FactValue> = {};
   const parts = path.split('.');
   let list: Step[] = root;
@@ -136,8 +137,16 @@ export function factsToReach(root: Step[], path: StepPath, facts: Record<string,
     if (step.t !== 'if') break;
     const want = branch === 't';
     const now = { ...facts, ...out };
-    if (testCondition(now, step.cond) !== want) {
-      const c = step.cond, v = c.value, n = typeof v === 'number' ? v : Number(v);
+    if (testCondition(now, step.cond, ctx) !== want) {
+      const c = step.cond;
+      if (c.quest) {
+        // A stage of the quest that takes this path.
+        const stage = findQuest(ctx, c.quest)?.stages.find(st => testCondition({ ...now, [c.fact]: st }, c, ctx) === want);
+        if (stage !== undefined) out[c.fact] = stage;
+        list = want ? step.then : step.else;
+        continue;
+      }
+      const v = c.value, n = typeof v === 'number' ? v : Number(v);
       const value: FactValue = c.op === 'truthy' ? want
         : typeof v !== 'number' ? (want === (c.op !== '!=') ? v : (typeof v === 'boolean' ? !v : `not ${v}`))
         : want ? ({ '>=': n, '<=': n, '>': n + 1, '<': n - 1, '=': n, '!=': n + 1 } as Record<string, number>)[c.op]

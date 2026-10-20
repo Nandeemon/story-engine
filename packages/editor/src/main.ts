@@ -3,7 +3,7 @@ import './editor.css';
 import './frame.css';
 import './content.css';
 import './mapui.css';
-import { areaPoints, elementConds, setAreaShape, cleanPanelName, newBlock, panelFromTemplate, renamePanelInScript, factsToReach, startFacts, pathAt, simplifyPath, walkSteps, characterOf, cleanLookName, cleanMarkName, cleanSoundName, factName, renameMarkInScript, renameSoundInScript, toValue, createProject, createRoom, findLook, findRoomByName, newId, normalizeProject, parseScript, renameLookInScript, renameRoomInScript, renameSpeakerInScript, uniqueLookName, writeScript, getStep } from '@story-engine/engine-core';
+import { areaPoints, elementConds, elementScripts, mapElementScripts, setAreaShape, cleanPanelName, newBlock, panelFromTemplate, renamePanelInScript, factsToReach, startFacts, pathAt, simplifyPath, walkSteps, characterOf, cleanLookName, cleanMarkName, cleanSoundName, factName, renameMarkInScript, renameSoundInScript, toValue, createProject, createRoom, findLook, findRoomByName, newId, normalizeProject, parseScript, renameLookInScript, renameRoomInScript, renameSpeakerInScript, uniqueLookName, writeScript, getStep } from '@story-engine/engine-core';
 import type { Condition, Panel, PanelBlock, PanelTemplate, Character, CharacterLook, FactDef, Facts, Idle, MarkDef, PathStep, Step, Project, Room, StoryElement } from '@story-engine/engine-core';
 import { BACKDROPS, CHARACTERS, OBJECTS, STARTER_MARKS, findMark, backdropHTML, createPlayer, elementArt, elementStyle, areaArt, esc, fxVars, lookStyle, sayHTML } from '@story-engine/runtime';
 import type { Player, PlayState } from '@story-engine/runtime';
@@ -108,7 +108,7 @@ function pruneOncePictures(): void {
     const used = new Set<string>();
     const who = c.name.trim().toLowerCase();
     for (const r of project.rooms) for (const el of r.els) {
-      walkSteps(parseScript(el.script).steps, st => { if (st.t === 'say' && st.who.trim().toLowerCase() === who) used.add(st.expr.trim().toLowerCase()); });
+      for (const sc of elementScripts(el)) walkSteps(parseScript(sc).steps, st => { if (st.t === 'say' && st.who.trim().toLowerCase() === who) used.add(st.expr.trim().toLowerCase()); });
     }
     c.looks = c.looks.filter(l => !l.once || used.has(l.name.toLowerCase()) || l.id === ui.lookEdit);
   }
@@ -592,7 +592,7 @@ function updateStrip(s: Readonly<PlayState>): void {
   const strip = $('#strip');
   if (!strip) return;
   const r = project.rooms.find(x => x.id === s.roomId);
-  const idle = !s.event && !r?.els.some(e => e.script.trim());
+  const idle = !s.event && !r?.els.some(e => elementScripts(e).some(sc => sc.trim()));
   const facts = Object.entries(s.facts);
   const tf = testFacts();
   strip.innerHTML = `<span class="label">Only you see this</span>`
@@ -611,7 +611,7 @@ function startPlay(fromElement?: StoryElement, startPath?: string, fromRoom?: st
   // Starting inside an "Only if": the facts are set so the marked step is reached.
   let facts = testFacts();
   if (fromElement && startPath) {
-    const need = factsToReach(parseScript(fromElement.script).steps, startPath, { ...startFacts(project), ...(facts ?? {}) });
+    const need = factsToReach(parseScript(fromElement.script).steps, startPath, { ...startFacts(project), ...(facts ?? {}) }, project);
     if (Object.keys(need).length) {
       facts = { ...(facts ?? {}), ...need };
       toast(`Playing with ${Object.entries(need).map(([k, v]) => `${k} = ${v === true ? 'yes' : v === false ? 'no' : v}`).join(', ')}, so this step is reached.`);
@@ -894,7 +894,7 @@ const actions: Record<string, (k: string) => void> = {
   'mark-delete'(k) {
     project.marks = project.marks?.filter(m => m.name !== k);
     if (!project.marks?.length) delete project.marks;
-    for (const r of project.rooms) for (const e of r.els) e.script = renameMarkInScript(e.script, k, '');
+    for (const r of project.rooms) for (const e of r.els) mapElementScripts(e, sc => renameMarkInScript(sc, k, ''));
     save(); render();
   },
   'sound-add'() { pickSound(() => undefined); },
@@ -908,7 +908,7 @@ const actions: Record<string, (k: string) => void> = {
     if (!project.sounds.length) delete project.sounds;
     for (const r of project.rooms) for (const e of r.els) {
       if ((e.sound ?? '').toLowerCase() === x.name) delete e.sound;
-      e.script = renameSoundInScript(e.script, x.name, '');
+      mapElementScripts(e, sc => renameSoundInScript(sc, x.name, ''));
     }
     for (const c of project.characters) for (const l of c.looks) if (l.sound === x.name) delete l.sound;
     for (const r of project.rooms) if (r.music === x.name) { delete r.music; delete r.musicOnce; }
@@ -1731,7 +1731,7 @@ document.addEventListener('change', ev => {
   if ((project.panels ?? []).some(x => x !== pn && x.name.toLowerCase() === name.toLowerCase())) { toast(`There is already a panel called "${name}".`); name = old; }
   pn.name = name;
   let n = 0;
-  for (const r of project.rooms) for (const e of r.els) { const next = renamePanelInScript(e.script, old, name); if (next !== e.script) { e.script = next; n++; } }
+  for (const r of project.rooms) for (const e of r.els) n += changeScripts(e, sc => renamePanelInScript(sc, old, name));
   if (n) toast(`Updated Show panel and Hide panel in ${n} conversation${n === 1 ? '' : 's'}`);
   save(); render();
 });
@@ -2372,6 +2372,13 @@ document.addEventListener('pointerdown', () => {
   if (fieldSnapshot !== null && !(a && isField(a))) { record(fieldSnapshot); fieldSnapshot = null; }
 }, true);
 
+/** Changes every script on a room thing; 1 when any of them changed, for counting. */
+function changeScripts(e: StoryElement, change: (script: string) => string): number {
+  let changed = 0;
+  mapElementScripts(e, sc => { const next = change(sc); if (next !== sc) changed = 1; return next; });
+  return changed;
+}
+
 function renameEverywhere(kind: 'room' | 'speaker', from: string, to: string): number {
   const key = from.trim().toLowerCase();
   const stillUsed = kind === 'room'
@@ -2380,8 +2387,7 @@ function renameEverywhere(kind: 'room' | 'speaker', from: string, to: string): n
   if (stillUsed) return 0;
   let changed = 0;
   for (const r of project.rooms) for (const e of r.els) {
-    const next = kind === 'room' ? renameRoomInScript(e.script, from, to) : renameSpeakerInScript(e.script, from, to);
-    if (next !== e.script) { e.script = next; changed++; }
+    changed += changeScripts(e, sc => kind === 'room' ? renameRoomInScript(sc, from, to) : renameSpeakerInScript(sc, from, to));
   }
   return changed;
 }
@@ -2592,7 +2598,7 @@ document.addEventListener('change', ev => {
       if (name !== m.name && (findMark(project, name) || STARTER_MARKS[name])) name = m.name;
       const old = m.name;
       m.name = name;
-      for (const r of project.rooms) for (const e of r.els) e.script = renameMarkInScript(e.script, old, name);
+      for (const r of project.rooms) for (const e of r.els) mapElementScripts(e, sc => renameMarkInScript(sc, old, name));
       for (const c of project.characters) if (c.markAt?.[old]) { c.markAt[name] = c.markAt[old]; delete c.markAt[old]; }
       save(); render();
     }
@@ -2611,7 +2617,7 @@ document.addEventListener('change', ev => {
       x.name = name;
       for (const r of project.rooms) for (const e of r.els) {
         if ((e.sound ?? '').toLowerCase() === old) e.sound = name;
-        e.script = renameSoundInScript(e.script, old, name);
+        mapElementScripts(e, sc => renameSoundInScript(sc, old, name));
       }
       for (const c of project.characters) for (const l of c.looks) if (l.sound === old) l.sound = name;
       for (const r of project.rooms) if (r.music === old) r.music = name;
@@ -2636,7 +2642,7 @@ document.addEventListener('change', ev => {
       const old = l.name;
       l.name = uniqueLookName({ ...c, looks: c.looks.filter(x => x !== l) }, cleanLookName(t.value || old));
       for (const r of project.rooms) for (const el of r.els) {
-        el.script = renameLookInScript(el.script, c.name, old, l.name);
+        mapElementScripts(el, sc => renameLookInScript(sc, c.name, old, l.name));
         if (el.characterId === c.id && (el.expr ?? '').toLowerCase() === old.toLowerCase()) el.expr = l.name;
       }
       save(); render();
@@ -2651,8 +2657,7 @@ document.addEventListener('change', ev => {
       t.value = l.name;
       let n = 0;
       for (const r of project.rooms) for (const el of r.els) {
-        const next = renameLookInScript(el.script, c.name, old, l.name);
-        if (next !== el.script) { el.script = next; n++; }
+        n += changeScripts(el, sc => renameLookInScript(sc, c.name, old, l.name));
       }
       for (const r of project.rooms) for (const el of r.els) {
         if (el.characterId === c.id && (el.expr ?? '').toLowerCase() === old.toLowerCase()) el.expr = l.name;

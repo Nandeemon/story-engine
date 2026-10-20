@@ -1,3 +1,4 @@
+import { findQuest, questFact, stageIndex, testQuestCondition, type CondContext } from './quests';
 import type { AskStep, ChoiceOption, Condition, DoorStep, Effect, Facts, FactValue, MusicStep, PanelStep, SayStep, SoundStep, StageStep, Step } from './types';
 
 export interface ChoiceEvent {
@@ -76,7 +77,9 @@ function same(a: FactValue, b: FactValue): boolean {
   return String(a) === String(b);
 }
 
-export function testCondition(facts: Facts, c: Condition): boolean {
+/** Whether a condition holds. Quest conditions need the story's quests in ctx to compare stages. */
+export function testCondition(facts: Facts, c: Condition, ctx?: CondContext): boolean {
+  if (c.quest) return testQuestCondition(facts, c, ctx);
   const a = getFact(facts, c.fact);
   const b = c.value;
   switch (c.op) {
@@ -97,7 +100,7 @@ const LOOP_LIMIT = 10_000;
  * Runs a conversation step by step. Facts are changed in place, so every
  * conversation in a playthrough shares the same story facts.
  */
-export function createRunner(steps: Step[], facts: Facts, onStage?: (step: StageStep | MusicStep | SoundStep | PanelStep) => void, startAt?: string, memory?: RunMemory, prefix = ''): Runner {
+export function createRunner(steps: Step[], facts: Facts, onStage?: (step: StageStep | MusicStep | SoundStep | PanelStep) => void, startAt?: string, memory?: RunMemory, prefix = '', ctx?: CondContext): Runner {
   const stack: { steps: Step[]; i: number }[] = startAt ? framesFor(steps, startAt) : [{ steps, i: 0 }];
   const optKey = (o: ChoiceOption) => `${prefix}|${o.text}`;
   return {
@@ -142,8 +145,14 @@ export function createRunner(steps: Step[], facts: Facts, onStage?: (step: Stage
             return { t: 'ask', prompt: fillText(step.prompt, facts), fact: step.fact, answer(v: string) { const t = v.trim(); facts[step.fact] = /^-?\d+(\.\d+)?$/.test(t) ? Number(t) : t; } };
           }
           case 'ending': stack.length = 0; return { t: 'end', ending: s.name };
-          case 'if': stack.push({ steps: testCondition(facts, s.cond) ? s.then : s.else, i: 0 }); continue;
+          case 'if': stack.push({ steps: testCondition(facts, s.cond, ctx) ? s.then : s.else, i: 0 }); continue;
           case 'change': applyEffects(facts, s.effects); continue;
+          case 'quest': {
+            // The quest's own spelling of the stage when it has one; Check points out unknown names.
+            const q = findQuest(ctx, s.quest);
+            facts[questFact(s.quest)] = q?.stages[stageIndex(q, s.stage)] ?? s.stage.trim();
+            continue;
+          }
           case 'jump': {
             const key = s.part.trim().toLowerCase();
             const at = steps.findIndex(x => x.t === 'part' && x.name.trim().toLowerCase() === key);

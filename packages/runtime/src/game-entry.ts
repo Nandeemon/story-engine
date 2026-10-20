@@ -3,7 +3,7 @@
  * and this script, which shows a start screen and then runs the same player
  * the editor's Play button uses.
  */
-import { normalizeProject } from '@story-engine/engine-core';
+import { elementScripts, normalizeProject } from '@story-engine/engine-core';
 import type { Facts, Project } from '@story-engine/engine-core';
 import gameCSS from './game.css?inline';
 import { createPlayer } from './player';
@@ -73,7 +73,7 @@ function start(): void {
   const key = `story-engine-save:${story.rooms[0]?.id ?? ''}`;
   // Endings: how many there are in the story, and which this player has found.
   const all = new Set<string>();
-  for (const r of story.rooms) for (const e of r.els) for (const m of e.script.matchAll(/^\s*ending\s*:\s*(.+?)\s*$/gim)) all.add(m[1].toLowerCase());
+  for (const r of story.rooms) for (const e of r.els) for (const m of elementScripts(e).join('\n').matchAll(/^\s*ending\s*:\s*(.+?)\s*$/gim)) all.add(m[1].toLowerCase());
   const found = (): string[] => { try { return JSON.parse(localStorage.getItem(`${key}:endings`) ?? '[]'); } catch { return []; } };
   const title_ = () => {
     const f = found().filter(x => all.has(x.toLowerCase()));

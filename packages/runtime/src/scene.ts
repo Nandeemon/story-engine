@@ -3,8 +3,8 @@
  * look. The editor's line preview and the player both build it with the same
  * functions, so the preview shows what the player will see.
  */
-import { findLook, testCondition, walkSteps } from '@story-engine/engine-core';
-import type { Facts, FxOptions, Idle, Look, PathPoint, PathStep, Placement, Project, Room, Step, StoryElement } from '@story-engine/engine-core';
+import { activeSituations, findLook, inSituation, testCondition, walkSteps } from '@story-engine/engine-core';
+import type { Facts, FxOptions, Idle, Look, PathPoint, PathStep, Placement, Project, Quest, Room, Step, StoryElement } from '@story-engine/engine-core';
 import { findMark, markHTML } from './marks';
 import { backdropHTML, elementArt, lookStyle } from './stage';
 import { esc } from './art';
@@ -42,12 +42,17 @@ export interface StagedChar {
 }
 
 /** Where the player is in the story beyond facts: conversations had and rooms visited. */
-export interface Progress { facts: Facts; seen: string[] }
+export interface Progress { facts: Facts; seen: string[]; /** The story's quests, for quest conditions. */ quests?: Quest[] }
 
-/** Whether something is in the room right now: its condition holds, and a one-time conversation that hides it has not happened. */
-export function present(el: StoryElement, progress?: Progress): boolean {
+/**
+ * Whether something is in the room right now: its condition holds, a one-time
+ * conversation that hides it has not happened, and, given the room, the
+ * room's situations allow it (its own situation is active, none it hides in is).
+ */
+export function present(el: StoryElement, progress?: Progress, room?: Room): boolean {
   if (!progress) return true;
-  if (el.cond && ![el.cond, ...(el.andConds ?? [])].every(c => testCondition(progress.facts, c))) return false;
+  if (el.cond && ![el.cond, ...(el.andConds ?? [])].every(c => testCondition(progress.facts, c, progress))) return false;
+  if (room && (el.situation || el.hideIn?.length) && !inSituation(el, activeSituations(room, progress.facts, progress))) return false;
   return !(el.once === 'hide' && progress.seen.includes(el.id));
 }
 
@@ -91,7 +96,7 @@ export function startScene(room: Room, owner: StoryElement, steps: Step[], progr
   if (owner.kind === 'char' && !(entering.has(lower(owner.name)) && !cast.has(lower(owner.name)))) cast.add(lower(owner.name));
   const aside = (owner.staging ?? 'aside') === 'aside';
   return {
-    chars: room.els.filter(e => e.kind === 'char' && (e === owner || present(e, progress))).map(e => ({
+    chars: room.els.filter(e => e.kind === 'char' && (e === owner || present(e, progress, room))).map(e => ({
       key: e.id, name: e.name, elId: e.id, characterId: e.characterId, preset: e.preset, img: e.img,
       x: e.x, y: e.y, size: e.size, flip: false, look: e.expr ?? '', lineLook: '', marks: [], lineMarks: [], idle: e.idle,
       visible: aside ? cast.has(lower(e.name)) : !(entering.has(lower(e.name)) && !cast.has(lower(e.name))), fx: ''
@@ -102,7 +107,7 @@ export function startScene(room: Room, owner: StoryElement, steps: Step[], progr
 /** The scene outside conversations: everyone where they stand in the room. */
 export function roomScene(room: Room, progress?: Progress): Scene {
   return {
-    chars: room.els.filter(e => e.kind === 'char' && present(e, progress)).map(e => ({
+    chars: room.els.filter(e => e.kind === 'char' && present(e, progress, room)).map(e => ({
       key: e.id, name: e.name, elId: e.id, characterId: e.characterId, preset: e.preset, img: e.img,
       x: e.x, y: e.y, size: e.size, flip: false, look: e.expr ?? '', lineLook: '', marks: [], lineMarks: [], idle: e.idle, visible: true, fx: ''
     }))

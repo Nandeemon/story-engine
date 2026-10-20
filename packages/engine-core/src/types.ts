@@ -14,6 +14,12 @@ export interface Condition {
   fact: string;
   op: CompareOp;
   value: FactValue;
+  /**
+   * Set for a quest condition ("quest Lost cat is at least Started"): the quest's
+   * name as written. fact is then questFact(quest), value is a stage name, and op
+   * is one of '=', '!=', '>=' (at least) and '<' (before), ordered by the quest's stages.
+   */
+  quest?: string;
 }
 
 export interface SayStep {
@@ -104,11 +110,13 @@ export interface MusicStep { t: 'music'; track: string; once?: boolean }
 export interface SoundStep { t: 'sound'; name: string; loop?: boolean; stop?: boolean; music?: boolean }
 /** Show or hide one of the game's interface panels, by name. */
 export interface PanelStep { t: 'panel'; name: string; show: boolean }
+/** Move a quest to one of its stages: "Quest Lost cat: Started". */
+export interface QuestStep { t: 'quest'; quest: string; stage: string }
 /** An author's note (a line starting with #). The player never sees it. */
 export interface NoteStep { t: 'note'; text: string }
 
 /** One step of a conversation. */
-export type Step = SayStep | ChoiceStep | IfStep | ChangeStep | DoorStep | EndStep | PartStep | JumpStep | NoteStep | ShowStep | MoveStep | HideStep | MusicStep | MarkStep | LoopStep | PathStep | AskStep | EndingStep | CameraStep | SoundStep | PanelStep;
+export type Step = SayStep | ChoiceStep | IfStep | ChangeStep | DoorStep | EndStep | PartStep | JumpStep | NoteStep | ShowStep | MoveStep | HideStep | MusicStep | MarkStep | LoopStep | PathStep | AskStep | EndingStep | CameraStep | SoundStep | PanelStep | QuestStep;
 export type StageStep = ShowStep | MoveStep | HideStep | MarkStep | LoopStep | PathStep | CameraStep;
 
 export interface ScriptError {
@@ -194,6 +202,38 @@ export interface Character {
   looks: CharacterLook[];
 }
 
+/**
+ * One more conversation on a room thing, used while its conditions hold. A thing's
+ * conversations are tried in order; its own script is the last one ("Otherwise").
+ */
+export interface Conversation {
+  id: string;
+  label: string;
+  conds: Condition[];
+  script: string;
+}
+
+/**
+ * A state the same room can be in (night, after the fire): active while all its
+ * conditions hold. Several can be active at once; for the backdrop and music,
+ * the active one latest in the list wins.
+ */
+export interface Situation {
+  id: string;
+  name: string;
+  conds: Condition[];
+  bg?: Backdrop | null;
+  music?: string;
+}
+
+/** A quest the story keeps track of. Its stage is the story fact questFact(name); unset means stages[0]. */
+export interface Quest {
+  id: string;
+  name: string;
+  /** In order; the first is where every quest starts. */
+  stages: string[];
+}
+
 export interface StoryElement {
   id: string;
   kind: ElementKind;
@@ -232,8 +272,14 @@ export interface StoryElement {
   expr?: string;
   /** How this element's conversation opens: other characters step aside (default) or the room stays. */
   staging?: 'aside' | 'room';
-  /** The written conversation opened by clicking this element. */
+  /** The written conversation opened by clicking this element: the last one tried, when it has conversations. */
   script: string;
+  /** More conversations, tried in order before script; the first whose conditions all hold runs. */
+  convos?: Conversation[];
+  /** Only in the room while this situation (an id in room.situations) is active. */
+  situation?: string;
+  /** Hidden while any of these situations is active. */
+  hideIn?: string[];
 }
 
 export interface Room {
@@ -250,6 +296,8 @@ export interface Room {
   music?: string;
   /** Play the room's music once instead of looping it. */
   musicOnce?: boolean;
+  /** States the room can be in, each with its own things, backdrop and music. */
+  situations?: Situation[];
   els: StoryElement[];
 }
 
@@ -361,6 +409,8 @@ export interface Project {
   sounds?: Sound[];
   /** Marks the author added, or starter marks they changed. */
   marks?: MarkDef[];
+  /** Quests with stages; each one's stage is a story fact (see questFact). */
+  quests?: Quest[];
 }
 
 /* ---------- Interface panels ---------- */

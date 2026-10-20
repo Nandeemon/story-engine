@@ -1,4 +1,5 @@
 import type { ChoiceOption, CompareOp, Condition, Effect, FactValue, ParseResult, Placement, ScriptError, Step } from './types';
+import { questFact } from './quests';
 import { idleText, lineFxText, parseIdle, parseLineFx, parsePathPoints, parsePlace, pathPointsText, placeText } from './staging';
 
 /**
@@ -43,7 +44,23 @@ export const CONDITION_WORDS: [string, CompareOp][] = [
   ['is at least', '>='], ['is at most', '<='], ['is more than', '>'], ['is less than', '<'], ['is not', '!='], ['is', '=']
 ];
 
-function parseCondition(text: string, n: number, errors: ScriptError[]): Condition {
+/** Words of quest conditions, in the order they are tried: "quest Lost cat is at least Started". */
+export const QUEST_CONDITION_WORDS: [string, '>=' | '<' | '!=' | '='][] = [['is at least', '>='], ['is before', '<'], ['is not', '!='], ['is', '=']];
+
+/** Reads a condition as written after "Only if"; null when it cannot be read. */
+export function parseCondition(text: string): Condition | null {
+  const errors: ScriptError[] = [];
+  const c = readCondition(text.trim(), 0, errors);
+  return errors.length ? null : c;
+}
+
+function readCondition(text: string, n: number, errors: ScriptError[]): Condition {
+  const qm = text.match(/^quest\s+(.+?)\s+(is(?:\s+(?:at\s+least|before|not))?)\s+(.+)$/i);
+  if (qm) {
+    const op = QUEST_CONDITION_WORDS.find(([w]) => w === qm[2].toLowerCase().replace(/\s+/g, ' ').trim())?.[1] ?? '=';
+    const quest = qm[1].trim(), stage = qm[3].trim();
+    return { fact: questFact(quest), op, value: stage, quest };
+  }
   const lower = text.toLowerCase();
   for (const [word, op] of CONDITION_WORDS) {
     const i = lower.indexOf(` ${word} `);
@@ -127,7 +144,7 @@ function parse(src: string, noteSources: boolean): ParseResult {
       } else if ((m = l.text.match(/^only if\s+(.+)$/i))) {
         pos++;
         const ifSrc = take(l);
-        const step: Step = { t: 'if', cond: parseCondition(m[1], l.n, errors), then: block(l.indent), else: [] };
+        const step: Step = { t: 'if', cond: readCondition(m[1], l.n, errors), then: block(l.indent), else: [] };
         if (pos < lines.length && lines[pos].indent === l.indent && /^otherwise$/i.test(lines[pos].text)) {
           const o = take(lines[pos]);
           ifSrc.elseRaw = o.raw;
@@ -147,6 +164,9 @@ function parse(src: string, noteSources: boolean): ParseResult {
         if (parentIndent >= 0 || l.indent > 0) errors.push({ n: l.n, msg: 'A part starts at the left edge, not indented under something else.' });
         else if (parts.has(name.toLowerCase())) errors.push({ n: l.n, msg: `There is already a part called "${name}". Give each part its own name.` });
         else { parts.add(name.toLowerCase()); steps.push(mark({ t: 'part', name }, l)); }
+      } else if ((m = l.text.match(/^quest\s+([^:"()]+?)\s*:\s*(.+)$/i))) {
+        pos++;
+        steps.push(mark({ t: 'quest', quest: m[1].trim(), stage: m[2].trim() }, l));
       } else if (/^change\s+[\w.]+\s*[+\-=]/i.test(l.text)) {
         pos++;
         steps.push(mark({ t: 'change', effects: parseEffects(l.text.replace(/^change\s+/i, ''), l.n, errors) }, l));
@@ -312,6 +332,7 @@ export function effectText(e: Effect): string {
 }
 
 export function conditionText(c: Condition): string {
+  if (c.quest) return `quest ${oneLine(c.quest)} ${QUEST_CONDITION_WORDS.find(([, op]) => op === c.op)?.[0] ?? 'is'} ${oneLine(String(c.value))}`;
   if (c.op === 'truthy') return c.fact;
   const word = CONDITION_WORDS.find(([, op]) => op === c.op)?.[0] ?? 'is';
   return `${c.fact} ${word} ${valueText(c.value)}`;
@@ -350,6 +371,7 @@ function headerOf(s: Step): string | null {
     case 'door': return `Go to ${oneLine(s.room)}${s.fx ? ` with ${s.fx}` : ''}`;
     case 'ask': return `Ask "${oneLine(s.prompt).replace(/"/g, "'")}" as ${s.fact}`;
     case 'ending': return `Ending: ${oneLine(s.name)}`;
+    case 'quest': return `Quest ${cleanName(s.quest)}: ${oneLine(s.stage)}`;
     case 'camera': return s.action === 'zoom' ? `Camera zoom ${s.scale ?? 1.5} at ${s.x ?? 50}% ${s.y ?? 50}%` : `Camera ${s.action}`;
     case 'jump': return `Go to part ${oneLine(s.part)}`;
     case 'end': return 'End';
@@ -456,6 +478,7 @@ export function summarize(steps: Step[]): ScriptSummary {
       case 'change': s.effects.forEach(e => facts.add(e.fact)); break;
       case 'choice': c.choices++; s.options.forEach(o => o.effects.forEach(e => facts.add(e.fact))); break;
       case 'if': c.conditions++; facts.add(s.cond.fact); break;
+      case 'quest': facts.add(questFact(s.quest)); break;
       case 'part': parts.push(s.name); break;
     }
   });
