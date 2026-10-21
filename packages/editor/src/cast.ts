@@ -3,7 +3,7 @@
  * own pictures), with everything each one is part of, so a story with many
  * scenes stays easy to find your way around.
  */
-import { elementConds, elementScripts, parseScript, talkedFact, valueText, walkSteps } from '@story-engine/engine-core';
+import { conditionText, elementConds, elementScripts, parseScript, talkedFact, valueText, walkSteps } from '@story-engine/engine-core';
 import type { Character, FactDef, Project, Room, Step, StoryElement } from '@story-engine/engine-core';
 import { CHARACTERS, characterSVG, esc } from '@story-engine/runtime';
 import { soundRow } from './widgets';
@@ -187,6 +187,18 @@ function castList(p: Project): string {
     ${otherList}</div>`;
 }
 
+/** When a placed figure is there: its situation, the situations it hides in, and its conditions, in plain words. */
+function placeWhen(room: Room, el: StoryElement): string {
+  const sit = (id: string) => room.situations?.find(s => s.id === id);
+  const parts: string[] = [];
+  if (el.situation) { const s = sit(el.situation); parts.push(`only in ${s ? `${esc(s.name)}${s.conds.length ? ` (${esc(s.conds.map(conditionText).join(' and '))})` : ''}` : 'a deleted situation'}`); }
+  const hid = (el.hideIn ?? []).map(id => sit(id)?.name).filter(Boolean) as string[];
+  if (hid.length) parts.push(`not in ${hid.map(esc).join(', ')}`);
+  const conds = elementConds(el);
+  if (conds.length) parts.push(`while ${esc(conds.map(conditionText).join(' and '))}`);
+  return `<em class="when">${parts.length ? parts.join('; ') : 'always'}</em>`;
+}
+
 function castDetail(p: Project, c: Character): string {
   const info = castInfo(p, c.name, c.id);
   const looks = [{ id: '', name: 'default', img: c.base }, ...c.looks.filter(l => !l.once)];
@@ -199,12 +211,12 @@ function castDetail(p: Project, c: Character): string {
   }).join('');
   const once = c.looks.filter(l => l.once).length;
   const placed = info.placed.length
-    ? info.placed.map(x => `<li><span>${esc(x.room.name)}${x.el.idle ? ` <i>${x.el.idle.move === 'none' ? 'stands still' : esc(x.el.idle.move)} here, set in the room</i>` : ''}</span><button class="btn small quiet" data-act="cast-goto-room" data-k="${esc(x.room.id)}|${esc(x.el.id)}">Open</button></li>`).join('')
+    ? info.placed.map(x => `<li><span>${esc(x.room.name)}${placeWhen(x.room, x.el)}${x.el.idle ? ` <i>${x.el.idle.move === 'none' ? 'stands still' : esc(x.el.idle.move)} here, set in the room</i>` : ''}</span><button class="btn small quiet" data-act="cast-goto-room" data-k="${esc(x.room.id)}|${esc(x.el.id)}">Open</button></li>`).join('')
     : '<li class="hint">Not placed in any room yet. A conversation can still bring them in.</li>';
   const free = p.rooms.filter(r => !info.placed.some(x => x.room === r));
   const placeIn = free.length ? `<select id="cast-place" data-in="cast-place" aria-label="Place in a room"><option value="">Place in a room…</option>${free.map(r => `<option value="${esc(r.id)}">${esc(r.name)}</option>`).join('')}</select>` : '';
   const convos = info.convos.length
-    ? info.convos.map(x => `<li><span>${esc(x.room.name)} › ${esc(x.el.name)}${x.label ? ` › ${esc(x.label)}` : ''}${x.lines ? ` <i>${plural(x.lines, 'line')}</i>` : ' <i>brought in</i>'}</span><button class="btn small quiet" data-act="cast-goto-convo" data-k="${esc(x.room.id)}|${esc(x.el.id)}">Open</button></li>`).join('')
+    ? info.convos.map(x => { const cv = x.convo ? x.el.convos?.find(c => c.id === x.convo) : undefined; return `<li><span>${esc(x.room.name)} › ${esc(x.el.name)}${x.label ? ` › ${esc(x.label)}` : ''}${x.lines ? ` <i>${plural(x.lines, 'line')}</i>` : ' <i>brought in</i>'}${cv?.conds.length ? `<em class="when">when ${esc(cv.conds.map(conditionText).join(' and '))}</em>` : x.el.convos?.length && !x.convo ? '<em class="when">when no other conversation runs</em>' : ''}</span><button class="btn small quiet" data-act="cast-goto-convo" data-k="${esc(x.room.id)}|${esc(x.el.id)}|${esc(x.convo ?? '')}">Open</button></li>`; }).join('')
     : '<li class="hint">No lines yet.</li>';
   return `<div class="castpage">
     <div class="casthead"><button class="btn small quiet" data-act="cast-back">← All characters</button><h2>${esc(c.name)}</h2></div>
@@ -220,7 +232,7 @@ function castDetail(p: Project, c: Character): string {
         <section><div class="label">Looks</div><div class="castlooks">${lookCells}</div>
           <div class="row"><button class="btn small" data-act="cast-add-looks">+ Add looks</button>${once ? `<span class="hint">and ${plural(once, 'picture')} used for one line only</span>` : ''}</div>
           <p class="hint">Renaming a look updates the lines that use it. To line a look up with the base picture, open ${esc(c.name)} in a room.</p></section>
-        <section><div class="label">In rooms</div><ul class="castlist">${placed}</ul>${placeIn}</section>
+        <section><div class="label">Where is ${esc(c.name)}</div><ul class="castlist">${placed}</ul>${placeIn}</section>
         <section><div class="label">Conversations</div><ul class="castlist">${convos}</ul></section>
         ${factsSection(p, c, info)}
         ${soundsSection(p, c)}

@@ -29,7 +29,7 @@ export interface PlayerOptions {
   roomId?: string;
   /** Start by running this element's conversation. */
   elementId?: string;
-  /** Start with this one of the element's conversations (its id in convos) instead of the one its conditions pick. */
+  /** Start with this one of the element's conversations (its id in convos, or '' for its own script) instead of the one its conditions pick. */
   convoId?: string;
   /** Start the element's conversation at this step instead of its first line (for testing). */
   startPath?: string;
@@ -470,8 +470,9 @@ export function createPlayer(host: HTMLElement, project: Project, opts: PlayerOp
     const focused = document.activeElement as HTMLElement | null;
     if (focused && host.contains(focused)) focused.blur();
     // The conversation its conditions pick now, or the one asked for; saves and memory know it by its key.
-    const asked = convoId ? scriptByKey(el, `${el.id}:${convoId}`) : undefined;
-    const convo = asked !== undefined ? { id: `${el.id}:${convoId}`, script: asked } : pickConversation(el, s.facts, ctx) ?? { id: el.id, script: el.script };
+    const key = convoId ? `${el.id}:${convoId}` : el.id;
+    const asked = convoId !== undefined ? scriptByKey(el, key) : undefined;
+    const convo = asked !== undefined ? { id: key, script: asked } : pickConversation(el, s.facts, ctx) ?? { id: el.id, script: el.script };
     const steps = stepsOf(convo.id, convo.script);
     const scene = startScene(room(), el, steps, progress());
     // Starting partway: the scene is set as it would stand by then.

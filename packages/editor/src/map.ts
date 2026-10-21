@@ -6,9 +6,10 @@
  * where the paths continue together. Edits made here rewrite the script, so the
  * script and the map always show the same conversation.
  */
-import { CONDITION_WORDS, FX_NORMAL, IDLE_MOVES, pathAt, placeText as spotText, ENTER_EFFECTS, EXIT_EFFECTS, LINE_EFFECTS, SPOTS, placeText, snapToSpot, stepsBefore, conditionText, effectText, findRoomByName, getList, getStep, parseScript, splitPath, stepPathOf, summarize, toValue, valueText, walkSteps, writeScript } from '@story-engine/engine-core';
-import { characterOf, findLook, hasLook, storyFactNames } from '@story-engine/engine-core';
-import type { Character, ChoiceStep, CompareOp, DoorStep, Effect, Placement, Project, Room, SayStep, Step, StoryElement } from '@story-engine/engine-core';
+import { FX_NORMAL, IDLE_MOVES, pathAt, placeText as spotText, ENTER_EFFECTS, EXIT_EFFECTS, LINE_EFFECTS, SPOTS, placeText, snapToSpot, stepsBefore, conditionText, effectText, findRoomByName, getList, getStep, parseScript, splitPath, stepPathOf, summarize, toValue, valueText, walkSteps, writeScript } from '@story-engine/engine-core';
+import { characterOf, findLook, findQuest, hasLook, newQuest, stageIndex, storyFactNames } from '@story-engine/engine-core';
+import { condRow, editCondition } from './conds';
+import type { Character, ChoiceStep, DoorStep, Effect, Placement, Project, Room, SayStep, Step, StoryElement } from '@story-engine/engine-core';
 import { EXPRESSIONS, allMarks, markArt, applyToScene, esc, nextMoment, sayHTML, sceneHTML, startScene } from '@story-engine/runtime';
 import type { Scene } from '@story-engine/runtime';
 import { musicSelect, soundSelect } from './widgets';
@@ -103,7 +104,7 @@ let model: Model = { edges: [], jumps: [], parts: new Map() };
 let nextId = 0;
 
 const lower = (s: string) => s.trim().toLowerCase();
-const LINE_KINDS = new Set(['say', 'change', 'note', 'show', 'move', 'hide', 'music', 'sound', 'panel', 'mark', 'loop', 'path', 'ask', 'camera']);
+const LINE_KINDS = new Set(['say', 'change', 'quest', 'note', 'show', 'move', 'hide', 'music', 'sound', 'panel', 'mark', 'loop', 'path', 'ask', 'camera']);
 
 /* Boxes made smaller: all of them, with single boxes switched the other way. Kept while the editor is open. */
 let allSmall = false;
@@ -729,6 +730,7 @@ const kinds = (top: boolean, hasParts: boolean): [string, string, string, KindGr
   ['change', 'Change something', 'Change a story fact without saying anything', 'top'],
   ['item', 'Give or take an item', 'The player gets something, such as a key, or loses it', 'talk'],
   ['ask', 'Ask the player', 'The player types an answer, such as their name, kept as a story fact', 'talk'],
+  ['quest', 'Move a quest on', 'Set a quest to one of its stages, such as Lost cat → Started', 'talk'],
   ['show', 'Bring someone in', 'A character comes on stage, with an effect', 'stage'],
   ['move', 'Move someone', 'Change where someone stands, their size, or turn them', 'stage'],
   ['hide', 'Take someone out', 'A character leaves the stage', 'stage'],
@@ -885,15 +887,21 @@ export function mapSide(ctx: MapCtx): string {
         <p class="hint">The player picks one answer. Each answer can lead its own way, and paths that do not end meet again below.</p>
         <div class="field"><span>Answers</span>${step.options.map((o, k) => `<button class="mkind" data-map-act="sel" data-k="${path}#o${k}"><b>${o.text === '...' ? 'Empty answer' : esc(o.text)}</b>${o.effects.length ? `<span>${esc(o.effects.map(effectText).join(', '))}</span>` : ''}</button>`).join('')}</div>
         <div class="row"><button class="btn small" data-map-act="add-answer" data-k="${path}">+ Answer</button>${del('Delete the whole choice')}</div>`;
-    case 'if': {
-      const c = step.cond;
-      const ops: [CompareOp, string][] = [...CONDITION_WORDS.map(([w, op]) => [op, w] as [CompareOp, string]), ['truthy', 'is yes']];
-      return `${header('Only if')}${facts}
+    case 'if':
+      return `${header('Only if')}
         <p class="hint">The Yes path runs when this is true, and the Otherwise path runs when it is not.</p>
-        <label class="field"><span>Story fact</span><input type="text" list="m-facts" id="m-cfact" data-map-in="cond-fact" value="${esc(c.fact)}"></label>
-        <label class="field"><span>Test</span><select id="m-cop" data-map-in="cond-op">${ops.map(([op, w]) => `<option value="${op}"${op === c.op ? ' selected' : ''}>${w}</option>`).join('')}</select></label>
-        ${c.op === 'truthy' ? '' : `<label class="field"><span>Value</span><input type="text" id="m-cval" data-map-in="cond-val" value="${esc(valueText(c.value))}"></label>`}
+        <div class="field"><span>${step.cond.quest ? 'Quest' : 'Story fact or quest'}</span>${condRow(ctx.project, step.cond, 'm-cond', f => `data-map-in="cond-${f}"`)}</div>
         ${del('Delete this condition and both paths')}`;
+    case 'quest': {
+      const q = findQuest(ctx.project, step.quest);
+      const names = (ctx.project.quests ?? []).map(x => x.name);
+      if (!q) names.push(step.quest);
+      const stages = q ? [...q.stages] : [];
+      if (!q || stageIndex(q, step.stage) < 0) stages.push(step.stage);
+      return `${header('Move a quest on')}
+        <label class="field"><span>Quest</span><select id="m-quest" data-map-in="quest-name">${names.map(n => `<option${lower(n) === lower(q?.name ?? step.quest) ? ' selected' : ''}>${esc(n)}</option>`).join('')}<option value="__new">+ New quest…</option></select></label>
+        <label class="field"><span>Is now at</span><select id="m-qstage" data-map-in="quest-stage">${stages.map(n => `<option${lower(n) === lower(step.stage) ? ' selected' : ''}>${esc(n)}</option>`).join('')}</select></label>
+        <p class="hint">From here on the quest is at this stage. Rooms, figures and conversations can depend on it.${q ? ` <button class="linkbtn" data-act="quest-open" data-k="${esc(q.id)}">See ${esc(q.name)} in Quests</button>` : ''}</p>${del()}`;
     }
     case 'change':
       if (itemStepText(ctx.project, step)) return itemStepPanel(ctx.project, step, header, del());
@@ -981,6 +989,10 @@ function newStep(kind: string, ctx: MapCtx, parts: string[]): Step {
     case 'if': return { t: 'if', cond: { fact: 'affection', op: '>=', value: 5 }, then: [], else: [] };
     case 'change': return { t: 'change', effects: [{ fact: 'affection', op: '+', value: 1 }] };
     case 'item': return newItemStep(ctx.project);
+    case 'quest': {
+      const q = ctx.project.quests?.[0] ?? (ctx.project.quests ??= [], ctx.project.quests[ctx.project.quests.push(newQuest(ctx.project)) - 1]);
+      return { t: 'quest', quest: q.name, stage: q.stages[1] ?? q.stages[0] };
+    }
     case 'music': return { t: 'music', track: (ctx.project.sounds ?? []).find(x => x.music)?.name ?? '' };
     case 'panel': return { t: 'panel', name: ctx.project.panels?.[0]?.name ?? 'Inventory', show: true };
     case 'sound': return { t: 'sound', name: (ctx.project.sounds ?? []).find(x => !x.music)?.name ?? '...' };
@@ -1336,10 +1348,19 @@ export function mapInput(ctx: MapCtx, field: string, k: string, value: string): 
   } else if (step.t === 'choice' && field === 'opt-text') {
     const o = step.options[Number(opt)];
     if (o) o.text = text.trim() ? text : '...';
-  } else if (step.t === 'if') {
-    if (field === 'cond-fact') step.cond.fact = factName(value) || 'fact';
-    if (field === 'cond-op') { panel = (step.cond.op === 'truthy') !== (value === 'truthy'); step.cond.op = value as CompareOp; if (value === 'truthy') step.cond.value = true; else if (panel) step.cond.value = 5; }
-    if (field === 'cond-val') step.cond.value = amount(value);
+  } else if (step.t === 'if' && field.startsWith('cond-')) {
+    const res = editCondition(ctx.project, step.cond, field.slice(5), value);
+    step.cond = res.cond;
+    panel = res.redraw;
+  } else if (step.t === 'quest' && field.startsWith('quest-')) {
+    if (field === 'quest-name') {
+      const q = value === '__new' ? ctx.project.quests![ctx.project.quests!.push(newQuest(ctx.project)) - 1] : findQuest(ctx.project, value);
+      if (!q) return undefined;
+      step.quest = q.name;
+      if (stageIndex(q, step.stage) < 0) step.stage = q.stages[1] ?? q.stages[0];
+      panel = true;
+    }
+    if (field === 'quest-stage') step.stage = value;
   } else if (step.t === 'path' && (field === 'path-secs' || field.startsWith('pt-'))) {
     if (field === 'path-secs') step.secs = Math.max(0.5, Number(value) || 3);
     const pt = step.points[ctx.pathPt ?? -1];

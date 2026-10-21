@@ -24,6 +24,10 @@ export interface Problem {
   hud?: string;
   /** An interface panel in Look. */
   panel?: string;
+  /** A situation of the room, shown with its chip on. */
+  situation?: string;
+  /** A quest the problem is about, by id; '' when the quest does not exist (Check then offers the Quests page). */
+  quest?: string;
   where: string;
   text: string;
   /** A room still being built (changed in the last few minutes): shown as a grey note, not a problem. */
@@ -53,8 +57,8 @@ export function findProblems(p: Project, fresh: ReadonlySet<string> = new Set())
         }
         if (s.t === 'say' && s.expr && missingLook(p, room, s.who, s.expr)) out.push({ ...base, level: 'warning', path, text: `${s.who} has no look called "${s.expr}", so the base picture shows.` });
         if ((s.t === 'show' || s.t === 'move' || s.t === 'hide' || s.t === 'mark' || s.t === 'loop') && unknownSpeaker(ctx, s.who)) out.push({ ...base, level: 'error', path, text: `"${stageText(s)}": there is no character called ${s.who}.` });
-        if (s.t === 'quest') { const q = questProblem(p, s.quest, s.stage); if (q) out.push({ ...base, level: 'error', path, text: `"Quest ${s.quest}: ${s.stage}": ${q}` }); }
-        if (s.t === 'if' && s.cond.quest) { const q = questProblem(p, s.cond.quest, String(s.cond.value)); if (q) out.push({ ...base, level: 'error', path, text: `"Only if ${conditionText(s.cond)}": ${q}` }); }
+        if (s.t === 'quest') { const q = questProblem(p, s.quest, s.stage); if (q) out.push({ ...base, level: 'error', path, quest: findQuest(p, s.quest)?.id ?? '', text: `"Quest ${s.quest}: ${s.stage}": ${q}` }); }
+        if (s.t === 'if' && s.cond.quest) { const q = questProblem(p, s.cond.quest, String(s.cond.value)); if (q) out.push({ ...base, level: 'error', path, quest: findQuest(p, s.cond.quest)?.id ?? '', text: `"Only if ${conditionText(s.cond)}": ${q}` }); }
         if (s.t === 'say' && unknownSpeaker(ctx, s.who)) out.push({ ...base, level: 'note', path, text: `"${s.who}" has no character, so this line is a voice without a picture.` });
       });
       for (const path of unreachableSteps(steps)) {
@@ -222,19 +226,20 @@ function questAndSituationProblems(p: Project): Problem[] {
   const badQuest = (conds: (Condition | undefined)[], at: Omit<Problem, 'level' | 'text'>) => {
     for (const c of conds) {
       const q = c?.quest ? questProblem(p, c.quest, String(c.value)) : '';
-      if (q) out.push({ ...at, level: 'error', text: `"${conditionText(c!)}": ${q}` });
+      if (q) out.push({ ...at, level: 'error', quest: findQuest(p, c!.quest!)?.id ?? '', text: `"${conditionText(c!)}": ${q}` });
     }
   };
   for (const pn of p.panels ?? []) badQuest([pn.cond, ...pn.blocks.map(b => b.cond)], { roomId: first, panel: pn.id, where: `Look › Interface › ${pn.name}` });
   for (const room of p.rooms) {
-    for (const st of room.situations ?? []) badQuest(st.conds, { roomId: room.id, where: `${room.name} › ${st.name}` });
+    for (const st of room.situations ?? []) badQuest(st.conds, { roomId: room.id, situation: st.id, where: `${room.name} › ${st.name}` });
     for (const el of room.els) {
       badQuest(elementConds(el), { roomId: room.id, elId: el.id, inRoom: true, where: `${room.name} › ${el.name}` });
       for (const cv of el.convos ?? []) badQuest(cv.conds, { roomId: room.id, elId: el.id, convo: cv.id, where: `${room.name} › ${el.name} › ${cv.label || 'Conversation'}` });
     }
     for (const st of room.situations ?? []) {
       const why = st.conds.map(never).find(Boolean);
-      if (why) out.push({ level: 'warning', roomId: room.id, where: `${room.name} › ${st.name}`, text: `The situation "${st.name}" can never happen: ${why}.` });
+      const qc = st.conds.find(c => c.quest && never(c));
+      if (why) out.push({ level: 'warning', roomId: room.id, situation: st.id, ...(qc ? { quest: findQuest(p, qc.quest!)?.id ?? '' } : {}), where: `${room.name} › ${st.name}`, text: `The situation "${st.name}" can never happen: ${why}.` });
     }
     for (const el of room.els) {
       if (el.situation && !(room.situations ?? []).some(st => st.id === el.situation)) out.push({ level: 'warning', roomId: room.id, elId: el.id, inRoom: true, where: `${room.name} › ${el.name}`, text: `${el.name} belongs to a situation that was deleted, so it never shows.` });

@@ -3,7 +3,8 @@ import './editor.css';
 import './frame.css';
 import './content.css';
 import './mapui.css';
-import { areaPoints, elementConds, elementScripts, mapElementScripts, setAreaShape, cleanPanelName, newBlock, panelFromTemplate, renamePanelInScript, factsToReach, startFacts, pathAt, simplifyPath, walkSteps, characterOf, cleanLookName, cleanMarkName, cleanSoundName, factName, renameMarkInScript, renameSoundInScript, toValue, createProject, createRoom, findLook, findRoomByName, newId, normalizeProject, parseScript, renameLookInScript, renameRoomInScript, renameSpeakerInScript, uniqueLookName, writeScript, getStep } from '@story-engine/engine-core';
+import './quests.css';
+import { cleanQuestName, findQuest, newQuest, renameQuest, renameStage, areaPoints, elementConds, elementScripts, mapElementScripts, setAreaShape, cleanPanelName, newBlock, panelFromTemplate, renamePanelInScript, factsToReach, startFacts, pathAt, simplifyPath, walkSteps, characterOf, cleanLookName, cleanMarkName, cleanSoundName, factName, renameMarkInScript, renameSoundInScript, createProject, createRoom, findLook, findRoomByName, newId, normalizeProject, parseScript, renameLookInScript, renameRoomInScript, renameSpeakerInScript, uniqueLookName, writeScript, getStep } from '@story-engine/engine-core';
 import type { Condition, Panel, PanelBlock, PanelTemplate, Character, CharacterLook, FactDef, Facts, Idle, MarkDef, PathStep, Step, Project, Room, StoryElement } from '@story-engine/engine-core';
 import { BACKDROPS, CHARACTERS, OBJECTS, STARTER_MARKS, findMark, backdropHTML, createPlayer, elementArt, elementStyle, areaArt, esc, fxVars, lookStyle, sayHTML } from '@story-engine/runtime';
 import type { Player, PlayState } from '@story-engine/runtime';
@@ -18,6 +19,8 @@ import type { LineWin, MapCtx, MapResult } from './map';
 import { readProjectFile, saveToFile } from './files';
 import { viewCast } from './cast';
 import { addItem } from '@story-engine/engine-core';
+import { editCondition, freshCondition } from './conds';
+import { convoList, convoPanel, convoTabs, parsePlace, roomShow, situationBar, situationField, situationPanel, testState, viewQuests } from './quests';
 
 const $ = <T extends HTMLElement = HTMLElement>(s: string) => document.querySelector<T>(s);
 
@@ -87,6 +90,33 @@ function refreshLookStage(): void {
 }
 /** Set when a conversation is opened, so the map opens on its start. */
 let freshConvo = false;
+
+/** The conversation of the selected thing being edited: one of its convos by id, or null for its own script (Otherwise). */
+let convoSel: string | null = null;
+let convoFor: string | null = null;
+/** The situation shown in the room editor, for that room; null shows the room as it always is. */
+let sitSel: string | null = null;
+let sitFor: string | null = null;
+/** The room stage shows who is there with the test values. */
+let stageTest = false;
+/** The quest open on the Quests page. */
+let questSel: string | null = null;
+/** The backdrop being picked is the situation's own. */
+let bgForSit = false;
+const curConvo = () => { const e = selected(); return e && convoFor === e.id ? e.convos?.find(c => c.id === convoSel) : undefined; };
+const curSit = () => (sitFor === ui.roomId ? room().situations?.find(s => s.id === sitSel) : undefined);
+function setConvo(elId: string | null, id: string): void { convoFor = elId; convoSel = id || null; }
+function setSit(id: string): void { sitFor = ui.roomId; sitSel = id || null; }
+/** The thing with the conversation being edited as its script, so every edit goes to that conversation. */
+function scriptHost(e: StoryElement): StoryElement {
+  const cv = convoFor === e.id ? e.convos?.find(c => c.id === convoSel) : undefined;
+  if (!cv) return e;
+  return new Proxy(e, {
+    get: (t, k, r) => (k === 'script' ? cv.script : Reflect.get(t, k, r)),
+    set: (t, k, v) => { if (k === 'script') cv.script = String(v); else (t as unknown as Record<string | symbol, unknown>)[k] = v; return true; }
+  });
+}
+const convoEl = (): StoryElement | undefined => { const e = selected(); return e ? scriptHost(e) : undefined; };
 
 /** A clickable area that leads somewhere is named after where it leads ("Door to Kitchen"), unless the author named it. */
 function nameAfterDoor(e: StoryElement, to: string): void {
@@ -198,7 +228,7 @@ function restore(json: string, message: string): void {
   if (ui.view === 'convo' && !ui.sel) ui.view = 'room';
   // The marked step stays marked when it is still there, so you can see what changed.
   const e = selected();
-  if (!e || !mapSel || mapSel.startsWith('add:') || !getStep(parseScript(e.script).steps, mapSel.split('#o')[0])) mapSel = null;
+  if (!e || !mapSel || mapSel.startsWith('add:') || !getStep(parseScript(scriptHost(e).script).steps, mapSel.split('#o')[0])) mapSel = null;
   save();
   render();
   toast(message);
@@ -236,6 +266,7 @@ function crumbs(): [string, string][] {
   if (ui.view === 'convo' && e) list.push(['convo', `Conversation · ${e.name}`]);
   if (ui.view === 'look') list.push(['look', 'Look']);
   if (ui.view === 'library') list.push(['library', 'Pictures & sounds']);
+  if (ui.view === 'quests') list.push(['quests', 'Quests']);
   if (ui.view === 'cast') { list.push(['cast', 'Characters']); const c = project.characters.find(x => x.id === castSel); if (c) list.push(['cast-one', c.name]); }
   if (ui.view === 'check') list.push(['check', 'Check']);
   return list;
@@ -265,6 +296,7 @@ const ICON: Record<string, string> = {
   cast: '<circle cx="12" cy="8" r="3.5"/><path d="M5 20c.8-4 3.6-6 7-6s6.2 2 7 6"/>',
   library: '<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="m4 17 5-4 4 3 3-2 4 3"/>',
   look: '<path d="M12 3a9 9 0 1 0 0 18c1.2 0 1.8-.8 1.8-1.7 0-1.3-1.1-1.6-1.1-2.7 0-1 .8-1.6 1.8-1.6H17a4 4 0 0 0 4-4C21 6.6 17 3 12 3Z"/><circle cx="7.5" cy="11" r="1.1"/><circle cx="10" cy="7.2" r="1.1"/><circle cx="14.5" cy="7.2" r="1.1"/>',
+  quests: '<path d="M5 21V3.5"/><path d="M5 4h12l-2.5 4L17 12H5"/>',
   check: '<circle cx="12" cy="12" r="9"/><path d="m8 12.3 2.7 2.7L16 9.6"/>',
   fold: '<path d="m14 7-5 5 5 5"/>'
 };
@@ -272,9 +304,9 @@ const icon = (k: string) => `<svg class="ico" viewBox="0 0 24 24" aria-hidden="t
 
 /** Story-wide places: the rail on wide screens, the ⋯ menu on phones. */
 function places(c: { n: number; errors: number }): [string, string, string, string][] {
-  return [['story-map', 'map', 'Story map', ''], ['cast', 'cast', 'Characters', ''], ['library', 'library', 'Pictures & sounds', ''], ['look', 'look', 'Look', ''], ['check', 'check', 'Check', checkBadge(c)]];
+  return [['story-map', 'map', 'Story map', ''], ['cast', 'cast', 'Characters', ''], ['quests', 'quests', 'Quests', ''], ['library', 'library', 'Pictures & sounds', ''], ['look', 'look', 'Look', ''], ['check', 'check', 'Check', checkBadge(c)]];
 }
-const placeView: Record<string, View> = { 'story-map': 'map', cast: 'cast', library: 'library', look: 'look', check: 'check' };
+const placeView: Record<string, View> = { 'story-map': 'map', cast: 'cast', quests: 'quests', library: 'library', look: 'look', check: 'check' };
 
 /** What "From here" plays while editing, or null where only the start makes sense. */
 function playHere(): { label: string; run: () => void } | null {
@@ -427,10 +459,18 @@ function renderView(): void {
   switch (ui.view) {
     case 'home': main.innerHTML = viewHome(stories, storyId); break;
     case 'cast': main.innerHTML = viewCast(project, castSel); break;
+    case 'quests': main.innerHTML = viewQuests(project, questSel); break;
     case 'library': main.innerHTML = viewLibrary(project, libFilter, libMark); break;
     case 'map': main.innerHTML = viewMap(project, ui, freshRooms()); requestAnimationFrame(drawRoomLinks); break;
-    case 'room':
-      main.innerHTML = viewRoom(project, ui, r, e);
+    case 'room': {
+      const sit = curSit();
+      const show = roomShow(project, r, sit, stageTest ? testState(project, test.values) : null);
+      main.innerHTML = viewRoom(project, ui, r, e, {
+        bar: situationBar(r, sit, show, stageTest), stage: show.room,
+        sitPanel: sit ? situationPanel(project, r, sit) : undefined,
+        el: e ? { sit: situationField(r, e, sit), convos: convoList(e) } : undefined
+      });
+      decorateStage(show.faint);
       if (ui.drawArea) {
         const reshape = !!shapeFor;
         $('.stage.edit')?.insertAdjacentHTML('beforeend', `<div class="pendraw areadraw" data-areadraw><span>${reshape ? 'Click around the shape, point by point' : 'Drag a box, or click point by point around a shape'}</span><i class="abox"></i><svg class="ashape" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"></svg></div>`);
@@ -441,9 +481,11 @@ function renderView(): void {
         drawShapeLine();
       }
       break;
+    }
     case 'convo': {
       const ctx = mapCtx()!;
-      main.innerHTML = viewConvo(project, r, e!, convoMode, { canvas: convoMode === 'map' ? mapHTML(ctx) : '', side: convoMode === 'map' ? mapSide(ctx) : '', scene: convoMode === 'map' ? mapScene(ctx, sceneOpen) : '', sceneOpen });
+      main.innerHTML = viewConvo(project, r, ctx.el, convoMode, { canvas: convoMode === 'map' ? mapHTML(ctx) : '', side: convoMode === 'map' ? sideHTML(ctx) : '', scene: convoMode === 'map' ? mapScene(ctx, sceneOpen) : '', sceneOpen },
+        convoTabs(e!, convoFor === e!.id ? convoSel : null), convoPanel(project, e!, convoFor === e!.id ? convoSel : null));
       if (convoMode === 'map') {
         if (sceneWidth) $('#mapwrap')?.style.setProperty('--scene-w', `${sceneWidth}px`);
         if (freshConvo) openView(); else applyZoom();
@@ -459,8 +501,24 @@ function renderView(): void {
   }
 }
 
-function mapCtx(): MapCtx | null {
+/** The selected thing in the room stage gets a handle to resize it; things not there with the test values are faint. */
+function decorateStage(faint: Set<string>): void {
+  for (const id of faint) document.querySelector(`.stage.edit .el[data-el="${CSS.escape(id)}"]`)?.classList.add('faint');
+  if (ui.lookEdit || ui.drawArea) return;
+  const node = document.querySelector<HTMLElement>('.stage.edit .el.sel:not(.area)');
+  node?.insertAdjacentHTML('beforeend', '<span class="rzc" data-resize-size title="Drag to resize" aria-hidden="true"></span>');
+}
+
+/** The map's side panel; with nothing selected, the conversation's own settings come first. */
+function sideHTML(ctx: MapCtx): string {
+  const side = mapSide(ctx);
   const e = selected();
+  if (mapSel || !e) return side;
+  return side.replace('</h2>', `</h2>${convoPanel(project, e, convoFor === e.id ? convoSel : null)}`);
+}
+
+function mapCtx(): MapCtx | null {
+  const e = convoEl();
   return e ? { project, room: room(), el: e, sel: mapSel, pen: pathPen, pathPt, win: lineWin, edit: inlineEdit } : null;
 }
 
@@ -509,7 +567,7 @@ function refreshMap(): void {
   if (inlineEdit && !getStep(parseScript(ctx.el.script).steps, inlineEdit)) inlineEdit = null;
   // Focus leaving a field that is being replaced is not the author leaving it.
   redrawingMap = true;
-  try { holder.innerHTML = mapHTML(ctx); side.innerHTML = mapSide(ctx); } finally { redrawingMap = false; }
+  try { holder.innerHTML = mapHTML(ctx); side.innerHTML = sideHTML(ctx); } finally { redrawingMap = false; }
   const sceneHost = $('#mscene');
   if (sceneHost) sceneHost.innerHTML = mapScene(ctx, sceneOpen);
   $('#mapwrap')?.classList.toggle('noscene', !sceneOpen);
@@ -544,7 +602,7 @@ function applyMap(res: MapResult | undefined): void {
 }
 
 function updateStatus(): void {
-  const e = selected(), el = $('#status'), facts = $('#facts');
+  const e = convoEl(), el = $('#status'), facts = $('#facts');
   if (!e || !el || !facts) return;
   const s = scriptStatus(project, room(), e.script);
   el.className = s.error ? 'status err' : 'status';
@@ -611,7 +669,7 @@ function startPlay(fromElement?: StoryElement, startPath?: string, fromRoom?: st
   // Starting inside an "Only if": the facts are set so the marked step is reached.
   let facts = testFacts();
   if (fromElement && startPath) {
-    const need = factsToReach(parseScript(fromElement.script).steps, startPath, { ...startFacts(project), ...(facts ?? {}) }, project);
+    const need = factsToReach(parseScript(scriptHost(fromElement).script).steps, startPath, { ...startFacts(project), ...(facts ?? {}) }, project);
     if (Object.keys(need).length) {
       facts = { ...(facts ?? {}), ...need };
       toast(`Playing with ${Object.entries(need).map(([k, v]) => `${k} = ${v === true ? 'yes' : v === false ? 'no' : v}`).join(', ')}, so this step is reached.`);
@@ -620,6 +678,8 @@ function startPlay(fromElement?: StoryElement, startPath?: string, fromRoom?: st
   player = createPlayer($('#player')!, project, {
     roomId: fromElement ? room().id : fromRoom,
     elementId: fromElement?.id,
+    // The conversation shown in the editor, even when its conditions would pick another.
+    convoId: fromElement ? (convoFor === fromElement.id ? convoSel ?? '' : '') : undefined,
     startPath,
     facts,
     storageKey: `story-engine-editor-play:${storyId ?? ''}`,
@@ -632,6 +692,9 @@ function startPlay(fromElement?: StoryElement, startPath?: string, fromRoom?: st
 /* ---------- Actions ---------- */
 
 function place(el: StoryElement): void {
+  // Added while a situation is shown: it belongs to that situation.
+  const sit = ui.view === 'room' ? curSit() : undefined;
+  if (sit) el.situation = sit.id;
   room().els.push(el);
   ui.sel = el.id;
   ui.adding = null;
@@ -779,7 +842,7 @@ let lookCompare: 'see-through' | 'difference' = 'see-through';
 /** Actions that never change the project, so they are not recorded for Undo. */
 const NOT_RECORDED = new Set(['lib-filter', 'lib-mark', 'panel-sel', 'pblock-sel', 'area-shape', 'shape-undo', 'map-fold', 'map-fold-all', 'snd-try', 'voice-play', 'voice-upload', 'voice-rec', 'upload-video', 'area-cancel', 'door-cancel', 'edit-enter', 'library', 'win', 'path-draw', 'path-play', 'mark-add', 'music-add', 'cast-sound-add', 'sound-add', 'sound-play', 'cast', 'cast-open', 'cast-back', 'cast-new', 'cast-promote', 'cast-add-looks', 'cast-goto-room', 'cast-goto-convo', 'fx-try', 'scene-toggle', 'home', 'open-story', 'new-story', 'new-sample', 'import-story', 'duplicate-story', 'delete-story', 'test-off', 'look-tab', 'make-game', 'play-here', 'check', 'goto-problem', 'test-clear', 'once-lineup', 'look-compare', 'undo', 'redo', 'save-file', 'open-file', 'upload', 'play', 'play-convo', 'stop', 'convo-mode', 'look', 'crumb', 'add-looks', 'look-replace', 'once-picture', 'look-open', 'look-done']);
 
-for (const a of ['story-map', 'play-menu', 'play-here-top', 'more-menu', 'share', 'share-close', 'rail-toggle', 'go-back']) NOT_RECORDED.add(a);
+for (const a of ['quests', 'quest-open', 'open-place', 'sit-pick', 'test-edit', 'convo-tab', 'open-convo', 'story-map', 'play-menu', 'play-here-top', 'more-menu', 'share', 'share-close', 'rail-toggle', 'go-back']) NOT_RECORDED.add(a);
 
 const actions: Record<string, (k: string) => void> = {
   crumb(k) {
@@ -803,10 +866,11 @@ const actions: Record<string, (k: string) => void> = {
   sample() { replaceProject(sampleProject()); },
   'ask-reset'() { ui.confirmReset = true; render(); },
   reset() { replaceProject(createProject()); },
-  cancel() { ui.adding = null; ui.confirmReset = false; render(); },
-  adding(k) { ui.adding = k as Adding; render(); },
+  cancel() { ui.adding = null; ui.confirmReset = false; bgForSit = false; render(); },
+  adding(k) { ui.adding = k as Adding; bgForSit = false; render(); },
   'set-bg'(k) {
     const r = room();
+    if (setSitBackdrop({ preset: k })) return;
     r.bg = { preset: k };
     if (/^Room \d+$/.test(r.name) && !findRoomByName(project, BACKDROPS[k].name)) {
       const old = r.name;
@@ -935,8 +999,8 @@ const actions: Record<string, (k: string) => void> = {
     c.looks = c.looks.filter(l => l.id !== k);
     save(); render();
   },
-  'cast-goto-room'(k) { const [roomId, elId] = k.split('|'); ui.roomId = roomId; ui.sel = elId; go('room'); },
-  'cast-goto-convo'(k) { const [roomId, elId] = k.split('|'); ui.roomId = roomId; ui.sel = elId; mapSel = null; freshConvo = true; go('convo'); },
+  'cast-goto-room'(k) { const [roomId, elId] = k.split('|'); ui.roomId = roomId; ui.sel = elId; setSit(room().els.find(x => x.id === elId)?.situation ?? ''); go('room'); },
+  'cast-goto-convo'(k) { const [roomId, elId, convo] = k.split('|'); ui.roomId = roomId; ui.sel = elId; setConvo(elId, convo ?? ''); mapSel = null; freshConvo = true; go('convo'); },
   'cast-sound-add'() { const c = project.characters.find(x => x.id === castSel); if (c) pickSound(() => undefined, c); },
   'cast-fact-add'() {
     const c = project.characters.find(x => x.id === castSel);
@@ -981,14 +1045,12 @@ const actions: Record<string, (k: string) => void> = {
   'map-fold-all'() { toggleFoldAll(); refreshMap(); },
   'snd-try'(k) { previewSound(k, true); },
   'scene-toggle'() { sceneOpen = !sceneOpen; try { localStorage.setItem(SCENE_KEY, sceneOpen ? 'yes' : 'no'); } catch { /* this session */ } refreshMap(); },
-  'cond-add'() { const e = selected(); if (!e?.cond) return; e.andConds = [...(e.andConds ?? []), { fact: e.cond.fact, op: '>=', value: 1 }]; save(); render(); },
+  'cond-add'(k) { const h = condHost(k); if (!h) return; h.set([...h.list, h.list.length ? { ...h.list[h.list.length - 1] } : freshCondition(project)]); save(); render(); },
   'cond-remove'(k) {
-    const e = selected();
-    if (!e?.cond) return;
-    const all = elementConds(e).filter((_, i) => i !== Number(k));
-    e.cond = all[0];
-    if (all.length > 1) e.andConds = all.slice(1); else delete e.andConds;
-    if (!e.cond) delete e.cond;
+    const [scope, i] = k.split('|');
+    const h = condHost(scope);
+    if (!h) return;
+    h.set(h.list.filter((_, j) => j !== Number(i)));
     save(); render();
   },
   'area-shape'() { const e = selected(); if (e?.kind !== 'area') return; shapeFor = e.id; shapePts = []; ui.drawArea = true; render(); },
@@ -1030,7 +1092,7 @@ const actions: Record<string, (k: string) => void> = {
     if (t) { t.focus(); t.setSelectionRange(t.value.length, t.value.length); }
   },
   insert(k) {
-    const e = selected(), t = $<HTMLTextAreaElement>('#script');
+    const e = convoEl(), t = $<HTMLTextAreaElement>('#script');
     if (!e || !t) return;
     const text = inserts(project, room(), e)[Number(k)].text;
     const before = t.value.slice(0, t.selectionStart), after = t.value.slice(t.selectionEnd);
@@ -1114,9 +1176,11 @@ const actions: Record<string, (k: string) => void> = {
     if (!pr) return;
     if (pr.panel) { panelSel = pr.panel; blockSel = null; lookTab = 'hud'; go('look'); return; }
     ui.roomId = pr.roomId;
+    setSit(pr.situation ?? '');
     if (!pr.elId) { ui.sel = null; go('room'); return; }
-    if (pr.inRoom) { ui.sel = pr.elId; go('room'); const more = $<HTMLDetailsElement>('#el-more'); if (more) more.open = true; return; }
+    if (pr.inRoom) { setSit(room().els.find(x => x.id === pr.elId)?.situation ?? ''); ui.sel = pr.elId; go('room'); const more = $<HTMLDetailsElement>('#el-more'); if (more) more.open = true; return; }
     ui.sel = pr.elId;
+    setConvo(pr.elId, pr.convo ?? '');
     convoMode = pr.line !== undefined ? 'script' : 'map';
     mapSel = pr.path ?? null;
     freshConvo = !pr.path;
@@ -1210,12 +1274,173 @@ const actions: Record<string, (k: string) => void> = {
     ui.sel = null;
     go('map');
   },
+  quests() { go('quests'); },
+  'quest-open'(k) { questSel = k || null; go('quests'); },
+  'quest-add'() {
+    const q = newQuest(project);
+    (project.quests ??= []).push(q);
+    questSel = q.id;
+    save(); render();
+    const n = $<HTMLInputElement>('#q-name');
+    if (n) { n.focus(); n.select(); }
+  },
+  'quest-delete'() {
+    const q = openQuest();
+    if (!q) return;
+    project.quests = project.quests!.filter(x => x !== q);
+    if (!project.quests.length) delete project.quests;
+    questSel = null;
+    save(); render();
+    toast(`Deleted ${q.name}. Check lists the steps and conditions that still use it; Undo brings it back.`);
+  },
+  'q-stage-add'() {
+    const q = openQuest();
+    if (!q) return;
+    let n = q.stages.length + 1;
+    while (q.stages.some(x => x.toLowerCase() === `stage ${n}`)) n++;
+    q.stages.push(`Stage ${n}`);
+    save(); render();
+    const f = $<HTMLInputElement>(`#q-stage-${q.stages.length - 1}`);
+    if (f) { f.focus(); f.select(); }
+  },
+  'q-stage-move'(k) {
+    const q = openQuest();
+    const [i, d] = k.split('|').map(Number);
+    if (!q || i + d < 0 || i + d >= q.stages.length) return;
+    [q.stages[i], q.stages[i + d]] = [q.stages[i + d], q.stages[i]];
+    save(); render();
+  },
+  'q-stage-del'(k) { const q = openQuest(); if (!q || q.stages.length < 2) return; q.stages.splice(Number(k), 1); save(); render(); },
+  'open-place'(k) { openPlace(k); },
+  'sit-pick'(k) { setSit(k); stageTest = false; ui.sel = null; ui.adding = null; render(); },
+  'sit-add'() {
+    const r = room();
+    r.situations ??= [];
+    let n = r.situations.length + 1;
+    while (r.situations.some(x => x.name === `Situation ${n}`)) n++;
+    const sit = { id: newId(), name: `Situation ${n}`, conds: project.quests?.length ? [freshCondition(project)] : [] };
+    r.situations.push(sit);
+    setSit(sit.id); stageTest = false; ui.sel = null; ui.adding = null;
+    save(); render();
+    const f = $<HTMLInputElement>('#sit-name');
+    if (f) { f.focus(); f.select(); }
+  },
+  'sit-delete'() {
+    const r = room(), sit = curSit();
+    if (!sit) return;
+    r.situations = r.situations!.filter(x => x !== sit);
+    if (!r.situations.length) delete r.situations;
+    r.els = r.els.filter(e => e.situation !== sit.id);
+    for (const e of r.els) if (e.hideIn) { e.hideIn = e.hideIn.filter(id => id !== sit.id); if (!e.hideIn.length) delete e.hideIn; }
+    setSit(''); ui.sel = null;
+    save(); render();
+  },
+  'sit-bg'() { ui.adding = 'bg'; bgForSit = true; render(); },
+  'sit-bg-clear'() { const sit = curSit(); if (sit) { delete sit.bg; save(); render(); } },
+  'el-unsit'() { const e = selected(); if (e) { delete e.situation; save(); render(); } },
+  'test-edit'() { go('check'); const d = $<HTMLDetailsElement>('#test-values'); if (d) { d.open = true; d.scrollIntoView({ block: 'start' }); } },
+  'convo-tab'(k) { setConvo(ui.sel, k); mapSel = null; inlineEdit = null; lineWin = null; pathPt = null; pathPen = false; freshConvo = true; render(); },
+  'open-convo'(k) { setConvo(ui.sel, k); mapSel = null; freshConvo = true; go('convo'); },
+  'convo-add'() {
+    const e = selected();
+    if (!e) return;
+    const cv = { id: newId(), label: '', conds: [freshCondition(project)], script: '' };
+    (e.convos ??= []).push(cv);
+    setConvo(e.id, cv.id); mapSel = null; freshConvo = true;
+    save(); go('convo');
+    toast('A new conversation. Set when it runs on the right, then write it.');
+  },
+  'cv-move'(k) {
+    const e = selected(), list = e?.convos, i = list ? list.findIndex(c => c.id === convoSel) : -1, j = i + Number(k);
+    if (!list || i < 0 || j < 0 || j >= list.length) return;
+    [list[i], list[j]] = [list[j], list[i]];
+    save(); render();
+  },
+  'cv-delete'() {
+    const e = selected();
+    if (!e?.convos) return;
+    e.convos = e.convos.filter(c => c.id !== convoSel);
+    if (!e.convos.length) delete e.convos;
+    setConvo(e.id, ''); mapSel = null;
+    save(); render();
+  },
   stop() {
     const back = ui.back === 'convo' && selected() ? 'convo' : ui.back === 'map' ? 'map' : 'room';
     if (back === 'convo') freshConvo = false;
     go(back);
   }
 };
+
+/** The quest open on the Quests page (the first one when none is picked). */
+const openQuest = () => project.quests?.find(q => q.id === questSel) ?? project.quests?.[0];
+
+/** Sets the backdrop of the situation shown, when the backdrop being picked is its own. */
+function setSitBackdrop(bg: NonNullable<Room['bg']>): boolean {
+  const sit = curSit();
+  if (!bgForSit || !sit) return false;
+  sit.bg = bg; bgForSit = false; ui.adding = null;
+  save(); render();
+  return true;
+}
+
+/** Opens a place from a link: a room (a thing, a situation, a conversation, a step), a panel in Look, or a quest. */
+function openPlace(k: string): void {
+  const x = parsePlace(k);
+  if (x.quest !== undefined) { questSel = x.quest || null; go('quests'); return; }
+  if (x.panel) { panelSel = x.panel; blockSel = null; lookTab = 'hud'; go('look'); return; }
+  if (!x.room || !project.rooms.some(r => r.id === x.room)) return;
+  ui.roomId = x.room;
+  const el = x.el ? room().els.find(e => e.id === x.el) : undefined;
+  setSit(x.sit ?? el?.situation ?? '');
+  ui.sel = el?.id ?? null;
+  if (el && (x.convo || x.path)) {
+    setConvo(el.id, x.convo ?? '');
+    mapSel = x.path ?? null; freshConvo = !x.path;
+    if (x.path) convoMode = 'map';
+    go('convo');
+    if (x.path) requestAnimationFrame(() => $('.mnode.on, .mrow.on')?.scrollIntoView({ block: 'center', inline: 'center' }));
+    return;
+  }
+  go('room');
+  if (el) { const more = $<HTMLDetailsElement>('#el-more'); if (more) more.open = true; }
+}
+
+/** A list of stored conditions the page edits, by the scope its fields name. */
+function condHost(scope: string): { list: Condition[]; set(list: Condition[]): void } | null {
+  if (scope === 'el') {
+    const e = selected();
+    if (!e) return null;
+    return { list: elementConds(e), set: l => { if (l.length) { e.cond = l[0]; if (l.length > 1) e.andConds = l.slice(1); else delete e.andConds; } else { delete e.cond; delete e.andConds; } } };
+  }
+  if (scope === 'pn' || scope === 'pb') {
+    const t = scope === 'pn' ? panelOf(panelSel) : blockOf();
+    if (!t) return null;
+    return { list: t.cond ? [t.cond] : [], set: l => { if (l[0]) t.cond = l[0]; else delete t.cond; } };
+  }
+  if (scope === 'sit') { const sit = curSit(); return sit ? { list: sit.conds, set: l => { sit.conds = l; } } : null; }
+  if (scope === 'cv') { const c = curConvo(); return c ? { list: c.conds, set: l => { c.conds = l; } } : null; }
+  return null;
+}
+
+/** A field of a condition row changed: the switch in front, or one field of a row. */
+function onCondInput(t: HTMLInputElement): void {
+  const scope = t.dataset.condOn ?? t.dataset.cond ?? '';
+  const h = condHost(scope);
+  if (!h) return;
+  if (t.dataset.condOn !== undefined) { h.set(t.value ? [freshCondition(project)] : []); save(); render(); return; }
+  const i = Number(t.dataset.ci), c = h.list[i];
+  if (!c) return;
+  const res = editCondition(project, c, t.dataset.cf ?? '', t.value);
+  const list = [...h.list];
+  list[i] = res.cond;
+  h.set(list);
+  save();
+  if (res.redraw) {
+    const row = t.id.replace(/-(fact|op|val|quest|stage)$/, '');
+    render();
+    document.getElementById(`${row}-${res.cond.quest ? 'stage' : 'fact'}`)?.focus();
+  } else if (scope === 'pn' || scope === 'pb') refreshLookStage();
+}
 
 /** Plays the selected line's effect on the speaker in the scene picture, and its sound. */
 function tryEffect(): void {
@@ -1369,7 +1594,7 @@ $('#videofile')!.addEventListener('change', ev => {
   if (!f) return;
   if (f.size > 20 * 1024 * 1024) { toast('That video is larger than 20 MB. A short loop of a few seconds works best.'); return; }
   const reader = new FileReader();
-  reader.onload = () => { const before = snapshot(); room().bg = { video: String(reader.result) }; ui.adding = null; save(); record(before); render(); };
+  reader.onload = () => { const before = snapshot(); if (!setSitBackdrop({ video: String(reader.result) })) { room().bg = { video: String(reader.result) }; ui.adding = null; save(); render(); } record(before); };
   reader.readAsDataURL(f);
 });
 
@@ -1512,7 +1737,7 @@ $('#file')!.addEventListener('change', ev => {
     URL.revokeObjectURL(url);
     const data = c.toDataURL(isBg ? 'image/jpeg' : 'image/webp', 0.85);
     const name = f.name.replace(/\.[^.]+$/, '').slice(0, 30) || 'Image';
-    if (isBg) { room().bg = { img: data }; ui.adding = null; save(); render(); }
+    if (isBg) { if (!setSitBackdrop({ img: data })) { room().bg = { img: data }; ui.adding = null; save(); render(); } }
     else if (pendingUpload === 'char') {
       const c: Character = { id: newId(), name: characterNameFromFile(f), base: data, looks: [] };
       project.characters.push(c);
@@ -1678,16 +1903,6 @@ function pickImageFile(done: (img: string) => void, max = 512): void {
   input.click();
 }
 
-function panelCond(target: { cond?: Condition }, field: string, value: string): boolean {
-  if (field.endsWith('-on')) { if (value) target.cond = { fact: storyFacts(project)[0] ?? 'has.key', op: 'truthy', value: true }; else delete target.cond; return true; }
-  const c = target.cond;
-  if (!c) return false;
-  if (field.endsWith('-fact')) c.fact = value.trim().replace(/[^\w.]/g, '_') || 'fact';
-  if (field.endsWith('-val')) c.value = toValue(value);
-  if (field.endsWith('-op')) { c.op = value as Condition['op']; if (c.op === 'truthy') c.value = true; else if (typeof c.value === 'boolean') c.value = 1; return true; }
-  return false;
-}
-
 document.addEventListener('input', ev => {
   const t = ev.target as HTMLInputElement;
   const k = t.dataset.in ?? '';
@@ -1697,9 +1912,7 @@ document.addEventListener('input', ev => {
   const b = blockOf();
   const v = t.type === 'checkbox' ? (t.checked ? 'yes' : '') : t.value;
   let redraw = false;
-  if (k.startsWith('pn-cond')) redraw = panelCond(pn, k, v);
-  else if (k.startsWith('pb-cond')) { if (b) redraw = panelCond(b, k, v); }
-  else switch (k) {
+  switch (k) {
     case 'pn-when': pn.when = v as Panel['when']; if (pn.when === 'rooms') pn.rooms ??= [room().id]; else delete pn.rooms; redraw = true; break;
     case 'pn-room': { const set = new Set(pn.rooms ?? []); if (v) set.add(t.dataset.k!); else set.delete(t.dataset.k!); pn.rooms = [...set]; break; }
     case 'pn-slice': if (pn.frame) pn.frame.slice = Number(v); break;
@@ -2443,8 +2656,10 @@ function commitMapField(t: HTMLInputElement): void {
 
 document.addEventListener('input', ev => {
   const t = ev.target as HTMLInputElement;
+  if (t.dataset.cond !== undefined || t.dataset.condOn !== undefined) { onCondInput(t); return; }
   if (t.dataset.mapIn) {
-    if (t.tagName === 'SELECT') commitMapField(t);
+    // A quest picked in the fact field of Only if turns the row into a quest row at once.
+    if (t.tagName === 'SELECT' || (t.dataset.mapIn === 'cond-fact' && /^\s*quest\s*:/i.test(t.value) && findQuest(project, t.value.replace(/^\s*quest\s*:/i, '')))) commitMapField(t);
     else if (t.dataset.mapIn === 'say-text' || t.dataset.mapIn === 'say-who') {
       const game = $('.mpreview .game');
       const who = $<HTMLInputElement>('#m-who-in')?.value ?? '', text = $<HTMLTextAreaElement>('#m-text')?.value ?? '';
@@ -2457,7 +2672,19 @@ document.addEventListener('input', ev => {
   const e = selected();
   const node = e ? document.querySelector<HTMLElement>(`.el[data-el="${CSS.escape(e.id)}"]`) : null;
   switch (k) {
-    case 'script': if (e) { e.script = t.value; updateStatus(); } break;
+    case 'script': { const h = convoEl(); if (h) { h.script = t.value; updateStatus(); } break; }
+    case 'cv-label': { const c = curConvo(); if (c) c.label = t.value.replace(/\s+/g, ' ').slice(0, 60); break; }
+    case 'sit-name': { const sit = curSit(); if (sit) { sit.name = t.value.slice(0, 40); const chip = $(`.sitchip.on`); if (chip) chip.textContent = t.value; } break; }
+    case 'sit-music': { const sit = curSit(); if (!sit) break; if (t.value === '__upload') { pickSound(name => { sit.music = name; }, null, true); t.value = sit.music ?? ''; return; } if (t.value) sit.music = t.value; else delete sit.music; save(); render(); return; }
+    case 'el-hidein': {
+      const sit = curSit();
+      if (!e || !sit) break;
+      const set = new Set(e.hideIn ?? []);
+      if (t.checked) set.add(sit.id); else set.delete(sit.id);
+      if (set.size) e.hideIn = [...set]; else delete e.hideIn;
+      save(); render(); return;
+    }
+    case 'stage-test': stageTest = t.checked; render(); return;
     case 'el-name': if (e) e.name = t.value; break;
     case 'el-size': if (e) { e.size = Number(t.value); if (node) node.style.height = `${e.size}%`; } break;
     case 'el-expr': if (e) { e.expr = t.value; if (node) node.innerHTML = elementArt(e, undefined, project.characters); } break;
@@ -2535,15 +2762,6 @@ document.addEventListener('input', ev => {
       save(); render(); toast(`${c.name} is now in ${r.name}.`); return;
     }
     case 'el-w': if (e) { e.w = Number(t.value); if (node) node.style.width = `${e.w}%`; } break;
-    case 'el-cond-on': if (e) { if (t.value) e.cond = { fact: storyFacts(project)[0] ?? 'met', op: '>=', value: 1 }; else { delete e.cond; delete e.andConds; } save(); render(); } return;
-    case 'el-cond-fact': case 'el-cond-op': case 'el-cond-val': {
-      const c = e ? elementConds(e)[Number(t.dataset.k ?? 0)] : undefined;
-      if (!c) break;
-      if (t.dataset.in === 'el-cond-fact') c.fact = t.value.trim().replace(/[^\w.]/g, '_') || 'fact';
-      if (t.dataset.in === 'el-cond-val') c.value = toValue(t.value);
-      if (t.dataset.in === 'el-cond-op') { c.op = t.value as typeof c.op; if (c.op === 'truthy') c.value = true; else if (typeof c.value === 'boolean') c.value = 1; save(); render(); return; }
-      break;
-    }
     case 'el-hover': if (e) { if (t.value.trim()) e.hover = t.value.slice(0, 120); else delete e.hover; } break;
     case 'el-once': if (e) { if (t.value === 'stay' || t.value === 'hide') e.once = t.value; else delete e.once; } break;
     case 'el-sound': {
@@ -2591,6 +2809,29 @@ document.addEventListener('change', ev => {
     save();
   }
   if (t.dataset.in === 'mark-speed' || t.dataset.in === 'mark-size') { save(); render(); }
+  if (t.dataset.in === 'q-name') {
+    const q = openQuest();
+    if (q) {
+      const name = cleanQuestName(t.value);
+      const clash = (project.quests ?? []).find(x => x !== q && x.name.toLowerCase() === name.toLowerCase());
+      if (clash) toast(`There is already a quest called "${clash.name}".`);
+      if (name && !clash && name !== q.name) renameQuest(project, q.name, name);
+      save(); render();
+    }
+  }
+  if (t.dataset.in === 'q-stage') {
+    const q = openQuest(), i = Number(t.dataset.k);
+    const old = q?.stages[i];
+    if (q && old !== undefined) {
+      const name = t.value.replace(/[\n:"()]/g, ' ').replace(/\s+/g, ' ').trim();
+      const clash = q.stages.some((x, j) => j !== i && x.toLowerCase() === name.toLowerCase());
+      if (clash) toast(`${q.name} already has a stage called "${name}".`);
+      if (name && !clash && name !== old) renameStage(project, q.name, old, name);
+      save(); render();
+    }
+  }
+  if (t.dataset.in === 'sit-name') { const sit = curSit(); if (sit) { sit.name = sit.name.trim() || 'Situation'; save(); render(); } }
+  if (t.dataset.in === 'cv-label') { save(); render(); }
   if (t.dataset.in === 'mark-name') {
     const m = project.marks?.find(x => x.name === t.dataset.k);
     if (m) {
@@ -2884,6 +3125,78 @@ document.addEventListener('pointerup', () => {
   resize = null;
   save(); record(before); render();
 });
+
+/* Resizing a character or object by the round handle at its top right: the bottom centre stays put,
+   and the size follows the pointer's distance from it. One undo step per drag. */
+let sizeDrag: { e: StoryElement; node: HTMLElement; ax: number; ay: number; d0: number; s0: number; before: string } | null = null;
+document.addEventListener('pointerdown', ev => {
+  const h = (ev.target as HTMLElement).closest<HTMLElement>('[data-resize-size]');
+  const node = h?.closest<HTMLElement>('.el');
+  const stage = node?.closest<HTMLElement>('.stage.edit');
+  const e = node ? room().els.find(x => x.id === node.dataset.el) : undefined;
+  if (!h || !node || !stage || !e || ev.button !== 0) return;
+  const box = stage.getBoundingClientRect(), hb = h.getBoundingClientRect();
+  const ax = box.left + box.width * e.x / 100, ay = box.top + box.height * e.y / 100;
+  sizeDrag = { e, node, ax, ay, d0: Math.max(8, Math.hypot(hb.left + hb.width / 2 - ax, hb.top + hb.height / 2 - ay)), s0: e.size, before: snapshot() };
+  node.classList.add('sizing');
+  try { h.setPointerCapture(ev.pointerId); } catch { /* not supported */ }
+  ev.preventDefault();
+  ev.stopPropagation();
+}, true);
+document.addEventListener('pointermove', ev => {
+  const d = sizeDrag;
+  if (!d) return;
+  d.e.size = Math.round(Math.max(4, Math.min(130, d.s0 * Math.hypot(ev.clientX - d.ax, ev.clientY - d.ay) / d.d0)) * 10) / 10;
+  d.node.style.height = `${d.e.size}%`;
+  const slider = $<HTMLInputElement>('#el-size');
+  if (slider) slider.value = String(Math.round(d.e.size));
+});
+const sizeDrop = () => {
+  const d = sizeDrag;
+  sizeDrag = null;
+  if (!d) return;
+  d.node.classList.remove('sizing');
+  save(); record(d.before); render();
+};
+document.addEventListener('pointerup', sizeDrop);
+document.addEventListener('pointercancel', sizeDrop);
+
+/* Dragging a quest stage by its handle (⋮⋮) changes the order of the stages. */
+let stageDrag: { from: number; row: HTMLElement; y: number; to: number | null; before: string } | null = null;
+document.addEventListener('pointerdown', ev => {
+  const h = (ev.target as HTMLElement).closest<HTMLElement>('[data-qdrag]');
+  if (!h || ev.button !== 0 || !openQuest()) return;
+  const row = h.closest<HTMLElement>('[data-qrow]')!;
+  stageDrag = { from: Number(h.dataset.qdrag), row, y: ev.clientY, to: null, before: snapshot() };
+  row.classList.add('dragging');
+  try { h.setPointerCapture(ev.pointerId); } catch { /* not supported */ }
+  ev.preventDefault();
+});
+document.addEventListener('pointermove', ev => {
+  const d = stageDrag;
+  if (!d) return;
+  d.row.style.translate = `0 ${ev.clientY - d.y}px`;
+  const rows = [...document.querySelectorAll<HTMLElement>('[data-qrow]')].filter(r => r !== d.row);
+  let to = rows.findIndex(r => { const b = r.getBoundingClientRect(); return ev.clientY < b.top + b.height / 2; });
+  if (to < 0) to = rows.length;
+  d.to = to;
+  rows.forEach((r, i) => r.classList.toggle('dropbefore', i === to));
+  document.querySelector('.qstages')?.classList.toggle('dropend', to === rows.length);
+});
+const stageDrop = () => {
+  const d = stageDrag;
+  stageDrag = null;
+  if (!d) return;
+  const q = openQuest();
+  if (q && d.to !== null && d.to !== d.from) {
+    const [st] = q.stages.splice(d.from, 1);
+    q.stages.splice(d.to, 0, st);
+    save(); record(d.before);
+  }
+  render();
+};
+document.addEventListener('pointerup', stageDrop);
+document.addEventListener('pointercancel', stageDrop);
 
 const drop = () => {
   if (!drag) return;

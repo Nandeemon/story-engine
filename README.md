@@ -177,6 +177,17 @@ One room can serve many moments of the story without copies.
 - **More than one conversation** per character or thing: each has its own conditions, and they are tried in order. The first one whose conditions all hold runs, and the thing's own conversation is used otherwise.
 - **Situations** of a room (night, after the fire) are active while their conditions hold, and several can be active at once. A situation can have its own backdrop and music; when several are active, the one latest in the list wins. A thing can belong to a situation, so it is there only while that situation is active, or it can hide while certain situations are active. The room updates after each conversation.
 
+In the editor:
+
+- **Quests** in the left rail lists the story's quests; **+ Quest** makes one with the default stages. Rename the quest or a stage in place (every step and condition follows), add stages with **+ Stage**, and reorder them by dragging ⋮⋮ or with ↑ and ↓. Under each stage, the overview shows what moves the quest there and what depends on it (situations, things in a room, conversations, panels, Only if), each with Open. Check's quest problems have **Open the quest**.
+- **Conditions** use one row everywhere (Only if, In the room or Clickable on a thing, Shows on a panel or block, situations and conversations). Its first field offers the quests too (`quest: Lost cat`); picking one turns the row into quest, is / is not / is at least / is before, and stage.
+- **Move a quest on** is under Talk and logic in Add a step; the map shows it as Quest: Lost cat → Started.
+- **Conversations**: **+ Conversation when…** (in the conversation's header, or under More on a thing) adds one. The header has a tab per conversation and **Otherwise** for the thing's own one; each tab is edited in Map and Script, and Play plays the tab shown. With nothing selected, the panel sets the conversation's name, when it runs and its order. The thing's panel in the room lists its conversations.
+- **Situations**: chips above the room stage show **Always**, each situation and **+ Situation**. Picking a situation shows the room as the player sees it then; what you add belongs to it, and a selected thing of the room can be hidden there. With nothing selected, the panel sets its name and conditions, with its own backdrop and music under More. Room cards on the Story map count the situations.
+- **Test values** beside the chips shows who is there with the test values from Check: the rest is drawn faint, and chips of the active situations are marked. Only you see this.
+- A character's page has **Where is**, every room and situation they are placed in with its conditions, and each conversation's conditions.
+- A selected character or object has a round handle at its top right: drag it to resize. A clickable area keeps its corner handle.
+
 ## Status
 
 Step 1 of the v1 build order is in place: rooms, characters and objects, the conversation map and writing mode, Play, the look of the game, and the story map. Characters with looks, staged conversations, choices in the dialogue box, backdrop framing, game files, the problem list and test values, and the on-screen display are in place too. Next up: built looks from parts, saving progress in published games, and simulation.

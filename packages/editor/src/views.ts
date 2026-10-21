@@ -1,16 +1,17 @@
-import { CONDITION_WORDS, IDLE_MOVES, storyItems, characterOf, elementConds, findRoomByName, parseScript, summarize, valueText, walkSteps } from '@story-engine/engine-core';
+import { IDLE_MOVES, storyItems, characterOf, elementConds, elementScripts, findRoomByName, parseScript, summarize, walkSteps } from '@story-engine/engine-core';
+import { condList } from './conds';
 import { KIND_GROUPS, missingLook, unknownSpeaker } from './map';
 import type { KindGroup } from './map';
 import { factKind, storyFacts } from './problems';
 import { musicSelect, soundRow, soundSelect } from './widgets';
 import type { Problem } from './problems';
 import type { StoryInfo } from './store';
-import type { Character, CompareOp, Idle, Project, Room, Sound, StoryElement } from '@story-engine/engine-core';
+import type { Character, Idle, Project, Room, Sound, StoryElement } from '@story-engine/engine-core';
 import { BACKDROPS, CHARACTERS, EXPRESSIONS, FONTS, OBJECTS, THEMES, allMarks, markArt, backdropHTML, characterSVG, choicesHTML, esc, panelsHTML, sayHTML, stageHTML } from '@story-engine/runtime';
 import { itemsField, panelSampleFacts, panelSection } from './panels';
 import type { Preset } from '@story-engine/runtime';
 
-export type View = 'home' | 'cast' | 'library' | 'map' | 'room' | 'convo' | 'look' | 'play' | 'check';
+export type View = 'home' | 'cast' | 'quests' | 'library' | 'map' | 'room' | 'convo' | 'look' | 'play' | 'check';
 export type Adding = 'char' | 'object' | 'bg' | null;
 
 export interface UI {
@@ -69,7 +70,7 @@ export function roomLinks(p: Project): Map<string, string[]> {
   const out = new Map<string, string[]>();
   for (const r of p.rooms) {
     const to = new Set<string>();
-    for (const e of r.els) walkSteps(parseScript(e.script).steps, st => { if (st.t === 'door') { const t = findRoomByName(p, st.room); if (t && t !== r) to.add(t.id); } });
+    for (const e of r.els) for (const sc of elementScripts(e)) walkSteps(parseScript(sc).steps, st => { if (st.t === 'door') { const t = findRoomByName(p, st.room); if (t && t !== r) to.add(t.id); } });
     out.set(r.id, [...to]);
   }
   return out;
@@ -195,7 +196,7 @@ export function viewMap(p: Project, ui: UI, fresh: ReadonlySet<string> = new Set
     const badge = !stuck ? '' : fresh.has(r.id)
       ? '<span class="badge unfinished" title="Nothing leads on from this room yet">Unfinished</span>'
       : '<span class="badge stuck" title="No conversation or area leads out of this room">No way out</span>';
-    return `<button class="card roomcard" data-act="open-room" data-k="${esc(r.id)}"><span class="pic">${backdropHTML(r.bg)}${i === 0 ? '<span class="badge start">Start</span>' : ''}${badge}</span><span class="meta"><b>${esc(r.name)}</b><span>${r.els.filter(e => !e.offstage).length} ${r.els.length === 1 ? 'thing' : 'things'} placed${r.auto ? ' · starts talking right away' : ''}</span>${names.length ? `<span class="leads">→ ${names.map(esc).join(', ')}</span>` : ''}</span></button>`;
+    return `<button class="card roomcard" data-act="open-room" data-k="${esc(r.id)}"><span class="pic">${backdropHTML(r.bg)}${i === 0 ? '<span class="badge start">Start</span>' : ''}${badge}</span><span class="meta"><b>${esc(r.name)}</b>${r.situations?.length ? `<span class="sitbadge">${r.situations.length} ${r.situations.length === 1 ? 'situation' : 'situations'}</span>` : ''}<span>${r.els.filter(e => !e.offstage).length} ${r.els.length === 1 ? 'thing' : 'things'} placed${r.auto ? ' · starts talking right away' : ''}</span>${names.length ? `<span class="leads">→ ${names.map(esc).join(', ')}</span>` : ''}</span></button>`;
   }).join('');
   return `<div class="side"><div class="maphead"><div><h2>Story map</h2><p class="hint">Every room in this story. Click one to work in it.</p></div><div class="row">${actions}</div></div>
     <div class="map">${cards}<button class="card new" data-act="new-room">+ New room</button></div>
@@ -286,22 +287,12 @@ export function idleField(id: string, idle: Idle | undefined, unsetLabel: string
     ${v && v !== 'none' ? `<div class="row">${lvl('strength', 'Strength')}${lvl('speed', 'Speed')}</div>` : ''}</div>`;
 }
 
-const OPS: [CompareOp, string][] = [...CONDITION_WORDS.map(([w, op]) => [op, w] as [CompareOp, string]), ['truthy', 'is yes']];
-
-/** Settings every room thing shares, under More: when it is there, how often it talks, its sound. */
 /** When a room thing is there (or, for an area, can be clicked): always, or only while every condition holds. */
 function condsField(p: Project, e: StoryElement): string {
   const all = elementConds(e);
   const area = e.kind === 'area';
-  const rows = all.map((c, i) => `${i ? '<span class="and">and</span>' : ''}<div class="condrow"><input type="text" list="el-facts" id="el-cond-fact-${i}" data-in="el-cond-fact" data-k="${i}" value="${esc(c.fact)}" aria-label="Story fact">
-        <select id="el-cond-op-${i}" data-in="el-cond-op" data-k="${i}" aria-label="Test">${OPS.map(([op, w]) => `<option value="${op}"${op === c.op ? ' selected' : ''}>${w}</option>`).join('')}</select>
-        ${c.op === 'truthy' ? '' : `<input type="text" id="el-cond-val-${i}" data-in="el-cond-val" data-k="${i}" value="${esc(valueText(c.value))}" aria-label="Value">`}
-        ${all.length > 1 ? `<button class="btn small quiet" data-act="cond-remove" data-k="${i}" aria-label="Remove this condition">✕</button>` : ''}</div>`).join('');
-  return `<div class="field"><span>${area ? 'Clickable' : 'In the room'}</span>
-      <select id="el-cond-on" data-in="el-cond-on"><option value=""${all.length ? '' : ' selected'}>Always</option><option value="on"${all.length ? ' selected' : ''}>Only if…</option></select>
-      ${all.length ? `${rows}<button class="btn small quiet" data-act="cond-add">+ And another</button>
-        <datalist id="el-facts">${storyFacts(p).map(f => `<option value="${esc(f)}">`).join('')}</datalist>
-        <p class="hint">${area ? `The area can only be clicked while ${all.length > 1 ? 'all of these are' : 'this is'} true. To do different things depending on story facts, use Only if in what happens on click.` : `${esc(e.name)} is only in the room while ${all.length > 1 ? 'all of these are' : 'this is'} true, so a conversation can bring ${e.kind === 'char' ? 'them' : 'it'} in with a Change.`}</p>` : ''}</div>`;
+  const hint = area ? `The area can only be clicked while ${all.length > 1 ? 'all of these are' : 'this is'} true. To do different things depending on story facts, use Only if in what happens on click.` : `${esc(e.name)} is only in the room while ${all.length > 1 ? 'all of these are' : 'this is'} true, so a conversation can bring ${e.kind === 'char' ? 'them' : 'it'} in with a Change.`;
+  return condList(p, 'el', all, { label: area ? 'Clickable' : 'In the room', hint });
 }
 
 /** Text by the mouse pointer while the player holds it over something clickable. */
@@ -311,12 +302,13 @@ function hoverField(e: StoryElement): string {
 
 function moreFields(p: Project, e: StoryElement): string {
   const cond = (e.kind === 'area' ? '' : hoverField(e) + condsField(p, e));
-  const once = e.script.trim() ? `<label class="field"><span>How often it can be clicked</span><select id="el-once" data-in="el-once">
+  const once = elementScripts(e).some(sc => sc.trim()) ? `<label class="field"><span>How often it can be clicked</span><select id="el-once" data-in="el-once">
       <option value=""${e.once ? '' : ' selected'}>Every time</option>
       <option value="stay"${e.once === 'stay' ? ' selected' : ''}>Once, then it stays but cannot be clicked</option>
       <option value="hide"${e.once === 'hide' ? ' selected' : ''}>Once, then it is gone</option></select></label>` : '';
   const sound = `<label class="field"><span>Sound when clicked</span>${soundSelect(p, 'el-sound', 'data-in="el-sound"', e.sound)}</label>`;
-  return cond + once + sound;
+  const later = e.offstage || e.convos?.length ? '' : `<div class="field"><span>Conversations</span><button class="btn small quiet" data-act="convo-add">+ Conversation when…</button><p class="hint">Another conversation for later in the story, used while its conditions hold. The one you have now stays as Otherwise.</p></div>`;
+  return cond + once + sound + later;
 }
 
 /**
@@ -344,13 +336,13 @@ function shapeTools(e: StoryElement): string {
     <p class="hint">${drawn ? 'Drag a dot in the picture to change the outline, or Draw shape to start again.' : 'Drag the box or its corner in the picture. Draw shape traces an exact outline.'}</p></div>`;
 }
 
-function areaPanel(p: Project, r: Room, e: StoryElement, naming = false): string {
+function areaPanel(p: Project, r: Room, e: StoryElement, naming = false, x: ElExtra = { sit: '', convos: '' }): string {
   const leads = doorField(p, r, e, naming);
   const action = leads
     ? `<button class="linkbtn" data-act="convo">${e.script.trim() ? 'Make it say something on the way' : 'Or make it say or do something'}</button>`
     : '<button class="btn block" data-act="convo">Edit what happens on click</button>';
   return `<h2>${esc(e.name)}</h2>
-    ${leads}${action}
+    ${leads}${action}${x.sit}${x.convos}
     ${hoverField(e)}
     ${shapeTools(e)}
     <details class="more" id="el-more"><summary>More</summary><div>
@@ -362,8 +354,11 @@ function areaPanel(p: Project, r: Room, e: StoryElement, naming = false): string
     <p class="hint">Invisible in the game; players see a hand pointer over it.</p>`;
 }
 
-function elementPanel(p: Project, e: StoryElement, r?: Room, naming = false): string {
-  if (e.kind === 'area' && r) return areaPanel(p, r, e, naming);
+/** Extra fields for a selected thing: its situation, and its conversations. */
+export interface ElExtra { sit: string; convos: string }
+
+function elementPanel(p: Project, e: StoryElement, r?: Room, naming = false, x: ElExtra = { sit: '', convos: '' }): string {
+  if (e.kind === 'area' && r) return areaPanel(p, r, e, naming, x);
   const name = esc(e.name);
   const c = characterOf(p, e);
   const has = e.script.trim() !== '';
@@ -380,7 +375,7 @@ function elementPanel(p: Project, e: StoryElement, r?: Room, naming = false): st
     : '';
   const door = e.kind === 'object' && r ? doorField(p, r, e, naming) : '';
   return `<h2>${name}</h2>
-    ${door ? `${door}<button class="linkbtn" data-act="convo">${e.script.trim() ? 'Make it say something on the way' : 'Or make it say or do something'}</button>` : `<button class="btn block" data-act="convo">${label}</button>`}
+    ${door ? `${door}<button class="linkbtn" data-act="convo">${e.script.trim() ? 'Make it say something on the way' : 'Or make it say or do something'}</button>` : `<button class="btn block" data-act="convo">${label}</button>`}${x.sit}${x.convos}
     <label class="field"><span>Name</span><input type="text" id="el-name" data-in="el-name" value="${name}"></label>
     <label class="field"><span>Size</span><input type="range" id="el-size" data-in="el-size" min="6" max="110" value="${e.size}"></label>
     ${c ? looksStrip(c, e) : expr}
@@ -450,12 +445,15 @@ function roomPanel(p: Project, r: Room): string {
     <p class="hint">${r.els.length ? 'Click anything in the picture to change it.' : 'The room is ready. Add someone to talk to.'}</p>`;
 }
 
-export function viewRoom(p: Project, ui: UI, r: Room, e: StoryElement | undefined): string {
-  if (!r.bg && !r.els.length) return emptyRoom();
+/** What the room editor shows beyond the room: the situation bar, the room as staged, and panels for a situation. */
+export interface RoomExtra { bar: string; stage: Room; sitPanel?: string; el?: ElExtra }
+
+export function viewRoom(p: Project, ui: UI, r: Room, e: StoryElement | undefined, x?: RoomExtra): string {
+  if (!r.bg && !r.els.length && !r.situations?.length) return emptyRoom();
   const c = e ? characterOf(p, e) : undefined;
   const lining = e && c && ui.lookEdit && c.looks.some(l => l.id === ui.lookEdit) ? { elId: e.id, lookId: ui.lookEdit } : undefined;
-  const side = ui.adding ? addingPanel(p, ui.adding) : lining && c ? lookPanel(p, c, lining.lookId) : e ? elementPanel(p, e, r, ui.namingRoom) : roomPanel(p, r);
-  return `<div class="work"><div>${stageHTML(r, { mode: 'edit', look: p.look, selected: lining ? null : ui.sel, characters: p.characters, lineup: lining })}</div><aside class="side">${side}</aside></div>`;
+  const side = ui.adding ? addingPanel(p, ui.adding) : lining && c ? lookPanel(p, c, lining.lookId) : e ? elementPanel(p, e, r, ui.namingRoom, x?.el) : x?.sitPanel ?? roomPanel(p, r);
+  return `<div class="work"><div class="stagecol">${x?.bar ?? ''}${stageHTML(x?.stage ?? r, { mode: 'edit', look: p.look, selected: lining ? null : ui.sel, characters: p.characters, lineup: lining })}</div><aside class="side">${side}</aside></div>`;
 }
 
 /** Text put in by the script's Insert menu, in the same groups as "Add a step" in the map. */
@@ -469,6 +467,7 @@ export function inserts(p: Project, r: Room, e: StoryElement): { label: string; 
     { label: 'Change something', text: 'Change affection + 1', hint: 'Change a story fact', group: 'top' },
     { label: 'Ask the player', text: 'Ask "What is your name?" as name', hint: 'The player types an answer', group: 'talk' },
     { label: 'Note', text: '# ', hint: 'Only you see it', group: 'talk' },
+    { label: 'Move a quest on', text: `Quest ${p.quests?.[0]?.name ?? 'Lost cat'}: ${p.quests?.[0]?.stages[1] ?? 'Started'}`, hint: 'Set a quest to a stage', group: 'talk' },
     { label: 'Bring someone in', text: `Show ${who} at left with fade`, hint: 'A character comes on stage', group: 'stage' },
     { label: 'Move someone', text: `Move ${who} to center`, hint: 'Place, size or turn', group: 'stage' },
     { label: 'Take someone out', text: `Hide ${who} with fade`, hint: 'A character leaves', group: 'stage' },
@@ -536,23 +535,23 @@ Part: Later
 Go to part Later
 # A note only you see`;
 
-function convoBar(mode: ConvoMode): string {
+function convoBar(mode: ConvoMode, tabs = ''): string {
   const tab = (m: ConvoMode, label: string) => `<button role="tab" class="seg${mode === m ? ' on' : ''}" aria-selected="${mode === m}" data-act="convo-mode" data-k="${m}">${label}</button>`;
   return `<div class="convobar"><div class="segs" role="tablist" aria-label="How to show the conversation">${tab('map', 'Map')}${tab('script', 'Script')}</div>
-    <div class="row"><button class="btn small" id="play-from" data-act="play-here" title="Play from the step marked in the map"${mode === 'map' ? '' : ' hidden'} disabled>Play from the marked step</button><button class="btn small" data-act="play-convo">Play this conversation</button></div></div>`;
+    <div class="row"><button class="btn small" id="play-from" data-act="play-here" title="Play from the step marked in the map"${mode === 'map' ? '' : ' hidden'} disabled>Play from the marked step</button><button class="btn small" data-act="play-convo">Play this conversation</button></div>${tabs}</div>`;
 }
 
-export function viewConvo(p: Project, r: Room, e: StoryElement, mode: ConvoMode, map: { canvas: string; side: string; scene: string; sceneOpen?: boolean }): string {
+export function viewConvo(p: Project, r: Room, e: StoryElement, mode: ConvoMode, map: { canvas: string; side: string; scene: string; sceneOpen?: boolean }, tabs = '', extra = ''): string {
   if (mode === 'map') {
-    return `<div class="work"><div class="mapwrap mapmode${map.sceneOpen === false ? ' noscene' : ''}" id="mapwrap">${convoBar(mode)}<div id="mscene">${map.scene}</div><div class="msplitter" role="separator" aria-orientation="vertical" aria-label="Width of the scene" tabindex="0" title="Drag to make the scene wider or narrower"></div><div id="mapholder">${map.canvas}</div></div><aside class="side" id="mside">${map.side}</aside></div>`;
+    return `<div class="work"><div class="mapwrap mapmode${map.sceneOpen === false ? ' noscene' : ''}" id="mapwrap">${convoBar(mode, tabs)}<div id="mscene">${map.scene}</div><div class="msplitter" role="separator" aria-orientation="vertical" aria-label="Width of the scene" tabindex="0" title="Drag to make the scene wider or narrower"></div><div id="mapholder">${map.canvas}</div></div><aside class="side" id="mside">${map.side}</aside></div>`;
   }
   const who = e.kind === 'char' ? esc(e.name) : 'Narrator';
-  return `<div class="work"><div class="mapwrap">${convoBar(mode)}<div class="paper">
+  return `<div class="work"><div class="mapwrap">${convoBar(mode, tabs)}<div class="paper">
       <div class="row">${insertMenu(p, r, e)}</div>
       <p class="status" id="status" role="status"></p>
       <div class="scriptbox"><div class="gutter" id="gutter" aria-hidden="true"></div><textarea id="script" data-in="script" spellcheck="false" aria-label="What ${esc(e.name)} says" placeholder="${who}: Type the first line here.">${esc(e.script)}</textarea></div>
     </div></div>
-    <aside class="side"><h2>What ${e.kind === 'char' ? `${esc(e.name)} says` : 'happens'}</h2>
+    <aside class="side"><h2>What ${e.kind === 'char' ? `${esc(e.name)} says` : 'happens'}</h2>${extra}
       <p class="hint">Write it like a script. A name and a colon starts a line. Indent with two spaces to put lines under an answer. Lines that are not indented run after every answer.</p>
       <details class="more cheatbox"><summary>Cheat sheet</summary><pre class="cheat">${esc(CHEAT)}</pre></details>
       <div id="facts"></div></aside></div>`;
@@ -672,7 +671,7 @@ function probCard(p: Project, x: Problem, i: number): string {
     const guess = p.rooms[Math.max(0, at - 1)]?.id;
     if (from.length) fix = `<div class="probfix"><label for="fix-from-${i}">Make a door here from</label><select id="fix-from-${i}">${from.map(r => `<option value="${esc(r.id)}"${r.id === guess ? ' selected' : ''}>${esc(r.name)}</option>`).join('')}</select><button class="btn small" data-act="fix-door" data-k="${i}">Make the door</button></div>`;
   }
-  return `<div class="prob ${x.unfinished ? 'unfinished' : x.level}"><div class="probhead"><span class="lvl">${x.unfinished ? 'Unfinished' : LEVEL_WORDS[x.level]}</span><b>${esc(x.where)}</b></div><p>${esc(x.text)}</p><button class="btn small${x.unfinished ? ' quiet' : ''}" data-act="goto-problem" data-k="${i}">${roomOnly ? 'Open the room' : 'Show'}</button>${fix}</div>`;
+  return `<div class="prob ${x.unfinished ? 'unfinished' : x.level}"><div class="probhead"><span class="lvl">${x.unfinished ? 'Unfinished' : LEVEL_WORDS[x.level]}</span><b>${esc(x.where)}</b></div><p>${esc(x.text)}</p><div class="probacts"><button class="btn small${x.unfinished ? ' quiet' : ''}" data-act="goto-problem" data-k="${i}">${roomOnly && !x.situation ? 'Open the room' : 'Show'}</button>${x.quest !== undefined ? `<button class="btn small quiet" data-act="open-place" data-k="||||||@${esc(x.quest)}">${x.quest ? 'Open the quest' : 'Open Quests'}</button>` : ''}</div>${fix}</div>`;
 }
 
 export function viewCheck(p: Project, problems: Problem[], test: { use: boolean; values: Record<string, string> }): string {

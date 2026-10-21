@@ -2,12 +2,12 @@
  * Look › Interface: the panels of the game (status bars, an inventory, buttons),
  * placed and changed in the picture, with their settings in the side panel.
  */
-import { CONDITION_WORDS, ITEM_PREFIX, PANEL_TEMPLATES, conditionText, panelRule, panelVisible, storyFactNames, storyItems, valueText } from '@story-engine/engine-core';
-import type { CompareOp, Condition, FactValue, Panel, PanelBlock, Project } from '@story-engine/engine-core';
+import { condList } from './conds';
+import { ITEM_PREFIX, PANEL_TEMPLATES, conditionText, panelRule, panelVisible, storyFactNames, storyItems } from '@story-engine/engine-core';
+import type { Condition, FactValue, Panel, PanelBlock, Project } from '@story-engine/engine-core';
 import { esc } from '@story-engine/runtime';
 
 const BLOCK_NAMES: Record<PanelBlock['kind'], string> = { text: 'Text', number: 'Number', meter: 'Meter', image: 'Picture', button: 'Button', list: 'Items the player has', portrait: 'Portrait' };
-const OPS: [CompareOp, string][] = [...CONDITION_WORDS.map(([w, op]) => [op, w] as [CompareOp, string]), ['truthy', 'is yes']];
 
 /** Example values so every block shows something in the editor; test values win. */
 export function panelSampleFacts(p: Project, test: Record<string, unknown>): Record<string, FactValue> {
@@ -25,12 +25,9 @@ export function panelSampleFacts(p: Project, test: Record<string, unknown>): Rec
   return out;
 }
 
-function condRow(prefix: string, c: Condition | undefined, label: string): string {
-  return `<div class="field"><span>${label}</span>
-    <select id="${prefix}-on" data-in="${prefix}-on"><option value=""${c ? '' : ' selected'}>Always</option><option value="on"${c ? ' selected' : ''}>Only if…</option></select>
-    ${c ? `<div class="condrow"><input type="text" list="pn-facts" id="${prefix}-fact" data-in="${prefix}-fact" value="${esc(c.fact)}" aria-label="Story fact">
-      <select id="${prefix}-op" data-in="${prefix}-op" aria-label="Test">${OPS.map(([op, w]) => `<option value="${op}"${op === c.op ? ' selected' : ''}>${w}</option>`).join('')}</select>
-      ${c.op === 'truthy' ? '' : `<input type="text" id="${prefix}-val" data-in="${prefix}-val" value="${esc(valueText(c.value))}" aria-label="Value">`}</div>` : ''}</div>`;
+/** When a panel or block shows: always, or only while a condition holds (one condition, with the shared row). */
+function condRow(p: Project, scope: 'pn' | 'pb', c: Condition | undefined, label: string): string {
+  return condList(p, scope, c ? [c] : [], { label, max: 1 });
 }
 
 /** The story's items, each with its icon and name, and a way to add one. Shared by the inventory block and the Library. */
@@ -75,7 +72,7 @@ function blockFields(p: Project, b: PanelBlock): string {
       break;
     }
   }
-  return `<div class="hudedit">${main}<details class="more" id="pb-more"><summary>More</summary><div>${more}${condRow('pb-cond', b.cond, 'Shows')}</div></details></div>`;
+  return `<div class="hudedit">${main}<details class="more" id="pb-more"><summary>More</summary><div>${more}${condRow(p, 'pb', b.cond, 'Shows')}</div></details></div>`;
 }
 
 /** In plain words, when the panel shows in the game, matching "When it shows", and why it may look see-through here. */
@@ -130,7 +127,7 @@ export function panelSection(p: Project, panelSel: string | null, blockSel: stri
         <label class="check keybox"><span>Key</span><input type="text" id="pn-key" data-in="pn-key" maxlength="1" value="${esc(pn.key ?? '')}" placeholder="I"></label></div>
         <label class="check"><input type="checkbox" id="pn-hidden" data-in="pn-hidden"${pn.startHidden ? ' checked' : ''}><span>Hidden until opened or shown</span></label>
         <p class="hint">Conversations can show and hide it too: <code>Show panel ${esc(pn.name)}</code>, <code>Hide panel ${esc(pn.name)}</code>.</p></div>
-      ${condRow('pn-cond', pn.cond, 'And only')}
+      ${condRow(p, 'pn', pn.cond, 'And only')}
       <div class="row"><button class="btn small quiet" data-act="panel-copy">Duplicate</button><button class="btn small danger" data-act="panel-remove" data-confirm="Click again to remove">Remove the panel</button></div>
     </div></details>`;
 }
