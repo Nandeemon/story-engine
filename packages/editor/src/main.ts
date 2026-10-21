@@ -1068,7 +1068,7 @@ const actions: Record<string, (k: string) => void> = {
   home() { goHome(); },
   'open-story'(k) { void openStory(k); },
   'new-story'() { void newStory(createProject(), 'room'); },
-  'new-sample'() { const p = sampleProject(); p.title = 'Last order (sample)'; void newStory(p, 'map'); },
+  'new-sample'() { const p = sampleProject(); p.title = 'The Hoshino House (sample)'; void newStory(p, 'map'); },
   'import-story'() { const input = $<HTMLInputElement>('#projectfile')!; input.value = ''; input.click(); },
   'duplicate-story'(k) { void duplicateStory(k).then(() => refreshHome('Duplicated')); },
   'delete-story'(k) {
