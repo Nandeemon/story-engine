@@ -2,7 +2,7 @@
  * Checking the whole story: every problem the author would otherwise only find by
  * playing, with a way to jump straight to it.
  */
-import { conditionText, elementConds, elementScripts, findQuest, mapProjectScripts, questFact, stageIndex, storyFactNames, talkedFact, findRoomByName, getStep, parseScript, summarize, unreachableSteps, walkSteps, walkWithPaths, writeScript } from '@story-engine/engine-core';
+import { conditionText, resolveQuestCondition, elementConds, elementScripts, findQuest, mapProjectScripts, questFact, stageIndex, storyFactNames, talkedFact, findRoomByName, getStep, parseScript, summarize, unreachableSteps, walkSteps, walkWithPaths, writeScript } from '@story-engine/engine-core';
 import type { Condition, FactValue, Project, StoryElement } from '@story-engine/engine-core';
 import { missingLook, stageText, unknownSpeaker } from './map';
 import { findMark } from '@story-engine/runtime';
@@ -58,7 +58,7 @@ export function findProblems(p: Project, fresh: ReadonlySet<string> = new Set())
         if (s.t === 'say' && s.expr && missingLook(p, room, s.who, s.expr)) out.push({ ...base, level: 'warning', path, text: `${s.who} has no look called "${s.expr}", so the base picture shows.` });
         if ((s.t === 'show' || s.t === 'move' || s.t === 'hide' || s.t === 'mark' || s.t === 'loop') && unknownSpeaker(ctx, s.who)) out.push({ ...base, level: 'error', path, text: `"${stageText(s)}": there is no character called ${s.who}.` });
         if (s.t === 'quest') { const q = questProblem(p, s.quest, s.stage); if (q) out.push({ ...base, level: 'error', path, quest: findQuest(p, s.quest)?.id ?? '', text: `"Quest ${s.quest}: ${s.stage}": ${q}` }); }
-        if (s.t === 'if' && s.cond.quest) { const q = questProblem(p, s.cond.quest, String(s.cond.value)); if (q) out.push({ ...base, level: 'error', path, quest: findQuest(p, s.cond.quest)?.id ?? '', text: `"Only if ${conditionText(s.cond)}": ${q}` }); }
+        if (s.t === 'if' && s.cond.quest) { const q = questProblem(p, s.cond.quest, String(resolveQuestCondition(s.cond, p).value)); if (q) out.push({ ...base, level: 'error', path, quest: findQuest(p, s.cond.quest)?.id ?? '', text: `"Only if ${conditionText(s.cond)}": ${q}` }); }
         if (s.t === 'say' && unknownSpeaker(ctx, s.who)) out.push({ ...base, level: 'note', path, text: `"${s.who}" has no character, so this line is a voice without a picture.` });
       });
       for (const path of unreachableSteps(steps)) {
@@ -211,7 +211,8 @@ function questAndSituationProblems(p: Project): Problem[] {
   });
   for (const r of p.rooms) for (const e of r.els) if (e.kind === 'char' && elementScripts(e).some(sc => sc.trim())) changed.add(talkedFact(e.name));
   /** Why a condition can never hold, or ''. */
-  const never = (c: Condition): string => {
+  const never = (cond: Condition): string => {
+    const c = resolveQuestCondition(cond, p);
     if (c.quest) {
       const q = findQuest(p, c.quest);
       if (!q) return '';
@@ -225,7 +226,7 @@ function questAndSituationProblems(p: Project): Problem[] {
   };
   const badQuest = (conds: (Condition | undefined)[], at: Omit<Problem, 'level' | 'text'>) => {
     for (const c of conds) {
-      const q = c?.quest ? questProblem(p, c.quest, String(c.value)) : '';
+      const q = c?.quest ? questProblem(p, c.quest, String(resolveQuestCondition(c, p).value)) : '';
       if (q) out.push({ ...at, level: 'error', quest: findQuest(p, c!.quest!)?.id ?? '', text: `"${conditionText(c!)}": ${q}` });
     }
   };

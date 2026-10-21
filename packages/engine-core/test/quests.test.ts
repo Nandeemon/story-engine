@@ -211,3 +211,14 @@ describe('renaming quests and stages', () => {
     expect(e.convos![0].script).toBe('Only if quest Missing cat is Rescued\n  End');
   });
 });
+
+describe('the first stage by name', () => {
+  it('reads "is Not started" as the stage, not as "is not started"', async () => {
+    const { parseScript, testCondition } = await import('../src');
+    const quests = [{ id: 'q', name: 'Lost cat', stages: ['Not started', 'Started', 'Done'] }];
+    const step = parseScript('Only if quest Lost cat is Not started\n  End').steps[0];
+    if (step.t !== 'if') throw new Error('not an if');
+    expect(testCondition({}, step.cond, { quests })).toBe(true);
+    expect(testCondition({ 'quest.lost_cat': 'Started' }, step.cond, { quests })).toBe(false);
+  });
+});

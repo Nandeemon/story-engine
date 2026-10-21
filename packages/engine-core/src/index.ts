@@ -13,6 +13,6 @@ export { storyFactNames } from './facts';
 export { panelFactKey, cleanPanelName, panelVisible, panelRule, panelItems, newBlock, panelFromTemplate, PANEL_TEMPLATES } from './panels';
 export type { PanelContext, PanelTemplate } from './panels';
 export { ITEM_PREFIX, itemIdOf, itemFact, itemName, itemOfStep, storyItems, addItem, normalizeItems } from './items';
-export { DEFAULT_STAGES, questSlug, questFact, findQuest, stageIndex, questStage, newQuest, questCondition, testQuestCondition, renameQuestInScript, renameStageInScript, renameQuestInCondition, renameStageInCondition } from './quests';
+export { DEFAULT_STAGES, questSlug, questFact, findQuest, stageIndex, questStage, newQuest, questCondition, resolveQuestCondition, testQuestCondition, renameQuestInScript, renameStageInScript, renameQuestInCondition, renameStageInCondition } from './quests';
 export type { CondContext } from './quests';
 export { elementScripts, mapElementScripts, conversationKey, scriptByKey, pickConversation, activeSituations, inSituation, roomSetting, forEachStoredCondition, mapProjectScripts, renameQuest, renameStage } from './situations';

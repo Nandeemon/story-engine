@@ -58,8 +58,21 @@ export function questCondition(quest: string, op: '=' | '!=' | '>=' | '<', stage
   return { fact: questFact(quest), op, value: stage, quest };
 }
 
+/**
+ * "quest X is Not started" reads as "is not" + "started". When the quest has no
+ * stage called "started" but one called "Not started", the stage is what was meant.
+ */
+export function resolveQuestCondition(c: Condition, src?: QuestSource): Condition {
+  if (!c.quest || c.op !== '!=') return c;
+  const q = findQuest(src, c.quest);
+  const want = String(c.value);
+  if (!q || stageIndex(q, `not ${want}`) < 0) return c;
+  return { ...c, op: '=', value: q.stages[stageIndex(q, `not ${want}`)] };
+}
+
 /** Whether a quest condition holds. Ordering follows the quest's stages; without the quest only is / is not can hold. */
-export function testQuestCondition(facts: Facts, c: Condition, ctx?: CondContext): boolean {
+export function testQuestCondition(facts: Facts, cond: Condition, ctx?: CondContext): boolean {
+  const c = resolveQuestCondition(cond, ctx);
   const q = findQuest(ctx, c.quest ?? '');
   const raw: FactValue | undefined = facts[c.fact];
   const now = typeof raw === 'string' && raw ? raw : q?.stages[0] ?? '';

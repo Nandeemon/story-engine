@@ -6,7 +6,7 @@
  * ("quest: Lost cat"). Picking a quest turns the row into
  * [quest] [is / is not / is at least / is before] [stage].
  */
-import { CONDITION_WORDS, QUEST_CONDITION_WORDS, findQuest, questCondition, stageIndex, storyFactNames, toValue, valueText } from '@story-engine/engine-core';
+import { CONDITION_WORDS, QUEST_CONDITION_WORDS, resolveQuestCondition, findQuest, questCondition, stageIndex, storyFactNames, toValue, valueText } from '@story-engine/engine-core';
 import type { CompareOp, Condition, Project } from '@story-engine/engine-core';
 import { esc } from '@story-engine/runtime';
 
@@ -26,7 +26,8 @@ export function condFactOptions(p: Project): string {
 }
 
 /** One condition as a row of fields. id prefixes the field ids (so focus survives a redraw); remove is extra HTML at the end. */
-export function condRow(p: Project, c: Condition, id: string, attr: CondAttr, remove = ''): string {
+export function condRow(p: Project, cond: Condition, id: string, attr: CondAttr, remove = ''): string {
+  const c = resolveQuestCondition(cond, p);
   const opSel = (ops: [CompareOp, string][]) => `<select id="${id}-op" ${attr('op')} aria-label="Test">${ops.map(([op, w]) => `<option value="${op}"${op === c.op ? ' selected' : ''}>${w}</option>`).join('')}</select>`;
   if (c.quest) {
     const q = findQuest(p, c.quest);
